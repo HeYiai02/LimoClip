@@ -1296,9 +1296,10 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
         if (layout is null)
         {
-            var count = Math.Max(profile.Slots.Count, 4);
-            var rows = (int)Math.Ceiling(Math.Sqrt(count));
-            layout = _dockBuilder.CreateGrid(rows, rows, paneId =>
+            // 旧方案没有 DockLayoutJson 时，必须和“一键自适应”使用同一套行分布；
+            // 不能退回 sqrt 方格，否则 3 路会变成 2×2 + 一个空窗格。
+            var count = Math.Max(1, profile.Slots.Count);
+            layout = _dockBuilder.CreateAutoFit(count, _workspaceAspect, paneId =>
             {
                 var slot = profile.Slots.FirstOrDefault(candidate => candidate.PaneId == paneId);
                 _roomById.TryGetValue(slot?.LiveRoomId ?? Guid.Empty, out var room);
