@@ -15,4 +15,11 @@ public sealed class ReconnectPolicyTests
     {
         Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), ReconnectPolicy.DelayForAttempt(attempt));
     }
+
+    [Fact]
+    public void RetryBudget_IsThreeAttemptsThen60SecondRecheck()
+    {
+        Assert.Equal(3, ReconnectPolicy.MaxAttempts);
+        Assert.Equal(TimeSpan.FromSeconds(60), ReconnectPolicy.FailureRecheckDelay);
+    }
 }

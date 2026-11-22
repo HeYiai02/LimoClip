@@ -33,6 +33,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
     private DispatcherTimer? _healthTimer;
     private Task? _disposeTask;
     private string? _audioMeterPath;
+    private bool _meterAttached;
     private double _audioMeterLevel;
     private int _disposed;
     private int _suppressVolumeChange;
@@ -238,6 +239,8 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
         {
             // mpv 已释放时忽略。
         }
+
+        ApplyAudioMeterState();
     }
 
     public bool IsMuted => _muted;
@@ -305,6 +308,8 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
         {
             // mpv 已释放时忽略。
         }
+
+        ApplyAudioMeterState();
     }
 
     public PlayerHealthMetrics GetHealthMetrics() => _metrics;
@@ -333,6 +338,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
         _loadTcs?.TrySetCanceled();
         _healthTimer?.Stop();
         _audioMeterTimer.Stop();
+        _meterAttached = false;
         TryDeleteAudioMeterFile();
 
         var context = Interlocked.Exchange(ref _context, null);
@@ -418,6 +424,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
             _context = null;
             _healthTimer?.Stop();
             _audioMeterTimer.Stop();
+            _meterAttached = false;
             // 文件交给接管方继续用，旧播放器 Dispose 时不要把文件删掉。
             _audioMeterPath = null;
             _loadTcs?.TrySetCanceled();
@@ -459,6 +466,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
             context.SetOptionString("volume", _volume.ToString(CultureInfo.InvariantCulture));
             Video.MpvContext = context;
             ApplyVideoFilter();
+            ApplyAudioMeterState();
 
             if (quality is not null)
             {
@@ -489,6 +497,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
                 if (_audioMeterPath is not null)
                 {
                     _audioMeterTimer.Start();
+                    ApplyAudioMeterState();
                 }
 
                 return _context;
@@ -522,8 +531,12 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
             if (_audioMeterPath is not null)
             {
                 AudioMeterPaths.AddOrUpdate(context, _audioMeterPath);
-                context.SetOptionString("af", BuildAudioMeterFilter(_audioMeterPath));
                 _audioMeterTimer.Start();
+                if (!_muted && _audioEnabled)
+                {
+                    context.SetOptionString("af", BuildAudioMeterFilter(_audioMeterPath));
+                    _meterAttached = true;
+                }
             }
 
             var caFile = ResolveCaFile();
@@ -594,6 +607,69 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
         return $"lavfi=[astats=metadata=1:reset=5,ametadata=mode=print:key=lavfi.astats.Overall.RMS_level:file={escaped}:direct=1]";
     }
 
+    /// <summary>
+    /// 音量表只在真正可听时挂到音频链上；静音/关音频时摘掉，避免每路 astats
+    /// 在 20~30 路场景持续吃 CPU。音频本身仍保持解码，不改变开声语义。
+    /// </summary>
+    private void ApplyAudioMeterState()
+    {
+        if (_audioMeterPath is null)
+        {
+            return;
+        }
+
+        if (_muted || !_audioEnabled)
+        {
+            DetachAudioMeter();
+        }
+        else
+        {
+            AttachAudioMeter();
+        }
+    }
+
+    private void AttachAudioMeter()
+    {
+        if (_audioMeterPath is null || _meterAttached)
+        {
+            return;
+        }
+
+        var context = _context;
+        if (context is null)
+        {
+            // context 尚未创建；EnsureContext 会根据当前 _muted 状态直接挂 af。
+            return;
+        }
+
+        try
+        {
+            context.Command("af", "set", BuildAudioMeterFilter(_audioMeterPath));
+            _meterAttached = true;
+            _audioMeterTimer.Start();
+        }
+        catch
+        {
+            _meterAttached = false;
+        }
+    }
+
+    private void DetachAudioMeter()
+    {
+        _meterAttached = false;
+        _audioMeterLevel = 0;
+        AudioMeter.Level = 0;
+
+        try
+        {
+            _context?.Command("af", "clr");
+        }
+        catch
+        {
+            // mpv 已释放时忽略。
+        }
+    }
+
     private void TryDeleteAudioMeterFile()
     {
         var path = _audioMeterPath;
@@ -615,7 +691,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
 
     private void UpdateAudioMeter()
     {
-        if (_audioMeterPath is null || _state != PlayerState.Playing)
+        if (!_meterAttached || _audioMeterPath is null || _state != PlayerState.Playing)
         {
             _audioMeterLevel = 0;
             AudioMeter.Level = 0;

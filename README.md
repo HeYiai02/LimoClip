@@ -49,7 +49,7 @@
   - Dock 无边框：`ToolControl` + `ToolChromeControl` 自定义 `ControlTheme`，Pane 无标题栏/pin/close；空窗格占位与播放器铺满；分割线使用 5px `ProportionalStackPanelSplitter` 样式
   - 方案保存/另存为/载入：`DockLayoutJson` 保存窗口树与 `Proportion`，房间归属单独存 `LayoutSlots`；反序列化后按 `PaneId` 重建并 `BindTiles`，启动恢复双流
   - 账号与设置：B站/Twitch 登录窗（WebView2 独立 STA 线程 + CookieManager 轮询 + DPAPI）、屏蔽词库、独轮车开关
-  - 测试：`tests/LiveMonitor.Desktop.Tests` 57 个 xUnit 测试通过（全仓库 104 个），覆盖 Auto-Fit 网格/行分布（含 3 路 [1,2]）、30 路、Proportion 克隆/套用、末行追加、比例变化后标自定义比例、房间放入工作区、3 路自动排布、自定义模式满窗格追加、平台徽章配色与在线状态点
+  - 测试：`tests/LiveMonitor.Desktop.Tests` 58 个 xUnit 测试通过（全仓库 105 个），覆盖 Auto-Fit 网格/行分布（含 3 路 [1,2]）、30 路、Proportion 克隆/套用、末行追加、比例变化后标自定义比例、房间放入工作区、3 路自动排布、自定义模式满窗格追加、平台徽章配色与在线状态点
   - 实测：B站 7734200 与 Twitch `eslcs` 同屏播放；拖拽分割线后自动切换为 `自定义比例`，再双击加入第 3 路会追加窗格；保存后重启保持 `1×3` 与两条分割线。设置窗添加屏蔽词与独轮车开关持久化成功；B站登录页可正常加载
   - 限制：WebView2 登录成功后的 Cookie 捕获/DPAPI 保存路径尚未用真实账号端到端验证；登录窗关闭/取消会显示未捕获提示。`mpv_render_context_render` 告警仍需在 Step 8 长稳压测中确认；Twitch `yt-dlp` 偶发外部 SSL 瞬断（`UNEXPECTED_EOF_WHILE_READING`），失败态会显示重连按钮
 - [x] Step 7：方案持久化与差量切换
@@ -61,7 +61,7 @@
   - `QualityPolicy`：窗格高度 >720px 且活跃 <12 路时选最高档；360–720px 选 ≤720P；<360px 或活跃 ≥12 路选 ≤480P 并强制 `vf=fps=15`；全屏浮层按焦点槽拉最高档
   - `WorkspacePlayerManager` 的 `SizeChanged` 500ms 防抖后重新选档；2s 采样 `decoder-frame-drop-count + frame-drop-count`，连续 3 个周期丢帧率 >5% 时降一档，无更低档则切 15fps；未开播每 60s 轮询；断流按 `ReconnectPolicy` 的 3/10/30s 退避重连并重新拉流签名
   - 实测：2×2 窗口从 1456×939 缩到 1456×650，Twitch 从 720P60 切到 480P30 + 15fps，恢复窗口后回到 720P60；B站游客只有 720P 一档，只能叠 15fps、无法降到 480P
-  - 测试：`tests/LiveMonitor.Desktop.Tests` 57 个通过（含 `QualityPolicyTests` 11 个、`ReconnectPolicyTests` 5 个、自动布局/比例/状态/手动换位相关测试）
+  - 测试：`tests/LiveMonitor.Desktop.Tests` 58 个通过（含 `QualityPolicyTests` 11 个、`ReconnectPolicyTests` 6 个、自动布局/比例/状态/手动换位相关测试）
   - 窗格交互：双击窗格或点右上 `⛶` 进入全屏浮层（独立播放器、隐藏工具栏/侧栏/状态栏、只保留全屏声音，双击/Esc/按钮退出；退出提示 2.5 秒后自动隐藏）；`✕` 把房间移出工作区但保留主库记录；音量左侧 16 段 LED 电平条，静音时仍显示波动
   - 顶部工具栏 `🔊` 全部静音：第一次记录每路原静音状态并全部静音，再点按原状态恢复（不强制全部开声）；全局健康灯每 2 秒汇总丢帧率（≥5% 变红）；状态栏显示进程内存、GPU 利用率/解码/编码（`nvidia-smi`，非 N 卡显示 `--`）
   - 左侧分组 pills：`全部` + 当前已有 `LiveRoom.GroupTag` 动态生成；添加直播间时可直接输入分组文本。状态栏 `独轮车已拦: 0` 是 V0.1 占位，实时过滤与计数在 V0.3 接入弹幕后启用

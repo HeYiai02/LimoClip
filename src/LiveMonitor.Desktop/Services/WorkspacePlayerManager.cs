@@ -21,6 +21,7 @@ public sealed class WorkspacePlayerManager : IDisposable
     private readonly Dictionary<string, RoomStatus> _statuses = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DropBaseline> _dropBaselines = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _retryCounts = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, CancellationTokenSource> _retryDelays = new(StringComparer.Ordinal);
     private readonly Dictionary<string, MpvPlayerView> _playerByPane = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _parseGate = new(4, 4);
     private readonly DispatcherTimer _dropTimer;
@@ -88,11 +89,13 @@ public sealed class WorkspacePlayerManager : IDisposable
             if (player.State == PlayerState.Playing)
             {
                 _retryCounts.Remove(tile.PaneId);
+                CancelRetryDelay(tile.PaneId);
+                CancelOfflinePoll(tile.PaneId);
             }
 
             OnPlayerStateChanged(tile, player);
         };
-        player.ReconnectRequested += (_, _) => _ = RetryAsync(tile);
+        player.ReconnectRequested += (_, _) => ScheduleRetry(tile);
         player.SizeChanged += (_, _) => ScheduleQualityCheck(tile, player);
     }
 
@@ -187,6 +190,7 @@ public sealed class WorkspacePlayerManager : IDisposable
             player.ShowFailed(ex.Message);
             tile.StateText = "播放失败";
             tile.DetailText = ex.Message;
+            ScheduleRetry(tile);
         }
         finally
         {
@@ -282,7 +286,7 @@ public sealed class WorkspacePlayerManager : IDisposable
         }
     }
 
-    private void ScheduleOfflinePoll(RoomTileViewModel tile)
+    private void ScheduleOfflinePoll(RoomTileViewModel tile, bool force = false)
     {
         if (_disposed)
         {
@@ -309,7 +313,8 @@ public sealed class WorkspacePlayerManager : IDisposable
                 await Task.Delay(TimeSpan.FromSeconds(60), cts.Token).ConfigureAwait(false);
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    if (!_disposed && tile.PlayerView is not null && tile.Status?.IsLive != true)
+                    if (!_disposed && tile.PlayerView is not null &&
+                        (force || tile.Status?.IsLive != true))
                     {
                         _ = StartAsync(tile);
                     }
@@ -432,6 +437,12 @@ public sealed class WorkspacePlayerManager : IDisposable
                 quality.Dispose();
             }
 
+            if (_retryDelays.Remove(paneId, out var retry))
+            {
+                retry.Cancel();
+                retry.Dispose();
+            }
+
             _statuses.Remove(paneId);
             _dropBaselines.Remove(paneId);
             _retryCounts.Remove(paneId);
@@ -451,7 +462,10 @@ public sealed class WorkspacePlayerManager : IDisposable
 
         lock (_gate)
         {
-            foreach (var cts in _starts.Values.Concat(_offlinePolls.Values).Concat(_qualityDebounces.Values))
+            foreach (var cts in _starts.Values
+                         .Concat(_offlinePolls.Values)
+                         .Concat(_qualityDebounces.Values)
+                         .Concat(_retryDelays.Values))
             {
                 cts.Cancel();
                 cts.Dispose();
@@ -460,6 +474,7 @@ public sealed class WorkspacePlayerManager : IDisposable
             _starts.Clear();
             _offlinePolls.Clear();
             _qualityDebounces.Clear();
+            _retryDelays.Clear();
             _statuses.Clear();
             _dropBaselines.Clear();
             _retryCounts.Clear();
@@ -469,7 +484,7 @@ public sealed class WorkspacePlayerManager : IDisposable
         _parseGate.Dispose();
     }
 
-    private async Task RetryAsync(RoomTileViewModel tile)
+    private void ScheduleRetry(RoomTileViewModel tile)
     {
         if (_disposed)
         {
@@ -477,17 +492,119 @@ public sealed class WorkspacePlayerManager : IDisposable
         }
 
         int attempt;
+        CancellationTokenSource? cts = null;
+        var exhausted = false;
+
         lock (_gate)
         {
+            if (!_playerByPane.ContainsKey(tile.PaneId) || _retryDelays.ContainsKey(tile.PaneId))
+            {
+                return;
+            }
+
             _retryCounts.TryGetValue(tile.PaneId, out var previous);
             attempt = previous + 1;
-            _retryCounts[tile.PaneId] = attempt;
+            if (attempt > ReconnectPolicy.MaxAttempts)
+            {
+                _retryCounts.Remove(tile.PaneId);
+                exhausted = true;
+            }
+            else
+            {
+                _retryCounts[tile.PaneId] = attempt;
+                cts = new CancellationTokenSource();
+                _retryDelays[tile.PaneId] = cts;
+            }
         }
 
-        await Task.Delay(ReconnectPolicy.DelayForAttempt(attempt)).ConfigureAwait(false);
-        // ReconnectRequested 来自 mpv 线程；StartAsync 会写播放器/ViewModel 的 UI 属性，
-        // 必须切回 Avalonia UI 线程再启动，不能在线程池里直接调用。
-        await Dispatcher.UIThread.InvokeAsync(() => _ = StartAsync(tile));
+        if (exhausted)
+        {
+            ScheduleFailureRecheck(tile);
+            return;
+        }
+
+        _ = RetryAfterDelayAsync(tile, attempt, cts!);
+    }
+
+    private async Task RetryAfterDelayAsync(
+        RoomTileViewModel tile,
+        int attempt,
+        CancellationTokenSource cts)
+    {
+        try
+        {
+            await Task.Delay(ReconnectPolicy.DelayForAttempt(attempt), cts.Token).ConfigureAwait(false);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                lock (_gate)
+                {
+                    if (!_retryDelays.TryGetValue(tile.PaneId, out var current) ||
+                        !ReferenceEquals(current, cts))
+                    {
+                        return;
+                    }
+
+                    _retryDelays.Remove(tile.PaneId);
+                }
+
+                if (!_disposed && _playerByPane.ContainsKey(tile.PaneId))
+                {
+                    _ = StartAsync(tile);
+                }
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // 窗格被移除、方案切换或已经恢复播放。
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                if (_retryDelays.TryGetValue(tile.PaneId, out var current) &&
+                    ReferenceEquals(current, cts))
+                {
+                    _retryDelays.Remove(tile.PaneId);
+                }
+            }
+
+            cts.Dispose();
+        }
+    }
+
+    private void ScheduleFailureRecheck(RoomTileViewModel tile)
+    {
+        if (_disposed || !_playerByPane.ContainsKey(tile.PaneId))
+        {
+            return;
+        }
+
+        tile.DetailText = "播放失败，60 秒后复检";
+        ScheduleOfflinePoll(tile, force: true);
+    }
+
+    private void CancelRetryDelay(string paneId)
+    {
+        lock (_gate)
+        {
+            if (_retryDelays.Remove(paneId, out var cts))
+            {
+                cts.Cancel();
+                cts.Dispose();
+            }
+        }
+    }
+
+    private void CancelOfflinePoll(string paneId)
+    {
+        lock (_gate)
+        {
+            if (_offlinePolls.Remove(paneId, out var cts))
+            {
+                cts.Cancel();
+                cts.Dispose();
+            }
+        }
     }
 
     private static void OnPlayerStateChanged(RoomTileViewModel tile, MpvPlayerView player)

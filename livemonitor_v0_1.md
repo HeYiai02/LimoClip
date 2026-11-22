@@ -149,6 +149,7 @@ LiveMonitor.sln
   * `hwdec=auto-safe`、`vo=libmpv`、`gpu-hwdec-interop=auto`（本机 ANGLE/OpenGL 下 d3d11 interop 不可用，硬解为 `d3d11va-copy`）
   * `cache=yes`、`demuxer-max-bytes=4M`（720P 以上 8M、低清 3M）、`demuxer-max-back-bytes=0`、`network-timeout=10`
   * 音频解码常开 `aid=auto`，默认 `mute=yes`；开声只切 `mute`，不再重建 `aid`，避免“要点一次 fps 才出声”
+  * 音量表按需挂载：仅在该路开声/可听时把 `astats` 挂到 `af`，静音立即摘除；音频解码本身不关闭，保留开声语义
   * `audio-buffer=0.8`、`audio-stream-silence=yes`、`audio-exclusive=no`（多路同时开声的稳态）
 * **防盗链头注入**：`User-Agent` 走 `user-agent` 属性，`Referer` 走 `referrer` 属性，其余头（如 `Cookie`）再走 `http-header-fields`，避免 UA 中的逗号截断请求头。
 * **节能模式**：`SetCompactMode(true)` 注入 `vf=fps=15`，用于 $\ge 12$ 路监控或丢帧降级。
