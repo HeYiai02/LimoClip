@@ -44,7 +44,7 @@
 | **3** | **Avalonia 视觉父级冲突**：把带 C++ 句柄的 `MpvPlayerView` 从旧 `ContentControl` 搬到新 `Dock` 窗格，会触发 `already has a visual parent`，且跨结构迁移 OpenGL 控件可能让 mpv 渲染初始化失败。 | **不做跨窗格搬运**。仅当新旧布局的 `PaneId` 集合一致时复用原窗格与原播放器；结构变化时销毁旧 `MpvPlayerView`，按新结构重建窗格与播放器。`PlayerView` 的唯一宿主是 `RoomTileViewModel`，`WorkspacePlayerManager` 只按 `PaneId` 管理实例。 |
 | **4** | **`Dispose` 误触发**：将 `Dispose()` 写在 `OnDetachedFromVisualTree` 会导致拖拽换位或 Diff 切换时视频被直接销毁。 | 移除 `OnDetachedFromVisualTree` 中的销毁逻辑；`MpvPlayerView` 的销毁权**唯一归属** `WorkspacePlayerManager`（仅在关闭分屏、方案差集移除或主窗口关闭时触发）。 |
 | **5** | **数据库重复入库**：同一主播链接被重复添加会导致主库脏数据与实例池键冲突。 | `LiveRooms` 表强制增加 `UNIQUE(Platform, RoomId)` 联合唯一索引，添加前先校验拦截。 |
-| **6** | **未开播与断流空屏**：房间未开播或中途断流时没有状态流转，界面表现为永久黑屏。 | `RoomTileVM` 维护状态机：`Loading` / `Playing` / `Offline` / `Error`，离线态显示占位并启动 60 秒轮询，断流态执行 3 次指数退避重连。 |
+| **6** | **未开播与断流空屏**：房间未开播或中途断流时没有状态流转，界面表现为永久黑屏。 | `RoomTileVM` 维护状态机：`Loading` / `Playing` / `Offline` / `Error`，离线态显示占位并启动 60 秒轮询，断流态执行 3 次指数退避重连，失败后 60 秒复检。 |
 
 ---
 
@@ -217,7 +217,7 @@ LiveMonitor.sln
 ### 6.5 未开播轮询与断流重连策略
 
 * **未开播轮询（`Offline` 态）**：后台维护单个轻量级 `PeriodicTimer`（默认每 **60 秒** 巡检一次当前方案中处于 `Offline` 态的直播间），检测已开播后自动拉流切换至 `Playing` 态。
-* **断流自动重连**：监听 `libmpv` 的 `end-file` / 网络错误事件，执行 **3 次指数退避重连**（间隔 3 秒 → 10 秒 → 30 秒，重新向 `IPlatformProvider` 获取新流地址防止原 URL Token 过期）；3 次均失败后切入 `Error` 态并展示手动 `[重连]` 按钮。
+* **断流自动重连**：监听 `libmpv` 的 `end-file` / 网络错误事件，执行 **3 次指数退避重连**（间隔 3 秒 → 10 秒 → 30 秒，重新向 `IPlatformProvider` 获取新流地址防止原 URL Token 过期）；3 次均失败后进入失败态并每 **60 秒**复检一次，网络恢复后自动重启该路，同时保留手动 `[重连]` 按钮。
 
 ---
 
