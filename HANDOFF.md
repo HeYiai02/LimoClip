@@ -2,7 +2,7 @@
 
 ## 基线
 
-- 仓库：`E:\code\liveSurveilance`，分支 `main`，代码基线 `1118197`（重连退避 + 音量表按需挂载）；前序 P0 修复 `a17bd3b`，报告/交接 `1d10bd8`、`f9836dd`。
+- 仓库：`E:\code\liveSurveilance`，分支 `main`，代码基线 `1118197`（重连退避 + 音量表按需挂载）；前序 P0 修复 `a17bd3b`，报告/交接 `1d10bd8`、`f9836dd`，本文件更新 `9159ffb`。
 - 文档：`livemonitor_v0_1.md` v1.7（本期契约）、`code_artifact.md` v1.3（长期架构）。
 - 状态：`dotnet build LiveMonitor.sln` 0 错误；测试 105/105（Platforms 38、Desktop 58、Data 9）。
 - 运行数据：默认库未动；测试库在 `.cache/step6-test8.db`，应用当前已关闭。
