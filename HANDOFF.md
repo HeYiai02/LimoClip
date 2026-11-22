@@ -16,7 +16,7 @@
 
 - 断网/起播失败：`ScheduleRetry` 在每次 `StartAsync` 失败后继续排 3s→10s→30s；3 次后进入 `Failed`，60 秒复检（`ScheduleFailureRecheck` + `ScheduleOfflinePoll(force:true)`），`Playing` 时取消重试/复检。
 - 音量表：`MpvPlayerView` 仅在 `!_muted && _audioEnabled` 时挂 `astats`，静音 `af clr` 摘除；音频仍 `aid=auto`，未回退 `aid=no`。
-- 真实断网恢复尚未复测；当前只验证了编译、105 测试和手动开声/静音 smoke。
+- 真实断网恢复尚未复测；已用临时移走 `yt-dlp.exe` 模拟 Twitch 解析失败，恢复文件后约 1 分钟内自动重连成功（`.cache/reconnect-failed-real2.png`、`.cache/reconnect-recovered-real2.png`）。
 
 ## 已有 Step 8 数据
 
