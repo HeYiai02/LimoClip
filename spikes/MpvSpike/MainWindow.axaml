@@ -1,0 +1,18 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mpv="clr-namespace:LibMpv.Avalonia;assembly=LibMpv.Avalonia"
+        x:Class="MpvSpike.MainWindow"
+        Width="1280" Height="800"
+        Title="MpvSpike"
+        Background="#101014">
+  <Grid RowDefinitions="*,Auto">
+    <mpv:VideoView x:Name="Video" Grid.Row="0" />
+    <Border Grid.Row="1" Background="#17171c" Padding="10,6">
+      <TextBlock x:Name="Status"
+                 FontFamily="Consolas,Menlo,monospace"
+                 FontSize="12"
+                 Foreground="#d8d8e0"
+                 TextWrapping="Wrap" />
+    </Border>
+  </Grid>
+</Window>

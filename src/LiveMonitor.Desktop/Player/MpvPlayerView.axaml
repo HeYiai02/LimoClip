@@ -1,0 +1,115 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:player="using:LiveMonitor.Desktop.Player"
+             xmlns:controls="using:LiveMonitor.Desktop.Controls"
+             xmlns:mpv="using:LibMpv.Avalonia"
+             x:Class="LiveMonitor.Desktop.Player.MpvPlayerView"
+             Background="#05070A"
+             HorizontalAlignment="Stretch"
+             VerticalAlignment="Stretch">
+  <Grid ClipToBounds="True">
+    <player:MpvVideoView x:Name="Video" />
+
+    <!-- 四态占位层：加载中 / 未开播 / 播放中（隐藏） / 失败 -->
+    <Border x:Name="StateOverlay" Background="#D90B0E13">
+      <StackPanel HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  Spacing="10"
+                  MaxWidth="360">
+        <ProgressBar x:Name="LoadingBar"
+                     Width="140"
+                     Height="3"
+                     IsIndeterminate="True"
+                     Foreground="#4C8DFF" />
+        <TextBlock x:Name="StateTitle"
+                   FontSize="16"
+                   FontWeight="SemiBold"
+                   Foreground="#E6E8EE"
+                   HorizontalAlignment="Center" />
+        <TextBlock x:Name="StateDetail"
+                   FontSize="12"
+                   Foreground="#8A93A6"
+                   TextWrapping="Wrap"
+                   TextAlignment="Center"
+                   HorizontalAlignment="Center" />
+        <Button x:Name="RetryButton"
+                Content="重新连接"
+                IsVisible="False"
+                Click="OnRetryClick"
+                HorizontalAlignment="Center" />
+      </StackPanel>
+    </Border>
+
+    <!-- 悬浮控制栏 -->
+    <Border x:Name="ControlBar"
+            VerticalAlignment="Bottom"
+            Background="#CC0B0E13"
+            BorderBrush="#262B36"
+            BorderThickness="0,1,0,0"
+            Padding="8,5">
+      <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+        <StackPanel Grid.Column="0" Spacing="1" VerticalAlignment="Center">
+          <TextBlock x:Name="TitleText"
+                     Text="未分配房间"
+                     FontSize="11"
+                     Foreground="#E6E8EE"
+                     TextTrimming="CharacterEllipsis" />
+          <TextBlock x:Name="QualityText"
+                     Text="—"
+                     FontSize="10"
+                     Foreground="#7C8596" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="8,0">
+          <controls:AudioLevelMeter x:Name="AudioMeter"
+                                    Width="62"
+                                    Height="18"
+                                    Margin="0,0,2,0"
+                                    VerticalAlignment="Center" />
+          <TextBlock Text="音量" FontSize="10" Foreground="#7C8596" VerticalAlignment="Center" />
+          <Slider x:Name="VolumeSlider"
+                  Width="72"
+                  Minimum="0"
+                  Maximum="100"
+                  Value="100"
+                  TickFrequency="1"
+                  IsSnapToTickEnabled="True"
+                  ValueChanged="OnVolumeChanged" />
+        </StackPanel>
+
+        <Button x:Name="MuteButton"
+                Grid.Column="2"
+                Padding="6,2"
+                Margin="0,0,6,0"
+                ToolTip.Tip="开声"
+                Click="OnMuteClick">
+          <TextBlock x:Name="MuteIcon"
+                     Text="&#xE74F;"
+                     FontFamily="Segoe Fluent Icons"
+                     FontSize="16"
+                     VerticalAlignment="Center" />
+        </Button>
+
+        <Button x:Name="CompactButton"
+                Grid.Column="3"
+                Content="60fps"
+                FontSize="10"
+                Padding="7,3"
+                Click="OnCompactClick" />
+      </Grid>
+    </Border>
+
+    <Border x:Name="HealthBadge"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Top"
+            Margin="8"
+            Padding="6,3"
+            CornerRadius="3"
+            Background="#CC0B0E13">
+      <TextBlock x:Name="HealthText"
+                 Text="等待"
+                 FontSize="10"
+                 Foreground="#7C8596" />
+    </Border>
+  </Grid>
+</UserControl>

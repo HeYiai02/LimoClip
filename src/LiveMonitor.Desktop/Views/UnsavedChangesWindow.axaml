@@ -1,0 +1,19 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LiveMonitor.Desktop.Views.UnsavedChangesWindow"
+        Title="切换方案"
+        Width="420" Height="190"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False"
+        Background="#12161D">
+  <Grid Margin="22" RowDefinitions="Auto,*,Auto">
+    <TextBlock Grid.Row="0" Text="当前方案有未保存的修改" FontSize="17" FontWeight="SemiBold" Foreground="#E8EDF5" />
+    <TextBlock Grid.Row="1" Margin="0,10,0,0" TextWrapping="Wrap" Foreground="#9AA6B8"
+               Text="切换前是否保存？保存会覆盖当前方案；放弃修改会丢失本次调整。" />
+    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button x:Name="CancelButton" Content="取消" Width="82" Click="OnCancel" />
+      <Button x:Name="DiscardButton" Content="放弃修改" Width="96" Click="OnDiscard" />
+      <Button x:Name="SaveButton" Content="保存并切换" Width="108" Click="OnSave" />
+    </StackPanel>
+  </Grid>
+</Window>

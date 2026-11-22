@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <AvaloniaVersion>11.3.23</AvaloniaVersion>
+    <DockVersion>11.3.12.1</DockVersion>
+  </PropertyGroup>
+</Project>

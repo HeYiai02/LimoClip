@@ -1,0 +1,947 @@
+using System.Globalization;
+using System.Runtime.CompilerServices;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Interactivity;
+using Avalonia.Media;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
+using LibMpv.Client;
+using LiveMonitor.Core.Enums;
+using LiveMonitor.Core.Interfaces;
+using LiveMonitor.Core.Models;
+
+namespace LiveMonitor.Desktop.Player;
+
+/// <summary>
+/// 单路直播播放器。一个实例对应一个 mpv context，常驻于 Dock 窗格中。
+/// 注意：不在 OnDetachedFromVisualTree 里 Dispose；拖拽、方案切换只是把控件
+/// 从旧视觉父级解绑，真正销毁由 WorkspacePlayerManager 显式调用 Dispose。
+/// </summary>
+public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerController, IDisposable
+{
+    private static readonly TimeSpan RenderReadyTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan StartPlaybackTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan HealthInterval = TimeSpan.FromSeconds(1);
+
+    private static readonly ConditionalWeakTable<MpvContext, string> AudioMeterPaths = new();
+
+    private readonly object _contextGate = new();
+    private readonly DispatcherTimer _audioMeterTimer;
+    private MpvContext? _context;
+    private TaskCompletionSource<bool>? _loadTcs;
+    private DispatcherTimer? _healthTimer;
+    private Task? _disposeTask;
+    private string? _audioMeterPath;
+    private double _audioMeterLevel;
+    private int _disposed;
+    private int _suppressVolumeChange;
+
+    private PlayerState _state = PlayerState.Offline;
+    private PlayerHealthMetrics _metrics = PlayerHealthMetrics.Empty;
+    private StreamQuality? _quality;
+    private bool _userStopped;
+    private bool _muted;
+    private DateTimeOffset _suppressEndUntil = DateTimeOffset.MinValue;
+    private bool _compact;
+    private bool _compactApplied;
+    // 音频解码从起播起就保持启用，只用 mute 控制是否出声。
+    // 否则每次 aid=no -> auto 都会让 mpv 重建音频输出，出现“点开声没声、
+    // 再点一下 fps 才恢复”的现象。
+    private bool _audioEnabled = true;
+    private int _volume = 100;
+
+    public MpvPlayerView()
+    {
+        InitializeComponent();
+        _audioMeterTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
+        _audioMeterTimer.Tick += (_, _) => UpdateAudioMeter();
+        ApplyStateVisuals(PlayerState.Offline, "等待加入房间");
+    }
+
+    protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        try
+        {
+            // 必须赶在 VideoView 的 OpenGL 初始化之前挂上 context；
+            // VideoView 只会在 OnOpenGlInit 里（GL 上下文当前时）配置 renderer。
+            EnsureContext();
+        }
+        catch
+        {
+            // 真正错误在 PlayAsync 里呈现。
+        }
+    }
+
+    protected override void OnDetachedFromVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+
+        // 方案切换/拖拽换位时把控件从旧窗格摘下：这里只解除 VideoView 的挂载，
+        // 不 dispose MpvContext，保证流不断；挂到新窗格时 EnsureContext 会重新挂载。
+        // 若 detach 事件晚于新窗格的 attach 事件，控件已经重新有视觉根，不能把新挂载清掉。
+        if (this.GetVisualRoot() is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            Video.MpvContext = null;
+        }
+        catch
+        {
+            // 旧渲染上下文可能已经随窗口销毁，忽略。
+        }
+    }
+
+    public PlayerState State => _state;
+
+    public StreamQuality? CurrentQuality => _quality;
+
+    public event EventHandler? StateChanged;
+
+    /// <summary>失败或断流后由上层做 3/10/30s 退避重连；播放器自身不解析地址。</summary>
+    public event EventHandler? ReconnectRequested;
+
+    public string? RoomTitle
+    {
+        get => TitleText.Text;
+        set => TitleText.Text = string.IsNullOrWhiteSpace(value) ? "未分配房间" : value;
+    }
+
+    public string? QualityLabel
+    {
+        get => QualityText.Text;
+        set => QualityText.Text = string.IsNullOrWhiteSpace(value) ? "—" : value;
+    }
+
+    public bool AudioEnabled => _audioEnabled;
+
+    public async Task PlayAsync(StreamQuality quality, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(quality);
+        ThrowIfDisposed();
+
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => PlayAsyncCore(quality, ct));
+            return;
+        }
+
+        await PlayAsyncCore(quality, ct);
+    }
+
+    private async Task PlayAsyncCore(StreamQuality quality, CancellationToken ct)
+    {
+        _userStopped = false;
+        _quality = quality;
+        QualityLabel = $"{quality.DisplayName} · {quality.Fps}fps";
+        SetState(PlayerState.Loading, "正在建立播放通道…");
+
+        var loadTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _loadTcs = loadTcs;
+
+        try
+        {
+            var context = EnsureContext();
+
+            using (var renderCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                renderCts.CancelAfter(RenderReadyTimeout);
+                await Video.WaitForRenderAsync(renderCts.Token);
+            }
+
+            ApplyStreamOptions(context, quality);
+
+            await Task.Delay(TimeSpan.FromMilliseconds(300), ct).ConfigureAwait(true);
+
+            context.Command("loadfile", quality.StreamUrl, "replace");
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(StartPlaybackTimeout);
+            using var registration = timeout.Token.Register(
+                () => loadTcs.TrySetException(new TimeoutException("mpv 起播超时")));
+
+            await loadTcs.Task.ConfigureAwait(true);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            SetState(PlayerState.Offline, "已取消");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            SetState(PlayerState.Failed, Trim(ex.Message, 160));
+            throw;
+        }
+        finally
+        {
+            if (ReferenceEquals(_loadTcs, loadTcs))
+            {
+                _loadTcs = null;
+            }
+        }
+    }
+
+    public Task SwitchQualityAsync(StreamQuality quality, CancellationToken ct = default)
+        => PlayAsync(quality, ct);
+
+    public Task StopAsync(CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+        _userStopped = true;
+        _loadTcs?.TrySetCanceled();
+        _healthTimer?.Stop();
+
+        var context = _context;
+        if (context is not null)
+        {
+            try
+            {
+                context.Command("stop");
+            }
+            catch
+            {
+                // stop 只是尽量释放流；真正的资源回收在 Dispose。
+            }
+        }
+
+        SetState(PlayerState.Offline, "已停止");
+        return Task.CompletedTask;
+    }
+
+    public void SetMute(bool muted)
+    {
+        _muted = muted;
+        if (!muted)
+        {
+            _audioEnabled = true;
+        }
+
+        UpdateMuteVisual(muted);
+
+        try
+        {
+            // 首次开声时才启用音轨解码；之后只切 mute。
+            // 若每次静音都设 aid=no，mpv 会拆除音频输出，下一次 aid=auto
+            // 需要额外命令才重新初始化，表现为“点开声没声，点一下 fps 才有声”。
+            if (!muted)
+            {
+                _context?.SetPropertyString("aid", "auto");
+            }
+
+            _context?.SetPropertyFlag("mute", muted);
+        }
+        catch
+        {
+            // mpv 已释放时忽略。
+        }
+    }
+
+    public bool IsMuted => _muted;
+
+    public int Volume => _volume;
+
+    /// <summary>重新布局时先把窗格显示成加载态，避免短暂闪成“未开播”。</summary>
+    public void ShowLoading(string? detail = null)
+    {
+        _userStopped = false;
+        SetState(PlayerState.Loading, detail ?? "正在连接…");
+    }
+
+    private void UpdateMuteVisual(bool muted)
+    {
+        // Segoe Fluent Icons: E74F = Mute，E767 = Volume。
+        MuteIcon.Text = muted ? "\uE74F" : "\uE767";
+        Avalonia.Controls.ToolTip.SetTip(MuteButton, muted ? "开声" : "静音");
+    }
+
+    public void SetVolume(int volume)
+    {
+        _volume = Math.Clamp(volume, 0, 100);
+        _suppressVolumeChange++;
+        try
+        {
+            VolumeSlider.Value = _volume;
+        }
+        finally
+        {
+            _suppressVolumeChange--;
+        }
+
+        try
+        {
+            _context?.SetPropertyLong("volume", _volume);
+        }
+        catch
+        {
+            // mpv 已释放时忽略。
+        }
+    }
+
+    public void SetCompactMode(bool enabled)
+    {
+        _compact = enabled;
+        CompactButton.Content = enabled ? "15fps" : "60fps";
+        ApplyVideoFilter();
+    }
+
+    /// <summary>
+    /// V0.1 默认关闭音频解码；焦点窗格需要开声时显式调用。
+    /// </summary>
+    public void SetAudioEnabled(bool enabled)
+    {
+        _audioEnabled = enabled;
+        _muted = !enabled;
+        UpdateMuteVisual(_muted);
+        try
+        {
+            _context?.SetPropertyString("aid", enabled ? "auto" : "no");
+            _context?.SetPropertyFlag("mute", !enabled);
+        }
+        catch
+        {
+            // mpv 已释放时忽略。
+        }
+    }
+
+    public PlayerHealthMetrics GetHealthMetrics() => _metrics;
+
+    public void ShowOffline(string? detail = null)
+    {
+        _userStopped = true;
+        _healthTimer?.Stop();
+        SetState(PlayerState.Offline, detail ?? "主播未开播");
+    }
+
+    public void ShowFailed(string? detail = null)
+    {
+        _healthTimer?.Stop();
+        SetState(PlayerState.Failed, detail ?? "播放失败");
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        _userStopped = true;
+        _loadTcs?.TrySetCanceled();
+        _healthTimer?.Stop();
+        _audioMeterTimer.Stop();
+        TryDeleteAudioMeterFile();
+
+        var context = Interlocked.Exchange(ref _context, null);
+
+        void DetachAndDispose()
+        {
+            try
+            {
+                Video.MpvContext = null;
+            }
+            catch
+            {
+                // 视觉树已销毁时忽略。
+            }
+
+            if (context is null)
+            {
+                return;
+            }
+
+            _disposeTask = Task.Run(() =>
+            {
+                try
+                {
+                    context.Command("stop");
+                }
+                catch
+                {
+                    // 已结束的流可能报错，忽略。
+                }
+
+                try
+                {
+                    context.Dispose();
+                }
+                catch
+                {
+                    // 后台释放失败不应拖垮 UI。
+                }
+            });
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            DetachAndDispose();
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(DetachAndDispose);
+        }
+
+        StateChanged = null;
+        ReconnectRequested = null;
+        GC.SuppressFinalize(this);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Dispose();
+        if (_disposeTask is not null)
+        {
+            await _disposeTask.ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// 方案差量切换时把底层 MpvContext 从旧播放器摘出，控制权交给新播放器；
+    /// 不销毁 context，因此流不会断。
+    /// </summary>
+    public MpvContext? TakeContext()
+    {
+        lock (_contextGate)
+        {
+            var context = _context;
+            if (context is null)
+            {
+                return null;
+            }
+
+            context.StartFile -= OnStartFile;
+            context.FileLoaded -= OnFileLoaded;
+            context.EndFile -= OnEndFile;
+            _context = null;
+            _healthTimer?.Stop();
+            _audioMeterTimer.Stop();
+            // 文件交给接管方继续用，旧播放器 Dispose 时不要把文件删掉。
+            _audioMeterPath = null;
+            _loadTcs?.TrySetCanceled();
+            _loadTcs = null;
+            Video.MpvContext = null;
+            return context;
+        }
+    }
+
+    /// <summary>接管另一个播放器摘出的 MpvContext，保持画面不中断。</summary>
+    public void AdoptContext(MpvContext context, StreamQuality? quality, PlayerState state, string? detail)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        lock (_contextGate)
+        {
+            if (_context is not null)
+            {
+                throw new InvalidOperationException("播放器已经持有 MpvContext。");
+            }
+
+            _context = context;
+            _quality = quality;
+            _compactApplied = false;
+            if (AudioMeterPaths.TryGetValue(context, out var meterPath))
+            {
+                _audioMeterPath = meterPath;
+                _audioMeterTimer.Start();
+            }
+            // 摘挂 render context 时 mpv 可能给旧 vo 发一个 -15 的 EndFile；
+            // 新宿主刚接管时先忽略这类瞬时错误，避免把仍在播放的流标成失败。
+            _suppressEndUntil = DateTimeOffset.UtcNow.AddSeconds(3);
+            context.StartFile += OnStartFile;
+            context.FileLoaded += OnFileLoaded;
+            context.EndFile += OnEndFile;
+
+            context.SetOptionString("aid", _audioEnabled ? "auto" : "no");
+            context.SetOptionString("mute", _muted ? "yes" : "no");
+            context.SetOptionString("volume", _volume.ToString(CultureInfo.InvariantCulture));
+            Video.MpvContext = context;
+            ApplyVideoFilter();
+
+            if (quality is not null)
+            {
+                QualityLabel = $"{quality.DisplayName} · {quality.Fps}fps";
+            }
+
+            SetState(state, detail);
+            if (state == PlayerState.Playing)
+            {
+                StartHealthTimer();
+            }
+        }
+    }
+
+    private MpvContext EnsureContext()
+    {
+        lock (_contextGate)
+        {
+            if (_context is not null)
+            {
+                // 从旧视觉父级摘下再挂回时，VideoView 可能已解绑 context；
+                // 这里在 GL 初始化前补挂，避免 Dock 拖拽后黑屏。
+                if (!ReferenceEquals(Video.MpvContext, _context))
+                {
+                    Video.MpvContext = _context;
+                }
+
+                if (_audioMeterPath is not null)
+                {
+                    _audioMeterTimer.Start();
+                }
+
+                return _context;
+            }
+
+            // LibMpv 默认按 version=0 查找 libmpv.dll；本机随包的是 libmpv-2.dll。
+            LibMpv.Client.LibMpv.UseLibMpv(2);
+
+            var context = new MpvContext();
+            context.SetOptionString("hwdec", "auto-safe");
+            context.SetOptionString("vo", "libmpv");
+            context.SetOptionString("gpu-hwdec-interop", "auto");
+            context.SetOptionString("gpu-api", "opengl");
+            context.SetOptionString("cache", "yes");
+            context.SetOptionString("demuxer-max-bytes", "4M");
+            context.SetOptionString("demuxer-max-back-bytes", "0");
+            context.SetOptionString("network-timeout", "10");
+            // 多路同时开声时，默认 0.2s 音频缓冲很容易被网络/HLS 分段抖动打穿。
+            context.SetOptionString("audio-buffer", "0.8");
+            context.SetOptionString("audio-stream-silence", "yes");
+            context.SetOptionString("audio-exclusive", "no");
+            context.SetOptionString("aid", _audioEnabled ? "auto" : "no");
+            context.SetOptionString("mute", _muted ? "yes" : "no");
+            context.SetOptionString("volume", _volume.ToString(CultureInfo.InvariantCulture));
+            context.SetOptionString("osc", "no");
+            context.SetOptionString("osd-level", "0");
+            context.SetOptionString("input-default-bindings", "no");
+            context.SetOptionString("keep-open", "no");
+
+            _audioMeterPath ??= CreateAudioMeterPath();
+            if (_audioMeterPath is not null)
+            {
+                AudioMeterPaths.AddOrUpdate(context, _audioMeterPath);
+                context.SetOptionString("af", BuildAudioMeterFilter(_audioMeterPath));
+                _audioMeterTimer.Start();
+            }
+
+            var caFile = ResolveCaFile();
+            if (caFile is not null)
+            {
+                context.SetOptionString("tls-ca-file", caFile);
+            }
+            else if (string.Equals(Environment.GetEnvironmentVariable("LIVEMONITOR_TLS_NO_VERIFY"), "1", StringComparison.Ordinal))
+            {
+                context.SetOptionString("tls-verify", "no");
+            }
+
+            if (string.Equals(Environment.GetEnvironmentVariable("LIVEMONITOR_MPV_LOG"), "1", StringComparison.Ordinal))
+            {
+                context.SetOptionString("terminal", "yes");
+                context.SetOptionString("msg-level", "all=v");
+                context.SetOptionString("log-file", Path.Combine(Path.GetTempPath(), "livemonitor-mpv.log"));
+            }
+
+            context.StartFile += OnStartFile;
+            context.FileLoaded += OnFileLoaded;
+            context.EndFile += OnEndFile;
+
+            _context = context;
+            _compactApplied = false;
+            Video.MpvContext = context;
+            ApplyVideoFilter();
+            return context;
+        }
+    }
+
+    private static string? CreateAudioMeterPath()
+    {
+        try
+        {
+            var root = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "LiveMonitor",
+                "audio-meter");
+            if (string.IsNullOrWhiteSpace(root) || root.StartsWith("LiveMonitor", StringComparison.Ordinal))
+            {
+                root = Path.Combine(AppContext.BaseDirectory, "audio-meter");
+            }
+
+            try
+            {
+                Directory.CreateDirectory(root);
+            }
+            catch
+            {
+                root = Path.Combine(AppContext.BaseDirectory, "audio-meter");
+                Directory.CreateDirectory(root);
+            }
+
+            return Path.Combine(root, $"meter-{Guid.NewGuid():N}.txt");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string BuildAudioMeterFilter(string path)
+    {
+        // ffmpeg 的 filter 参数以 ':' 分隔，Windows 盘符必须转义；
+        // 实测 ffmpeg 需要两个反斜杠 ("E\\:/...")，单反斜杠会被它当成分隔符吃掉。
+        var escaped = path.Replace('\\', '/').Replace(":", "\\\\:");
+        return $"lavfi=[astats=metadata=1:reset=5,ametadata=mode=print:key=lavfi.astats.Overall.RMS_level:file={escaped}:direct=1]";
+    }
+
+    private void TryDeleteAudioMeterFile()
+    {
+        var path = _audioMeterPath;
+        _audioMeterPath = null;
+        if (path is null)
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(path);
+        }
+        catch
+        {
+            // mpv 可能还持有文件句柄，退出时由系统清理。
+        }
+    }
+
+    private void UpdateAudioMeter()
+    {
+        if (_audioMeterPath is null || _state != PlayerState.Playing)
+        {
+            _audioMeterLevel = 0;
+            AudioMeter.Level = 0;
+            return;
+        }
+
+        var target = 0d;
+        try
+        {
+            using var stream = new FileStream(
+                _audioMeterPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            if (stream.Length > 0)
+            {
+                // 只读文件尾，避免长时间运行时把整个日志读进内存。
+                if (stream.Length > 8192)
+                {
+                    stream.Seek(-8192, SeekOrigin.End);
+                }
+
+                using var reader = new StreamReader(stream);
+                var text = reader.ReadToEnd();
+                const string key = "lavfi.astats.Overall.RMS_level=";
+                var index = text.LastIndexOf(key, StringComparison.Ordinal);
+                if (index >= 0)
+                {
+                    var start = index + key.Length;
+                    var end = text.IndexOfAny(['\r', '\n'], start);
+                    var valueText = end < 0 ? text[start..] : text[start..end];
+                    if (double.TryParse(valueText, NumberStyles.Float, CultureInfo.InvariantCulture, out var db)
+                        && double.IsFinite(db))
+                    {
+                        target = Math.Clamp((db + 60d) / 60d, 0d, 1d);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            target = 0;
+        }
+
+        // 上升快、下降慢，接近真实电平表的观感。
+        _audioMeterLevel = target >= _audioMeterLevel
+            ? target
+            : _audioMeterLevel * 0.72 + target * 0.28;
+        AudioMeter.Level = _audioMeterLevel;
+    }
+
+    private static string? ResolveCaFile()
+    {
+        var configured = Environment.GetEnvironmentVariable("LIVEMONITOR_CA_FILE");
+        if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
+        {
+            return configured;
+        }
+
+        // 发布时把 CA bundle 放成 exe 同目录的 cacert.crt 即可，不需要改环境变量。
+        var bundledCrt = Path.Combine(AppContext.BaseDirectory, "cacert.crt");
+        if (File.Exists(bundledCrt))
+        {
+            return bundledCrt;
+        }
+
+        var bundledPem = Path.Combine(AppContext.BaseDirectory, "cacert.pem");
+        return File.Exists(bundledPem) ? bundledPem : null;
+    }
+
+    private static void ApplyStreamOptions(MpvContext context, StreamQuality quality)
+    {
+        // 720P 以上的直播码率明显更高，4M 的 demuxer cache 在 HLS 分段/网络抖动时
+        // 容易让音频输出断粮；这里按档位给更宽的缓冲，低清仍保持低内存。
+        context.SetOptionString("demuxer-max-bytes", quality.Height >= 720 ? "8M" : "3M");
+
+        var userAgent = FindHeader(quality, "User-Agent")
+                        ?? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+        context.SetOptionString("user-agent", SanitizeHeaderValue(userAgent));
+
+        var referer = FindHeader(quality, "Referer");
+        if (!string.IsNullOrWhiteSpace(referer))
+        {
+            context.SetOptionString("referrer", SanitizeHeaderValue(referer));
+        }
+
+        var cookie = FindHeader(quality, "Cookie");
+        if (!string.IsNullOrWhiteSpace(cookie))
+        {
+            context.SetOptionString("http-header-fields", "Cookie: " + SanitizeHeaderValue(cookie));
+        }
+    }
+
+    private void ApplyVideoFilter()
+    {
+        try
+        {
+            if (_context is null)
+            {
+                return;
+            }
+
+            if (_compact)
+            {
+                if (!_compactApplied)
+                {
+                    _context.Command("vf", "add", "@compact:fps=15");
+                    _compactApplied = true;
+                }
+            }
+            else if (_compactApplied)
+            {
+                // 用命名滤镜精确移除，避免空字符串/清空命令在不同 mpv 版本行为不一致。
+                _context.Command("vf", "remove", "@compact");
+                _compactApplied = false;
+            }
+        }
+        catch
+        {
+            // mpv 已释放时忽略。
+        }
+    }
+
+    private void OnStartFile(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!_userStopped)
+            {
+                SetState(PlayerState.Loading, "正在缓冲…");
+            }
+        });
+    }
+
+    private void OnFileLoaded(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_userStopped)
+            {
+                return;
+            }
+
+            SetState(PlayerState.Playing, null);
+            StartHealthTimer();
+            _loadTcs?.TrySetResult(true);
+        });
+    }
+
+    private void OnEndFile(object? sender, MpvEndFileEventArgs e)
+    {
+        var reason = e.EventData.Reason;
+        var error = e.EventData.Error;
+
+        if (reason is MpvEndFileReason.MpvEndFileReasonStop or MpvEndFileReason.MpvEndFileReasonQuit)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_userStopped)
+            {
+                return;
+            }
+
+            if (reason == MpvEndFileReason.MpvEndFileReasonError)
+            {
+                if (DateTimeOffset.UtcNow < _suppressEndUntil)
+                {
+                    return;
+                }
+
+                var message = $"mpv 拉流失败 (code {error})";
+                SetState(PlayerState.Failed, message);
+                _loadTcs?.TrySetException(new InvalidOperationException(message));
+                ReconnectRequested?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+
+            if (reason == MpvEndFileReason.MpvEndFileReasonEof)
+            {
+                SetState(PlayerState.Offline, "直播流已结束");
+                _loadTcs?.TrySetException(new EndOfStreamException("直播流已结束"));
+                ReconnectRequested?.Invoke(this, EventArgs.Empty);
+            }
+        });
+    }
+
+    private void StartHealthTimer()
+    {
+        if (_healthTimer is null)
+        {
+            _healthTimer = new DispatcherTimer { Interval = HealthInterval };
+            _healthTimer.Tick += (_, _) => SampleHealth();
+        }
+
+        if (!_healthTimer.IsEnabled)
+        {
+            _healthTimer.Start();
+        }
+    }
+
+    private void SampleHealth()
+    {
+        var context = _context;
+        if (context is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var decoderDrops = context.GetPropertyLong("decoder-frame-drop-count") ?? 0;
+            var frameDrops = context.GetPropertyLong("frame-drop-count") ?? 0;
+            // 用 container-fps（源帧率）判断解码是否跟得上；estimated-vf-fps 会被 vf 滤镜影响。
+            var fps = context.GetPropertyDouble("container-fps")
+                      ?? context.GetPropertyDouble("estimated-vf-fps")
+                      ?? 0;
+            var hwdec = context.GetPropertyString("hwdec-current");
+            var hardware = !string.IsNullOrWhiteSpace(hwdec)
+                           && !string.Equals(hwdec, "no", StringComparison.OrdinalIgnoreCase);
+
+            _metrics = new PlayerHealthMetrics(
+                decoderDrops,
+                frameDrops,
+                fps,
+                hardware,
+                hwdec,
+                DateTimeOffset.Now);
+
+            HealthText.Text = hardware
+                ? $"硬解 {fps:0}fps"
+                : $"软解 {fps:0}fps";
+            HealthText.Foreground = hardware
+                ? new SolidColorBrush(Avalonia.Media.Color.Parse("#5BD68A"))
+                : new SolidColorBrush(Avalonia.Media.Color.Parse("#E0B15C"));
+        }
+        catch
+        {
+            // mpv 正在切换/释放时属性读取会失败，等下一周期。
+        }
+    }
+
+    private void OnVolumeChanged(object? sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (_suppressVolumeChange != 0)
+        {
+            return;
+        }
+
+        SetVolume((int)Math.Round(e.NewValue));
+    }
+
+    private void OnMuteClick(object? sender, RoutedEventArgs e)
+        => SetMute(!_muted);
+
+    private void OnCompactClick(object? sender, RoutedEventArgs e)
+        => SetCompactMode(!_compact);
+
+    private void OnRetryClick(object? sender, RoutedEventArgs e)
+        => ReconnectRequested?.Invoke(this, EventArgs.Empty);
+
+    private void SetState(PlayerState state, string? detail)
+    {
+        _state = state;
+        ApplyStateVisuals(state, detail);
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void ApplyStateVisuals(PlayerState state, string? detail)
+    {
+        StateOverlay.IsVisible = state != PlayerState.Playing;
+        LoadingBar.IsVisible = state == PlayerState.Loading;
+        RetryButton.IsVisible = state == PlayerState.Failed;
+
+        StateTitle.Text = state switch
+        {
+            PlayerState.Loading => "加载中",
+            PlayerState.Offline => "未开播",
+            PlayerState.Failed => "播放失败",
+            _ => string.Empty,
+        };
+
+        StateDetail.Text = detail ?? state switch
+        {
+            PlayerState.Loading => "正在解析直播流…",
+            PlayerState.Offline => "等待主播开播",
+            PlayerState.Failed => "可点击重新连接",
+            _ => string.Empty,
+        };
+
+        HealthBadge.IsVisible = state == PlayerState.Playing;
+        if (state == PlayerState.Loading)
+        {
+            HealthText.Text = "连接中";
+            HealthText.Foreground = new SolidColorBrush(Avalonia.Media.Color.Parse("#7C8596"));
+        }
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            throw new ObjectDisposedException(nameof(MpvPlayerView));
+        }
+    }
+
+    private static string? FindHeader(StreamQuality quality, string name)
+    {
+        foreach (var (key, value) in quality.RequiredHeaders)
+        {
+            if (string.Equals(key, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    private static string SanitizeHeaderValue(string value)
+        => value.Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal)
+            .Trim();
+
+    private static string Trim(string value, int maxLength)
+        => value.Length <= maxLength ? value : value[..maxLength];
+}

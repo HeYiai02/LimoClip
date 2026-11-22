@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build-desktop",
+      "detail": "用仓库自带的 .dotnet SDK 编译 LiveMonitor.Desktop（环境变量与 README 一致）",
+      "type": "process",
+      "command": "${workspaceFolder}\\.dotnet\\dotnet.exe",
+      "args": [
+        "build",
+        "src/LiveMonitor.Desktop/LiveMonitor.Desktop.csproj",
+        "-m:1",
+        "-v",
+        "minimal"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "DOTNET_ROOT": "${workspaceFolder}\\.dotnet",
+          "DOTNET_CLI_HOME": "${workspaceFolder}\\.dotnet-home",
+          "NUGET_PACKAGES": "${workspaceFolder}\\.nuget\\packages",
+          "APPDATA": "${workspaceFolder}\\.appdata\\Roaming",
+          "LOCALAPPDATA": "${workspaceFolder}\\.appdata\\Local"
+        }
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$msCompile"
+    }
+  ]
+}

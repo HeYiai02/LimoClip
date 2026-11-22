@@ -1,0 +1,23 @@
+bin/
+obj/
+.vs/
+.idea/
+*.user
+*.suo
+
+# Local portable toolchain / caches (created by this workspace's bootstrap)
+.dotnet/
+.dotnet-home/
+.nuget/
+.appdata/
+.cache/
+.dev/
+.scratch/
+spikes/**/bin/
+spikes/**/obj/
+
+# Third-party runtime binaries; see tools/README.md for acquisition.
+tools/yt-dlp.exe
+tools/libmpv-2.dll
+tools/ffmpeg/
+tools/mpv/

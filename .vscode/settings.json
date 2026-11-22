@@ -1,0 +1,9 @@
+{
+  "dotnet.defaultSolution": "LiveMonitor.sln",
+  "terminal.integrated.env.windows": {
+    "DOTNET_ROOT": "${workspaceFolder}\\.dotnet",
+    "DOTNET_CLI_HOME": "${workspaceFolder}\\.dotnet-home",
+    "NUGET_PACKAGES": "${workspaceFolder}\\.nuget\\packages",
+    "PATH": "${workspaceFolder}\\.dotnet;${env:PATH}"
+  }
+}

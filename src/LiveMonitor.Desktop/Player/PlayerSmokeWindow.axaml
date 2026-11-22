@@ -1,0 +1,20 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:player="using:LiveMonitor.Desktop.Player"
+        x:Class="LiveMonitor.Desktop.Player.PlayerSmokeWindow"
+        Title="Player Smoke"
+        Width="960" Height="600"
+        WindowStartupLocation="CenterScreen"
+        Background="#05070A">
+  <Grid>
+    <player:MpvPlayerView x:Name="Player" />
+    <Border HorizontalAlignment="Left"
+            VerticalAlignment="Top"
+            Margin="8"
+            Padding="8,4"
+            CornerRadius="4"
+            Background="#CC0B0E13">
+      <TextBlock x:Name="SmokeStatus" Text="初始化…" FontSize="11" Foreground="#8A93A6" />
+    </Border>
+  </Grid>
+</Window>

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>LiveMonitor.Platforms</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LiveMonitor.Core\LiveMonitor.Core.csproj" />
+    <ProjectReference Include="..\LiveMonitor.Platforms.Common\LiveMonitor.Platforms.Common.csproj" />
+    <ProjectReference Include="..\LiveMonitor.Platforms.Bilibili\LiveMonitor.Platforms.Bilibili.csproj" />
+    <ProjectReference Include="..\LiveMonitor.Platforms.Twitch\LiveMonitor.Platforms.Twitch.csproj" />
+  </ItemGroup>
+</Project>

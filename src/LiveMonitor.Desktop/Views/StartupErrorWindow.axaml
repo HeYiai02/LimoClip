@@ -1,0 +1,29 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LiveMonitor.Desktop.Views.StartupErrorWindow"
+        Title="启动失败"
+        Width="760" Height="520"
+        MinWidth="520" MinHeight="320"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        Background="#0F1115">
+  <Grid Margin="18" RowDefinitions="Auto,*,Auto">
+    <TextBlock Grid.Row="0"
+               Text="主程序启动失败。完整错误如下，可复制后反馈："
+               FontSize="12" Foreground="#E6E8EE" Margin="0,0,0,10" />
+    <TextBox Grid.Row="1"
+             x:Name="ErrorText"
+             IsReadOnly="True"
+             AcceptsReturn="True"
+             TextWrapping="Wrap"
+             ScrollViewer.VerticalScrollBarVisibility="Auto"
+             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+             FontFamily="Consolas"
+             FontSize="12" />
+    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"
+                Spacing="8" Margin="0,12,0,0">
+      <Button Content="复制错误" Click="OnCopy" />
+      <Button Content="关闭" Click="OnClose" Classes="accent" />
+    </StackPanel>
+  </Grid>
+</Window>

@@ -1,0 +1,17 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LiveMonitor.Desktop.Views.TextPromptWindow"
+        Title="保存方案"
+        Width="380" Height="180"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Background="#0F1115">
+  <Grid Margin="18" RowDefinitions="Auto,*,Auto">
+    <TextBlock Grid.Row="0" x:Name="PromptText" FontSize="12" Foreground="#E6E8EE" Margin="0,0,0,8" />
+    <TextBox Grid.Row="1" x:Name="ValueBox" FontSize="13" />
+    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,12,0,0">
+      <Button Content="取消" Click="OnCancel" />
+      <Button Content="确定" Click="OnOk" Classes="accent" />
+    </StackPanel>
+  </Grid>
+</Window>

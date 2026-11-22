@@ -1,0 +1,208 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:dock="using:Dock.Avalonia.Controls"
+        x:Class="LiveMonitor.Desktop.Views.MainWindow"
+        Title="LiveMonitor"
+        Width="1440" Height="900"
+        MinWidth="1100" MinHeight="700"
+        WindowStartupLocation="CenterScreen"
+        Background="#121316">
+  <Window.Styles>
+    <Style Selector="Button.group-pill">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="#2E323C" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="Padding" Value="9,3" />
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="Foreground" Value="#94A3B8" />
+    </Style>
+    <Style Selector="Button.group-pill.active">
+      <Setter Property="Background" Value="#1E3A5F" />
+      <Setter Property="BorderBrush" Value="#3B82F6" />
+      <Setter Property="Foreground" Value="#DBEAFE" />
+    </Style>
+    <Style Selector="Button.room-action">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="3" />
+      <Setter Property="Width" Value="21" />
+      <Setter Property="Height" Value="21" />
+      <Setter Property="FontSize" Value="11" />
+    </Style>
+  </Window.Styles>
+  <Grid x:Name="RootGrid" RowDefinitions="48,*,28" ColumnDefinitions="260,*">
+    <!-- Top toolbar -->
+    <Border x:Name="TopBar" Grid.Row="0" Grid.ColumnSpan="2"
+            Background="#1B1D22"
+            BorderBrush="#2E323C"
+            BorderThickness="0,0,0,1"
+            Padding="10,0">
+      <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto">
+        <Button Grid.Column="0" Content="☰" Click="OnToggleSidebar" Padding="7,4" Margin="0,0,8,0"
+                ToolTip.Tip="展开/收起主库" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <TextBlock Text="LiveMonitor" FontSize="15" FontWeight="SemiBold" Foreground="#E6E8EE" />
+          <TextBlock Text="V0.1" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" />
+          <TextBlock Text="●" FontSize="12" Foreground="#F59E0B" IsVisible="{Binding IsDirty}"
+                     ToolTip.Tip="方案有未保存修改" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="16,0,0,0">
+          <ComboBox x:Name="ProfileBox" Width="150" Height="28"
+                    ItemsSource="{Binding Profiles}"
+                    SelectedItem="{Binding SelectedProfile}">
+            <ComboBox.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding Name}" FontSize="11" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <Button Content="保存" Click="OnSave" Padding="8,4" />
+          <Button Content="另存为" Click="OnSaveAs" Padding="8,4" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+          <Border Background="#16281E" BorderBrush="#2E5A3A" BorderThickness="1"
+                  CornerRadius="4" Padding="8,4" VerticalAlignment="Center"
+                  ToolTip.Tip="统计当前播放器每 2 秒的解码丢帧率">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Border Width="7" Height="7" CornerRadius="4" Background="#22C55E"
+                      VerticalAlignment="Center" IsVisible="{Binding !IsHealthWarning}" />
+              <Border Width="7" Height="7" CornerRadius="4" Background="#EF4444"
+                      VerticalAlignment="Center" IsVisible="{Binding IsHealthWarning}" />
+              <TextBlock Text="{Binding HealthText}" FontSize="10" Foreground="#A7F3D0" />
+            </StackPanel>
+          </Border>
+          <Button x:Name="MasterMuteButton" Click="OnToggleMasterMute"
+                  Padding="6,4" ToolTip.Tip="{Binding MasterMuteToolTip}">
+            <TextBlock Text="{Binding MasterMuteIcon}" FontFamily="Segoe Fluent Icons" FontSize="16" />
+          </Button>
+          <Border Background="#1D2430" BorderBrush="#2B3442" BorderThickness="1"
+                  CornerRadius="4" Padding="8,3" VerticalAlignment="Center">
+            <TextBlock Text="{Binding LayoutModeText}" FontSize="10" Foreground="#9AA6B8" />
+          </Border>
+          <Button Content="⊞ 一键自适应排布" Click="OnAutoFit" Padding="9,4"
+                  ToolTip.Tip="按当前直播间数量重算最接近 16:9 的网格，并清除自定义比例" />
+          <Button Content="↶ 恢复比例" Click="OnRestoreCustomLayout" Padding="8,4"
+                  IsVisible="{Binding CanRestoreCustomLayout}"
+                  ToolTip.Tip="恢复到点一键自适应之前的自定义比例" />
+          <Button Content="账号与设置" Click="OnSettings" Padding="8,4" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Left live-room library -->
+    <Border Grid.Row="1" Grid.Column="0" x:Name="Sidebar"
+            Background="#1B1D22"
+            BorderBrush="#2E323C"
+            BorderThickness="0,0,1,0"
+            Padding="12">
+      <DockPanel LastChildFill="True">
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,2,0,8">
+          <TextBlock Text="直播间主库" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
+          <Button Grid.Column="1" Content="+ 添加" FontSize="11" Padding="8,4" Click="OnAddRoom" />
+        </Grid>
+        <TextBox DockPanel.Dock="Top" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                 Watermark="搜索主播 / 房间号" FontSize="11" Margin="0,0,0,8" />
+        <StackPanel x:Name="GroupPills" DockPanel.Dock="Top" Orientation="Horizontal" Spacing="4" Margin="0,0,0,8" />
+        <Border DockPanel.Dock="Bottom" Margin="0,8,0,0"
+                Background="#1B1D22" BorderBrush="#2E323C" BorderThickness="1"
+                CornerRadius="6" Padding="8">
+          <TextBlock Text="双击列表中的直播间，放入第一个空窗格。"
+                     FontSize="10" Foreground="#94A3B8" TextWrapping="Wrap" />
+        </Border>
+        <ListBox x:Name="RoomList"
+                 ItemsSource="{Binding FilteredRooms}"
+                 Background="Transparent"
+                 BorderThickness="0">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,5">
+                <Border Grid.Column="0" Background="{Binding PlatformBadgeBackground}" CornerRadius="4"
+                        Padding="5,2" VerticalAlignment="Center" Margin="0,0,8,0">
+                  <TextBlock Text="{Binding PlatformBadge}" FontSize="9" Foreground="{Binding PlatformBadgeForeground}" />
+                </Border>
+                <StackPanel Grid.Column="1" Spacing="1">
+                  <TextBlock Text="{Binding DisplayTitle}" FontSize="11" Foreground="#E6E8EE" />
+                  <TextBlock Text="{Binding Meta}" FontSize="9" Foreground="#6B7484" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                  <TextBlock Text="●" FontSize="9" Foreground="{Binding StatusBrush}"
+                             ToolTip.Tip="{Binding StatusTip}" VerticalAlignment="Center" Margin="0,0,2,0" />
+                  <Button Classes="room-action" Click="OnEditRoom" ToolTip.Tip="修改直播间">
+                    <TextBlock Text="&#xE70F;" FontFamily="Segoe Fluent Icons" FontSize="11" Foreground="#94A3B8" />
+                  </Button>
+                  <Button Classes="room-action" Click="OnDeleteRoom" ToolTip.Tip="从主库删除">
+                    <TextBlock Text="&#xE711;" FontFamily="Segoe Fluent Icons" FontSize="11" Foreground="#F87171" />
+                  </Button>
+                </StackPanel>
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Border>
+
+    <!-- Dock workspace -->
+    <Border Grid.Row="1" Grid.Column="1" Background="#121316" Padding="8">
+      <Grid>
+        <dock:DockControl x:Name="Dock" Layout="{Binding Layout}" />
+
+        <!-- 全屏浮层：独立播放器，只保留这一路声音 -->
+        <Border IsVisible="{Binding IsFocused}"
+                Background="#0B0E14"
+                DoubleTapped="OnFocusDoubleTapped">
+          <ContentControl Content="{Binding FocusPlayer}"
+                          HorizontalContentAlignment="Stretch"
+                          VerticalContentAlignment="Stretch"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch" />
+        </Border>
+
+        <!-- 全屏焦点提示；2.5 秒后自动隐藏，Esc 或双击退出 -->
+        <Border IsVisible="{Binding IsFocusHintVisible}"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top"
+                Margin="0,10,0,0"
+                Background="#E60B0E14"
+                BorderBrush="#3A4455"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="10,6">
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <TextBlock Text="{Binding FocusedTitle}" FontSize="11" Foreground="#E6E8EE"
+                       VerticalAlignment="Center" />
+            <Button Content="退出全屏 (Esc)" FontSize="10" Padding="8,3" Click="OnExitFocus" />
+          </StackPanel>
+        </Border>
+      </Grid>
+    </Border>
+
+    <!-- Status bar -->
+    <Border x:Name="StatusBar" Grid.Row="2" Grid.ColumnSpan="2"
+            Background="#1B1D22"
+            BorderBrush="#2E323C"
+            BorderThickness="0,1,0,0"
+            Padding="12,0">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <TextBlock Grid.Column="0" Text="{Binding StatusText}" FontSize="10"
+                   Foreground="#94A3B8" VerticalAlignment="Center" />
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+          <TextBlock Text="{Binding UnicycleBlockedText}" FontSize="10" Foreground="#94A3B8"
+                     ToolTip.Tip="V0.1 只保存屏蔽词与开关；实时弹幕过滤将在 V0.3 接入后计数" />
+          <TextBlock Text="{Binding RoomCountText}" FontSize="10" Foreground="#94A3B8" />
+          <TextBlock Text="{Binding Metrics.MemoryText}" FontSize="10" Foreground="#94A3B8" />
+          <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+            <TextBlock Text="GPU" FontSize="10" Foreground="#64748B" />
+            <ProgressBar Value="{Binding Metrics.GpuBarValue}" Minimum="0" Maximum="100"
+                         Width="52" Height="5" Foreground="#3B82F6" />
+          </StackPanel>
+          <TextBlock Text="{Binding Metrics.GpuUtilizationText}" FontSize="10" Foreground="#94A3B8" />
+          <TextBlock Text="{Binding Metrics.GpuDecoderText}" FontSize="10" Foreground="#64748B" />
+          <TextBlock Text="{Binding Metrics.GpuEncoderText}" FontSize="10" Foreground="#64748B" />
+        </StackPanel>
+      </Grid>
+    </Border>
+  </Grid>
+</Window>

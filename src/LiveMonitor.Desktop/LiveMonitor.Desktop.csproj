@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>false</UseWPF>
+    <RootNamespace>LiveMonitor.Desktop</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Desktop" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Semi.Avalonia" Version="11.3.22" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Dock.Avalonia" Version="$(DockVersion)" />
+    <PackageReference Include="Dock.Avalonia.Themes.Fluent" Version="$(DockVersion)" />
+    <PackageReference Include="Dock.Model.Mvvm" Version="$(DockVersion)" />
+    <PackageReference Include="Dock.Serializer.SystemTextJson" Version="$(DockVersion)" />
+    <PackageReference Include="LibMpv.Avalonia" Version="1.0.0" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LiveMonitor.Core\LiveMonitor.Core.csproj" />
+    <ProjectReference Include="..\LiveMonitor.Data\LiveMonitor.Data.csproj" />
+    <ProjectReference Include="..\LiveMonitor.Platforms\LiveMonitor.Platforms.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\tools\libmpv-2.dll" Link="libmpv-2.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\tools\libmpv-2.dll')" />
+    <None Include="..\..\tools\yt-dlp.exe" Link="yt-dlp.exe" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\tools\yt-dlp.exe')" />
+    <None Include="..\..\tools\cacert.crt" Link="cacert.crt" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\tools\cacert.crt')" />
+  </ItemGroup>
+</Project>

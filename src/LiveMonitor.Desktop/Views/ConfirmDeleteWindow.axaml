@@ -1,0 +1,20 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LiveMonitor.Desktop.Views.ConfirmDeleteWindow"
+        Title="从主库删除"
+        Width="420" Height="190"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Background="#0F1115">
+  <Grid Margin="18" RowDefinitions="Auto,*,Auto">
+    <TextBlock Grid.Row="0" x:Name="MessageText" FontSize="12" Foreground="#E6E8EE"
+               TextWrapping="Wrap" />
+    <TextBlock Grid.Row="1" Text="工作区中的对应窗格也会被清空，此操作不可撤销。"
+               FontSize="10" Foreground="#94A3B8" TextWrapping="Wrap"
+               VerticalAlignment="Bottom" Margin="0,10,0,0" />
+    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Content="取消" Click="OnCancel" />
+      <Button Content="删除" Click="OnDelete" Foreground="#F87171" />
+    </StackPanel>
+  </Grid>
+</Window>

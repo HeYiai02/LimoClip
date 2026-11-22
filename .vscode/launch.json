@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "LiveMonitor.Desktop",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-desktop",
+      "program": "${workspaceFolder}\\.dotnet\\dotnet.exe",
+      "args": [
+        "${workspaceFolder}\\src\\LiveMonitor.Desktop\\bin\\Debug\\net8.0-windows\\LiveMonitor.Desktop.dll"
+      ],
+      "cwd": "${workspaceFolder}\\src\\LiveMonitor.Desktop\\bin\\Debug\\net8.0-windows",
+      "env": {
+        "DOTNET_ROOT": "${workspaceFolder}\\.dotnet"
+      },
+      "console": "internalConsole",
+      "stopAtEntry": false,
+      "justMyCode": true
+    }
+  ]
+}

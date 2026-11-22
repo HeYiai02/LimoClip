@@ -1,0 +1,95 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LiveMonitor.Desktop.Views.SettingsWindow"
+        Title="账号与设置"
+        Width="720" Height="620"
+        MinWidth="620" MinHeight="520"
+        WindowStartupLocation="CenterOwner"
+        Background="#0F1115">
+  <Grid RowDefinitions="Auto,*,Auto" Margin="20">
+    <StackPanel Grid.Row="0" Spacing="2" Margin="0,0,0,14">
+      <TextBlock Text="账号与设置" FontSize="20" FontWeight="SemiBold" Foreground="#E6E8EE" />
+      <TextBlock Text="登录态只保存在本机 DPAPI 加密的 PlatformCredentials 中。"
+                 FontSize="11" Foreground="#7C8596" />
+    </StackPanel>
+
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+      <StackPanel Spacing="14">
+        <Border Background="#151923" BorderBrush="#262B36" BorderThickness="1"
+                CornerRadius="8" Padding="14">
+          <StackPanel Spacing="10">
+            <TextBlock Text="平台账号" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto,Auto">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="B 站"
+                         FontSize="12" Foreground="#A9B4C6" VerticalAlignment="Center" />
+              <TextBlock Grid.Row="0" Grid.Column="1" x:Name="BilibiliStatus"
+                         FontSize="11" Foreground="#7C8596" Margin="12,0"
+                         VerticalAlignment="Center" Text="未绑定" />
+              <Button Grid.Row="0" Grid.Column="2" Content="登录 B 站"
+                      FontSize="11" Padding="10,4" Click="OnBilibiliLogin" />
+              <Button Grid.Row="0" Grid.Column="3" Content="清除"
+                      FontSize="11" Padding="10,4" Margin="6,0,0,0" Click="OnClearBilibili" />
+
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="Twitch"
+                         FontSize="12" Foreground="#A9B4C6" VerticalAlignment="Center"
+                         Margin="0,10,0,0" />
+              <TextBlock Grid.Row="1" Grid.Column="1" x:Name="TwitchStatus"
+                         FontSize="11" Foreground="#7C8596" Margin="12,10,0,0"
+                         VerticalAlignment="Center" Text="未绑定" />
+              <Button Grid.Row="1" Grid.Column="2" Content="登录 Twitch"
+                      FontSize="11" Padding="10,4" Margin="0,10,0,0" Click="OnTwitchLogin" />
+              <Button Grid.Row="1" Grid.Column="3" Content="清除"
+                      FontSize="11" Padding="10,4" Margin="6,10,0,0" Click="OnClearTwitch" />
+            </Grid>
+            <TextBlock x:Name="AccountHint" FontSize="10" Foreground="#6B7484"
+                       TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+
+        <Border Background="#151923" BorderBrush="#262B36" BorderThickness="1"
+                CornerRadius="8" Padding="14">
+          <StackPanel Spacing="10">
+            <TextBlock Text="弹幕屏蔽词库" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+              <TextBox Grid.Column="0" x:Name="KeywordBox"
+                       Watermark="输入要屏蔽的关键词 / 短语" FontSize="12" />
+              <Button Grid.Column="1" Content="添加" FontSize="11" Padding="12,4"
+                      Click="OnAddKeyword" />
+            </Grid>
+            <ListBox x:Name="KeywordList" Height="150" FontSize="11">
+              <ListBox.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding Keyword}" Foreground="#D5DAE4" />
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="删除选中" FontSize="11" Padding="10,4" Click="OnRemoveKeyword" />
+              <CheckBox x:Name="UnicycleToggle" Content="开启独轮车自动屏蔽"
+                        FontSize="11" VerticalAlignment="Center"
+                        Checked="OnUnicycleChanged" Unchecked="OnUnicycleChanged" />
+            </StackPanel>
+            <TextBlock FontSize="10" Foreground="#6B7484" TextWrapping="Wrap"
+                       Text="V0.1 只保存词库和开关；实时弹幕过滤在 V0.3 接入。正则标记暂不开放。" />
+          </StackPanel>
+        </Border>
+
+        <Border Background="#151923" BorderBrush="#262B36" BorderThickness="1"
+                CornerRadius="8" Padding="14">
+          <StackPanel Spacing="4">
+            <TextBlock Text="安全说明" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
+            <TextBlock FontSize="10" Foreground="#7C8596" TextWrapping="Wrap"
+                       Text="Cookie 等同登录态。登录窗关闭后不会写入日志或数据库明文；DPAPI 仅当前 Windows 用户可解密。" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
+
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,14,0,0">
+      <TextBlock x:Name="StatusText" Grid.Column="0" FontSize="11"
+                 Foreground="#7C8596" VerticalAlignment="Center" />
+      <Button Grid.Column="1" Content="关闭" FontSize="12" Padding="18,6"
+              Click="OnClose" />
+    </Grid>
+  </Grid>
+</Window>
