@@ -71,7 +71,28 @@
 
 ## 构建与运行
 
-要求：Windows x64，.NET 8 SDK；仓库根目录的 `tools/` 下需要有 `libmpv-2.dll`、`yt-dlp.exe` 和 `cacert.crt`（当前工作区已就位；`cacert.crt` 为公开 CA 根证书清单，缺失时 mpv 无法校验 B站 CDN 证书）。
+要求：Windows x64，.NET 8 SDK。
+
+### 第三方二进制（不入库）
+
+仓库只跟踪源码和 `tools/cacert.crt`。播放与流解析依赖的二进制体积大、再分发还涉及第三方许可，所以都写进 `.gitignore`、不提交：
+
+| 路径 | 用途 | 上游 |
+| --- | --- | --- |
+| `tools/libmpv-2.dll`（约 116 MB） | mpv 播放内核，`LibMpv.Avalonia` 加载 | [shinchiro/mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake/releases) 的 `mpv-dev-x86_64-*.7z`（别选 `-v3-`，那个要 AVX2） |
+| `tools/yt-dlp.exe`（约 22 MB） | Twitch / YouTube 流解析 | [yt-dlp releases](https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe) |
+| `tools/ffmpeg/`（约 100 MB，可选） | 探测 / 兜底，应用当前未直接调用 | [gyan.dev FFmpeg builds](https://www.gyan.dev/ffmpeg/builds/) |
+
+首次克隆后一条命令补齐（已存在的文件跳过，`-Force` 重新下载）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/fetch-tools.ps1             # libmpv-2.dll + yt-dlp.exe + cacert.crt
+powershell -ExecutionPolicy Bypass -File scripts/fetch-tools.ps1 -WithFfmpeg # 额外下载 ffmpeg
+```
+
+脚本会查 GitHub 最新 Release、下载后用 7-Zip 解包（系统没有 7-Zip 时临时下载官方单文件 `7zr.exe`，不安装软件）；`cacert.crt` 为公开 CA 根证书清单，仓库已带，缺失时才从 curl.se 拉取。构建时 `LiveMonitor.Desktop.csproj` 会把 `libmpv-2.dll`、`yt-dlp.exe`、`cacert.crt` 复制到输出目录；缺文件不会让构建失败，但播放/解析会在运行时失败。
+
+发 GitHub Releases 时，把 `tools/` 里的二进制连同 `bin/Release/net8.0-windows/` 的输出一起打进 zip 包即可，仓库本身不必包含它们。
 
 ```powershell
 dotnet build LiveMonitor.sln
@@ -167,6 +188,7 @@ tests/
   LiveMonitor.Data.Tests/           Data 层单元测试（xUnit）
   LiveMonitor.Platforms.Tests/      B站 / Twitch 解析单元测试（xUnit）
   LiveMonitor.Desktop.Tests/        Dock Auto-Fit / 结构克隆单元测试（xUnit）
-tools/                    libmpv-2.dll、yt-dlp.exe
+tools/                    运行时二进制目录（默认不入库，用 scripts/fetch-tools.ps1 补齐；cacert.crt 例外）
+scripts/                  fetch-tools.ps1：一键下载 libmpv / yt-dlp / ffmpeg
 spikes/                   三个技术验证 demo（不参与主解决方案）
 ```

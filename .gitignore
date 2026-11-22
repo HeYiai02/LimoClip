@@ -16,8 +16,9 @@ obj/
 spikes/**/bin/
 spikes/**/obj/
 
-# Third-party runtime binaries; see tools/README.md for acquisition.
+# Third-party runtime binaries; see tools/README.md and scripts/fetch-tools.ps1.
 tools/yt-dlp.exe
 tools/libmpv-2.dll
 tools/ffmpeg/
 tools/mpv/
+tools/*.part
