@@ -2,7 +2,7 @@
 
 ## 基线
 
-- 仓库：`E:\code\liveSurveilance`，分支 `main`，当前提交 `a17bd3b`（P0 修复）；此前基线为 `aa2d43a` / `6e3c646`。
+- 仓库：`E:\code\liveSurveilance`，分支 `main`，代码基线 `a17bd3b`（P0 修复）；报告/交接提交 `1d10bd8`。
 - 文档：`livemonitor_v0_1.md` v1.7（本期契约）、`code_artifact.md` v1.3（长期架构）。
 - 状态：`dotnet build LiveMonitor.sln` 0 错误；测试 104/104（Platforms 38、Desktop 57、Data 9）。
 - 运行数据：默认库未动；测试库在 `.cache/step6-test8.db`，应用当前已关闭。
