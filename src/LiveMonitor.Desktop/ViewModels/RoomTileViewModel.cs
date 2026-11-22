@@ -150,6 +150,12 @@ public sealed class RoomTileViewModel : ObservableObject
         {
             if (SetProperty(ref _playerView, value))
             {
+                // 播放器底部控制条绑定本窗格的弹幕开关；PlayerView 不参与 Dock 序列化。
+                if (value is not null)
+                {
+                    value.DataContext = this;
+                }
+
                 OnPropertyChanged(nameof(HasPlayer));
             }
         }

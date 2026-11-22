@@ -190,7 +190,7 @@
                    Foreground="#94A3B8" VerticalAlignment="Center" />
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
           <TextBlock Text="{Binding UnicycleBlockedText}" FontSize="10" Foreground="#94A3B8"
-                     ToolTip.Tip="V0.1 只保存屏蔽词与开关；实时弹幕过滤将在 V0.3 接入后计数" />
+                     ToolTip.Tip="V0.1 只保存屏蔽词与开关；实时弹幕过滤将在 V0.2 接入后计数" />
           <TextBlock Text="{Binding RoomCountText}" FontSize="10" Foreground="#94A3B8" />
           <TextBlock Text="{Binding Metrics.MemoryText}" FontSize="10" Foreground="#94A3B8" />
           <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">

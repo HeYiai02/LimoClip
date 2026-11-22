@@ -69,8 +69,11 @@
                         FontSize="11" VerticalAlignment="Center"
                         Checked="OnUnicycleChanged" Unchecked="OnUnicycleChanged" />
             </StackPanel>
+            <CheckBox x:Name="DanmakuPreviewToggle" Content="监控画面弹幕预览"
+                      FontSize="11" VerticalAlignment="Center"
+                      Checked="OnDanmakuPreviewChanged" Unchecked="OnDanmakuPreviewChanged" />
             <TextBlock FontSize="10" Foreground="#6B7484" TextWrapping="Wrap"
-                       Text="V0.1 只保存词库和开关；实时弹幕过滤在 V0.3 接入。正则标记暂不开放。" />
+                       Text="V0.1 只保存词库和开关；实时弹幕过滤在 V0.2 接入。正则标记暂不开放。" />
           </StackPanel>
         </Border>
 

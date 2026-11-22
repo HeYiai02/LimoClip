@@ -532,7 +532,9 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
             {
                 AudioMeterPaths.AddOrUpdate(context, _audioMeterPath);
                 _audioMeterTimer.Start();
-                if (!_muted && _audioEnabled)
+                // 静音只关输出，不关解码；电平条必须继续反映音频包络，
+                // 否则“静音仍有波动”的既有交互会被破坏。
+                if (_audioEnabled)
                 {
                     context.SetOptionString("af", BuildAudioMeterFilter(_audioMeterPath));
                     _meterAttached = true;
@@ -608,8 +610,8 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
     }
 
     /// <summary>
-    /// 音量表只在真正可听时挂到音频链上；静音/关音频时摘掉，避免每路 astats
-    /// 在 20~30 路场景持续吃 CPU。音频本身仍保持解码，不改变开声语义。
+    /// 音量表跟随音频解码，不跟随 mute：静音时仍要能看到电平波动。
+    /// 只有显式关闭音频解码（焦点切换/全静音关闭音频）时才摘掉 astats。
     /// </summary>
     private void ApplyAudioMeterState()
     {
@@ -618,7 +620,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
             return;
         }
 
-        if (_muted || !_audioEnabled)
+        if (!_audioEnabled)
         {
             DetachAudioMeter();
         }
@@ -638,7 +640,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
         var context = _context;
         if (context is null)
         {
-            // context 尚未创建；EnsureContext 会根据当前 _muted 状态直接挂 af。
+            // context 尚未创建；EnsureContext 会根据当前 _audioEnabled 状态直接挂 af。
             return;
         }
 

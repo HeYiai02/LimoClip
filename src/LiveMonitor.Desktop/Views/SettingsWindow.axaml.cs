@@ -36,6 +36,9 @@ public partial class SettingsWindow : Window
             await ReloadKeywordsAsync();
             var value = await _services.Settings.GetAsync(AppSettingKeys.BlockUnicycleEnabled);
             UnicycleToggle.IsChecked = string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+
+            var preview = await _services.Settings.GetAsync(AppSettingKeys.DanmakuPreviewEnabled);
+            DanmakuPreviewToggle.IsChecked = string.Equals(preview, "true", StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception ex)
         {
@@ -202,6 +205,28 @@ public partial class SettingsWindow : Window
         catch (Exception ex)
         {
             StatusText.Text = $"保存开关失败：{ex.Message}";
+        }
+    }
+
+    private async void OnDanmakuPreviewChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_loading || _services is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _services.Settings.SetAsync(
+                AppSettingKeys.DanmakuPreviewEnabled,
+                DanmakuPreviewToggle.IsChecked == true ? "true" : "false");
+            StatusText.Text = DanmakuPreviewToggle.IsChecked == true
+                ? "监控画面弹幕预览已开启。"
+                : "监控画面弹幕预览已关闭。";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"保存弹幕预览开关失败：{ex.Message}";
         }
     }
 

@@ -47,7 +47,7 @@
             BorderBrush="#262B36"
             BorderThickness="0,1,0,0"
             Padding="8,5">
-      <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
         <StackPanel Grid.Column="0" Spacing="1" VerticalAlignment="Center">
           <TextBlock x:Name="TitleText"
                      Text="未分配房间"
@@ -90,8 +90,18 @@
                      VerticalAlignment="Center" />
         </Button>
 
+        <ToggleButton x:Name="DanmakuButton"
+                      Grid.Column="3"
+                      Padding="6,2"
+                      Margin="0,0,6,0"
+                      FontSize="10"
+                      ToolTip.Tip="弹幕开关（V0.1 占位）"
+                      IsChecked="{Binding IsDanmakuVisible, Mode=TwoWay}">
+          <TextBlock Text="弹" FontSize="11" VerticalAlignment="Center" />
+        </ToggleButton>
+
         <Button x:Name="CompactButton"
-                Grid.Column="3"
+                Grid.Column="4"
                 Content="60fps"
                 FontSize="10"
                 Padding="7,3"
