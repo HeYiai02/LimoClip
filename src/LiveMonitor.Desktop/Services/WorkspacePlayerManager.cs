@@ -140,11 +140,12 @@ public sealed class WorkspacePlayerManager : IDisposable
             // 20~30 路同时进入时，把真正的外部解析（B站 HTTP / yt-dlp 进程）限制为 4 路并发，
             // 避免 CLI 进程风暴；播放器起播本身不占这个信号量。
             RoomStatus status;
-            await _parseGate.WaitAsync(cts.Token).ConfigureAwait(false);
+            // 这里不能用 ConfigureAwait(false)：后续 SetCompactMode/ShowFailed 会直接写
+            // Avalonia 控件，必须回到调用方（UI）的 SynchronizationContext。
+            await _parseGate.WaitAsync(cts.Token);
             try
             {
-                status = await provider.GetRoomStatusAsync(room.RoomId, cookie, cts.Token)
-                    .ConfigureAwait(false);
+                status = await provider.GetRoomStatusAsync(room.RoomId, cookie, cts.Token);
             }
             finally
             {
@@ -484,7 +485,9 @@ public sealed class WorkspacePlayerManager : IDisposable
         }
 
         await Task.Delay(ReconnectPolicy.DelayForAttempt(attempt)).ConfigureAwait(false);
-        await StartAsync(tile).ConfigureAwait(false);
+        // ReconnectRequested 来自 mpv 线程；StartAsync 会写播放器/ViewModel 的 UI 属性，
+        // 必须切回 Avalonia UI 线程再启动，不能在线程池里直接调用。
+        await Dispatcher.UIThread.InvokeAsync(() => _ = StartAsync(tile));
     }
 
     private static void OnPlayerStateChanged(RoomTileViewModel tile, MpvPlayerView player)
