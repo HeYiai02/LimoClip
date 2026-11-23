@@ -579,7 +579,10 @@ public sealed class WorkspacePlayerManager : IDisposable
             return;
         }
 
-        tile.DetailText = "播放失败，60 秒后复检";
+        // 连续重连失败后不显示“未开播”（主播可能仍在播，只是本机网络到 CDN 不稳），
+        // 保持「直播流中断」语义并每 60 秒自动复检一次主播状态。
+        tile.StateText = "重连中";
+        tile.DetailText = "直播流已中断，60 秒后自动重试";
         ScheduleOfflinePoll(tile, force: true);
     }
 
@@ -611,14 +614,14 @@ public sealed class WorkspacePlayerManager : IDisposable
     {
         void Update()
         {
-            tile.StateText = player.State switch
+            tile.StateText = PlayerStateText.Describe(player.State);
+
+            // 断流重连时把「正在自动重连」写进副标题，
+            // 避免沿用上一次的「未开播」文案误导用户。
+            if (player.State == PlayerState.Reconnecting)
             {
-                PlayerState.Loading => "连接中",
-                PlayerState.Playing => "直播中",
-                PlayerState.Offline => "已停止",
-                PlayerState.Failed => "播放失败",
-                _ => player.State.ToString()
-            };
+                tile.DetailText = "直播流已中断，正在自动重连…";
+            }
         }
 
         if (Dispatcher.UIThread.CheckAccess())

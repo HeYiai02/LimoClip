@@ -1010,8 +1010,10 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
 
             if (reason == MpvEndFileReason.MpvEndFileReasonEof)
             {
-                SetState(PlayerState.Offline, "直播流已结束");
-                _loadTcs?.TrySetException(new EndOfStreamException("直播流已结束"));
+                // 直播流被 CDN/网络中断时 mpv 表现为 EOF；这并不代表主播下播，
+                // 用「重连中」状态提示用户，同时交给上层退避重连。
+                SetState(PlayerState.Reconnecting, "直播流已中断，正在自动重连…");
+                _loadTcs?.TrySetException(new EndOfStreamException("直播流已中断"));
                 ReconnectRequested?.Invoke(this, EventArgs.Empty);
             }
         });
@@ -1101,13 +1103,14 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
     private void ApplyStateVisuals(PlayerState state, string? detail)
     {
         StateOverlay.IsVisible = state != PlayerState.Playing;
-        LoadingBar.IsVisible = state == PlayerState.Loading;
-        RetryButton.IsVisible = state == PlayerState.Failed;
+        LoadingBar.IsVisible = state is PlayerState.Loading or PlayerState.Reconnecting;
+        RetryButton.IsVisible = state is PlayerState.Failed or PlayerState.Reconnecting;
 
         StateTitle.Text = state switch
         {
             PlayerState.Loading => "加载中",
             PlayerState.Offline => "未开播",
+            PlayerState.Reconnecting => "直播流中断",
             PlayerState.Failed => "播放失败",
             _ => string.Empty,
         };
@@ -1116,6 +1119,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
         {
             PlayerState.Loading => "正在解析直播流…",
             PlayerState.Offline => "等待主播开播",
+            PlayerState.Reconnecting => "正在自动重连…",
             PlayerState.Failed => "可点击重新连接",
             _ => string.Empty,
         };

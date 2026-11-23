@@ -58,6 +58,7 @@ public static class FfmpegArgumentBuilder
         }
 
         AppendCaBundle(arguments, caBundlePath, sourceQuality.StreamUrl);
+        AppendReconnectOptions(arguments, sourceQuality.StreamUrl);
 
         arguments.Add("-i");
         arguments.Add(sourceQuality.StreamUrl.Trim());
@@ -85,6 +86,7 @@ public static class FfmpegArgumentBuilder
             }
 
             AppendCaBundle(arguments, caBundlePath, sourceQuality.AudioStreamUrl);
+            AppendReconnectOptions(arguments, sourceQuality.AudioStreamUrl);
             arguments.Add("-i");
             arguments.Add(sourceQuality.AudioStreamUrl!.Trim());
 
@@ -126,6 +128,34 @@ public static class FfmpegArgumentBuilder
 
         arguments.Add("-ca_file");
         arguments.Add(caBundlePath.Trim());
+    }
+
+    /// <summary>
+    /// HTTP(S) 直播流的自动重连参数。虎牙等 CDN 会周期性主动断开连接，
+    /// 不加 reconnect 时 ffmpeg 直接以 I/O error 退出，录制只能撑几秒；
+    /// 加上后可在连接被断开时自动重连（本地文件输入不会走到这里）。
+    /// </summary>
+    private static void AppendReconnectOptions(List<string> arguments, string? streamUrl)
+    {
+        if (streamUrl is null)
+        {
+            return;
+        }
+
+        var trimmed = streamUrl.TrimStart();
+        var isHttp = trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                     || trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        if (!isHttp)
+        {
+            return;
+        }
+
+        arguments.Add("-reconnect");
+        arguments.Add("1");
+        arguments.Add("-reconnect_streamed");
+        arguments.Add("1");
+        arguments.Add("-reconnect_delay_max");
+        arguments.Add("2");
     }
 
     /// <summary>

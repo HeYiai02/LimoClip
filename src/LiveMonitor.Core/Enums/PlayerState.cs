@@ -14,6 +14,12 @@ public enum PlayerState
     /// <summary>流已打开，正在播放。</summary>
     Playing,
 
+    /// <summary>
+    /// 直播流在播放中意外中断（CDN 断流、网络抖动、签名地址过期等），
+    /// 与「主播未开播」区分：上层会按退避策略自动重连，界面上不能显示成未开播。
+    /// </summary>
+    Reconnecting,
+
     /// <summary>拉流或解码失败，显示失败占位，可按退避策略重试。</summary>
     Failed
 }
