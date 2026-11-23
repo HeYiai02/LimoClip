@@ -1,13 +1,13 @@
-# LiveMonitor 交接（截至 V0.5-B：平台插件热更新底座 + YouTube；含本机运行规避方案）
+# LiveMonitor 交接（截至 V0.5-C Step6：虎牙插件；含本机运行规避方案）
 
 ## 状态
 
-- 分支 `main`；**当前 HEAD 为 V0.5-B 收尾提交（登录后可见 `git log` 顶部；最新代码提交为 `e9e7aab feat(youtube): 录制/播放补齐分离音频轨`，其后为本次文档提交）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避、波形修复、产品侧加固、V0.5-B 六次提交，提交清单见文末各节。
+- 分支 `main`；**当前 HEAD 为 V0.5-C Step6 收尾提交（登录后可见 `git log` 顶部；虎牙插件提交 `2c2ca42`、清理提交 `1b6d0ac`，其后为本次文档提交）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避、波形修复、产品侧加固、V0.5-B 六次提交、V0.5-C Step6 两次提交，提交清单见文末各节。
 - 构建：`dotnet build LiveMonitor.sln --no-restore` → **0 错误**，8~14 警告（MSB3277 / NU1803 / NU1900 等，均为本机环境既有告警，无新增代码告警）。
-- 测试：Data 37 / Platforms **245** / Danmaku 98 / Media **166** / Desktop 94 = **640 全绿**（V0.4 基线 471；V0.5-A +7 Media、+18 Desktop；产品侧加固 +17 Media；V0.5-B +125 Platforms、+2 Media）。
-- 验收：V0.4 GUI 端到端通过（脚本 `.cache/v04-acceptance2.ps1`，证据 `.cache/v04b-*.png`）；V0.5-A 完成真实 API 验证（55s 音频约 11s 返回，见「V0.5-A 增量」）；本机运行规避后完成真实 GUI 录制/打开目录/ASR 验证；**V0.5-B 阶段验收通过**（YouTube 添加/监控/录制 49.97s（含音频）/剪辑波形/双版导出（含音频）/ASR，见「V0.5-B 增量」）。
-- 实现依据：`limoclip_v0_4.md`（V0.4）、`limoclip_v0_5_asr.md`（V0.5-A/B，已按实现修订 P0 偏差）；`code_artifact.md` 已更新为 v1.8。
-- **V0.5-B（插件热更新底座 + YouTube）已完成并通过阶段 B 验收；V0.5-C（虎牙/斗鱼/抖音）未开始**（用户同意按 B→C 串行推进，恢复开发先读本文件「新 session 首条消息」「V0.5-B 增量」）。多轨 NLE 只评估、不实现。
+- 测试：Data 37 / Platforms **310** / Danmaku 98 / Media **166** / Desktop 94 = **705 全绿**（V0.4 基线 471；V0.5-A +7 Media、+18 Desktop；产品侧加固 +17 Media；V0.5-B +125 Platforms、+2 Media；V0.5-C Step6 +65 Platforms）。
+- 验收：V0.4 GUI 端到端通过（脚本 `.cache/v04-acceptance2.ps1`，证据 `.cache/v04b-*.png`）；V0.5-A 完成真实 API 验证（55s 音频约 11s 返回，见「V0.5-A 增量」）；本机运行规避后完成真实 GUI 录制/打开目录/ASR 验证；**V0.5-B 阶段验收通过**（YouTube 添加/监控/录制 49.97s（含音频）/剪辑波形/双版导出（含音频）/ASR，见「V0.5-B 增量」）；V0.5-C Step6 虎牙：插件、协议单测与真实探针（拉流状态 + 20s 内 86 条弹幕）通过，但本机为海外出口、虎牙 CDN 对海外网络限流，GUI 播放/录制未能完整验证（见「V0.5-C 增量」）。
+- 实现依据：`limoclip_v0_4.md`（V0.4）、`limoclip_v0_5_asr.md`（V0.5-A/B，已按实现修订 P0 偏差）；`code_artifact.md` 已更新为 v1.9。
+- **V0.5-B 已完成并通过阶段 B 验收；V0.5-C 进行中：Step6 虎牙已完成（插件 + 单测 + 真实探针），Step7 斗鱼 / Step8 抖音 / Step9 联调打包待做**（用户同意按 B→C 串行推进，恢复开发先读本文件「新 session 首条消息」「V0.5-B 增量」「V0.5-C 增量」）。多轨 NLE 只评估、不实现。
 
 ## V0.4 已实现内容
 
@@ -87,7 +87,8 @@
 
 ## 已知限制 / 待办（V0.5）
 
-- ASR（V0.5-A 已实现并完成真实 API 验收）；平台/插件热更新底座与 YouTube（V0.5-B 已实现并通过阶段验收，见「V0.5-B 增量」）；虎牙/斗鱼/抖音（V0.5-C 未开始）。
+- ASR（V0.5-A 已实现并完成真实 API 验收）；平台/插件热更新底座与 YouTube（V0.5-B 已实现并通过阶段验收）；虎牙（V0.5-C Step6 已实现，见「V0.5-C 增量」）；斗鱼/抖音（V0.5-C Step7/8 未开始）。
+- **虎牙 CDN 对海外/非大陆网络限流**：本机出口 IP 为台湾，实测虎牙 FLV/HLS 仅能拉取约 0.5~5 秒即被服务端断开（多条 CDN 线路一致，与客户端/UA/参数无关），故本机无法完成虎牙监控/录制的 GUI 验收；国内网络需实测。
 - 产品侧加固（已完成，见文末「后续修复 · 产品侧加固」）：录制前目录可写性预检、`ffmpeg exit -13 / Permission denied` 中文提示与建议目录、「打开目录」失败提示，启动器 `scripts/refresh-and-run.ps1` 已入库。
 - V0.5-A 小尾巴：GUI 二次点击命中缓存未复测；`TestConnectionAsync` 走 `GET /models`，少数服务不暴露该接口时会显示失败（不影响真实转写）。
 - 本机「工作区内可执行文件写沙箱」根因未根治（AliPaladin/安全软件嫌疑未证实，`sc stop` 被拒），当前只能靠工作区外运行规避；普通用户机器不受影响。
@@ -151,7 +152,7 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 
 ## 新 session 首条消息（可直接复制）
 
-> 阅读 `HANDOFF.md`、`limoclip_v0_5_asr.md`，先核对 `git log --oneline -8` 与全量测试（build + 五套测试，应为 **640 全绿**）。V0.5-A、V0.5-B（插件热更新底座 + YouTube）、产品侧加固均已完成并验收；**下一步是 V0.5-C（虎牙/斗鱼/抖音），按 B→C 串行推进**。恢复开发前先读「V0.5-B 增量」「V0.5-A 增量」与「本机运行限制」；本机运行一律使用仓库启动器 `scripts/refresh-and-run.ps1`（桌面快捷方式也指向它），不要直接运行工作区内 bin 下的 exe。插件签名私钥不在仓库内，需向用户索取或使用环境变量 `LIVEMONITOR_PLUGIN_KEY`。
+> 阅读 `HANDOFF.md`、`limoclip_v0_5_asr.md`，先核对 `git log --oneline -8` 与全量测试（build + 五套测试，应为 **705 全绿**）。V0.5-A、V0.5-B、产品侧加固均已完成并验收，V0.5-C Step6 虎牙已完成；**下一步是 V0.5-C Step7 斗鱼、Step8 抖音、Step9 联调打包**。恢复开发前先读「V0.5-B 增量」「V0.5-A 增量」与「本机运行限制」；本机运行一律使用仓库启动器 `scripts/refresh-and-run.ps1`（桌面快捷方式也指向它），不要直接运行工作区内 bin 下的 exe。插件签名私钥不在仓库内，需向用户索取或使用环境变量 `LIVEMONITOR_PLUGIN_KEY`。
 
 ## V0.5-A 增量（2026-11-23）：剪辑台语音识别（ASR）
 
@@ -300,3 +301,23 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 - 启动器入库：新增 `scripts/refresh-and-run.ps1`（UTF-8 BOM，PS 5.1 兼容），参数 `-SkipBuild` / `-NoLaunch` / `-RunDirectory`；`$repo` 由 `$PSScriptRoot` 推导，自动检测便携 SDK（无便携 SDK 时用 PATH 的 `dotnet`），缺省输出 `%LOCALAPPDATA%\LimoClip\run`，可用 `LIVEMONITOR_RUN_DIR` 覆盖；失败红字报错 + 暂停 + transcript 日志。本机桌面快捷方式已改为指向该脚本并带 `-RunDirectory E:\LimoClip-v05-run`；`C:\Users\Administrator\LimoClip\refresh-and-run.ps1` 保留为转发器。
 - 测试：新增 `tests/LiveMonitor.Media.Tests/RecordingDirectoryGuardTests.cs` 17 个用例（缺省目录创建、空白/文件路径拒绝并带建议、权限错误分类、非权限错误保持原格式、stderr 截断、目录解析）；五套 **513 全绿**、构建 0 错误。
 - 验证：用仓库启动器从工作区完整执行「构建 → 复制 → 启动」exit 0，副本启动 PID 37260。
+
+
+## V0.5-C 增量（2026-11-23）：虎牙平台插件（Step6）
+
+### 状态
+
+- 完成：虎牙插件（移动端拉流接口 + 新 wsapi Tars 弹幕协议），提交 `2c2ca42`（功能）与 `1b6d0ac`（移除诊断日志）。
+- 校验：解决方案 build 0 错误；五套测试 **705 全绿**（Platforms 245→310，新增虎牙 65 个用例）。
+- 真实探针（`.cache/huyaprobe`）：房间 60066（杨齐家丶）`LIVE=True`、画质「蓝光20M」；新 wsapi 弹幕 20 秒收到 **86 条**。
+- **本机限制**：本机出口 IP 为台湾，虎牙 CDN 对海外拉流限制（实测约 0.5~5 秒决断开），GUI 监控画面会在播放 1 帧后显示「直播流已结束」；录制/GUI 验收需国内网络实测。
+
+### 实现要点
+
+- `src/LiveMonitor.Plugins.Huya/`：`HuyaUrlParser`（huya.com 链接/数字房间号/个性域名）、`HuyaApiClient`（`mp.huya.com` Live profileRoom JSON + 个性域名缓存解析 gzip 房间页）、`HuyaTars`（Tars/Wup 最小子集编解码）、`HuyaPacketParser`（wsapi 订阅包、cmd7/22 弹幕解析）、`HuyaDanmakuClient`（ClientWebSocket + 主动断开不触发 Disconnected）、`HuyaProvider`（单档画质，匿名下取 iBitRate==0 最高档）、`HuyaPlugin`。
+- 协议结论：旧 `cdnws.api.huya.com` 进房协议已半废弃（只推 10 多秒），实现改用 `wss://wsapi.huya.com/?baseinfo=<base64 Tars>` + cmd16 订阅 `live:<uid>` / `chat:<uid>`；Tars 头字节 `(tag<<4)|type`、大端整型、zero tag 优化。.NET ClientWebSocket 默认不请求 permessage-deflate，避开了 OkHttp 会窗口 2 秒后停推的坑。
+- 平台注册：`LiveMonitor.Platforms.csproj` 引用虎牙插件；`BuiltInPlatformPlugins.CreateAll()` 加 `new HuyaPlugin()`；平台展示映射此前已存在。
+
+### 新 session 首条消息（V0.5-C 阶段）
+
+- 继续 V0.5-C：Step7 斗鱼（Jint 执行 `ub98484234` 签名 + STT 键值对弹幕 + extraScripts 热更新），然后 Step8 抖音（ttwid + Protobuf PushFrame→Gzip→Response→Ack），Step9 全平台联调 + v0.5.0 打包准备。main 小步提交；GUI 验收从 `E:\LimoClip-v05-run`；注意本机海外网络对国内平台直播 CDN 的限制。
