@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -10,6 +11,8 @@ using LiveMonitor.Danmaku;
 using LiveMonitor.Desktop.Services;
 using LiveMonitor.Platforms;
 using LiveMonitor.Platforms.Plugins;
+using Button = Avalonia.Controls.Button;
+using Color = Avalonia.Media.Color;
 
 namespace LiveMonitor.Desktop.Views;
 
@@ -43,6 +46,9 @@ public partial class SettingsWindow : Window
     /// <summary>组件与插件更新操作进行中（用于禁用按钮并阻止重入）。</summary>
     private bool _updateBusy;
 
+    /// <summary>各平台账号状态文本（按平台索引，登录/清除后统一刷新）。</summary>
+    private readonly Dictionary<PlatformType, TextBlock> _accountStatusTexts = new();
+
     public SettingsWindow()
     {
         InitializeComponent();
@@ -55,7 +61,70 @@ public partial class SettingsWindow : Window
         AsrPresetBox.ItemsSource = AsrSettingsStore.Presets;
         AsrLanguageBox.ItemsSource = AsrLanguageNames;
         AsrLanguageBox.SelectedIndex = 0;
+        BuildAccountRows();
         Opened += OnOpened;
+    }
+
+    /// <summary>按平台配置表动态生成账号行，避免每加一个平台就改一遍 XAML。</summary>
+    private void BuildAccountRows()
+    {
+        AccountRowsPanel.Children.Clear();
+        _accountStatusTexts.Clear();
+
+        var first = true;
+        foreach (var profile in PlatformLoginProfiles.All)
+        {
+            var row = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto"),
+                Margin = new Thickness(0, first ? 0 : 6, 0, 0),
+            };
+            first = false;
+
+            var name = new TextBlock
+            {
+                Text = profile.DisplayName,
+                FontSize = 12,
+                Foreground = new SolidColorBrush(Color.Parse("#A9B4C6")),
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            };
+            var status = new TextBlock
+            {
+                Text = "未绑定",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Color.Parse("#7C8596")),
+                Margin = new Thickness(12, 0, 12, 0),
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            };
+            var login = new Button
+            {
+                Content = "登录 " + profile.DisplayName,
+                FontSize = 11,
+                Padding = new Thickness(10, 4),
+                Tag = profile.Platform,
+            };
+            login.Click += OnPlatformLogin;
+            var clear = new Button
+            {
+                Content = "清除",
+                FontSize = 11,
+                Padding = new Thickness(10, 4),
+                Margin = new Thickness(6, 0, 0, 0),
+                Tag = profile.Platform,
+            };
+            clear.Click += OnPlatformClear;
+
+            Grid.SetColumn(name, 0);
+            Grid.SetColumn(status, 1);
+            Grid.SetColumn(login, 2);
+            Grid.SetColumn(clear, 3);
+            row.Children.Add(name);
+            row.Children.Add(status);
+            row.Children.Add(login);
+            row.Children.Add(clear);
+            AccountRowsPanel.Children.Add(row);
+            _accountStatusTexts[profile.Platform] = status;
+        }
     }
 
     private async void OnOpened(object? sender, EventArgs e)
@@ -96,17 +165,19 @@ public partial class SettingsWindow : Window
 
     private async Task LoadAccountStatusAsync()
     {
-        var bilibili = await _services.Credentials.GetCookieAsync(PlatformType.Bilibili);
-        var twitch = await _services.Credentials.GetCookieAsync(PlatformType.Twitch);
-        var bilibiliExpired = await _services.Credentials.IsExpiredAsync(PlatformType.Bilibili);
-        var twitchExpired = await _services.Credentials.IsExpiredAsync(PlatformType.Twitch);
+        foreach (var profile in PlatformLoginProfiles.All)
+        {
+            if (!_accountStatusTexts.TryGetValue(profile.Platform, out var statusText))
+            {
+                continue;
+            }
 
-        BilibiliStatus.Text = bilibili is null
-            ? (bilibiliExpired ? "未绑定（上次登录已过期）" : "未绑定")
-            : "已绑定（Cookie 已加密保存）";
-        TwitchStatus.Text = twitch is null
-            ? (twitchExpired ? "未绑定（上次登录已过期）" : "未绑定")
-            : "已绑定（Cookie 已加密保存）";
+            var cookie = await _services.Credentials.GetCookieAsync(profile.Platform);
+            var expired = await _services.Credentials.IsExpiredAsync(profile.Platform);
+            statusText.Text = cookie is null
+                ? (expired ? "未绑定（上次登录已过期）" : "未绑定")
+                : "已绑定（Cookie 已加密保存）";
+        }
     }
 
     private async Task ReloadKeywordsAsync()
@@ -361,19 +432,18 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private async void OnBilibiliLogin(object? sender, RoutedEventArgs e)
+    private async void OnPlatformLogin(object? sender, RoutedEventArgs e)
     {
-        await LoginAsync(PlatformType.Bilibili);
-    }
-
-    private async void OnTwitchLogin(object? sender, RoutedEventArgs e)
-    {
-        await LoginAsync(PlatformType.Twitch);
+        if (sender is Button { Tag: PlatformType platform })
+        {
+            await LoginAsync(platform);
+        }
     }
 
     private async Task LoginAsync(PlatformType platform)
     {
-        StatusText.Text = platform == PlatformType.Bilibili ? "正在打开 B 站登录窗…" : "正在打开 Twitch 登录窗…";
+        var displayName = WebViewLoginService.DisplayName(platform);
+        StatusText.Text = $"正在打开 {displayName} 登录窗…";
         try
         {
             var cookie = await _loginService.LoginAsync(platform);
@@ -385,9 +455,7 @@ public partial class SettingsWindow : Window
 
             await _services.Credentials.SaveAsync(platform, null, cookie);
             await LoadAccountStatusAsync();
-            StatusText.Text = platform == PlatformType.Bilibili
-                ? "B 站登录态已保存（DPAPI）。"
-                : "Twitch 登录态已保存（DPAPI）。";
+            StatusText.Text = $"{displayName} 登录态已保存（DPAPI）。";
         }
         catch (Exception ex)
         {
@@ -395,14 +463,12 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private async void OnClearBilibili(object? sender, RoutedEventArgs e)
+    private async void OnPlatformClear(object? sender, RoutedEventArgs e)
     {
-        await ClearAsync(PlatformType.Bilibili);
-    }
-
-    private async void OnClearTwitch(object? sender, RoutedEventArgs e)
-    {
-        await ClearAsync(PlatformType.Twitch);
+        if (sender is Button { Tag: PlatformType platform })
+        {
+            await ClearAsync(platform);
+        }
     }
 
     private async Task ClearAsync(PlatformType platform)
@@ -411,7 +477,7 @@ public partial class SettingsWindow : Window
         {
             await _services.Credentials.RemoveAsync(platform);
             await LoadAccountStatusAsync();
-            StatusText.Text = "登录态已清除。";
+            StatusText.Text = $"{WebViewLoginService.DisplayName(platform)} 登录态已清除。";
         }
         catch (Exception ex)
         {

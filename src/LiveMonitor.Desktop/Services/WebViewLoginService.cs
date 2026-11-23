@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Runtime.InteropServices;
 using LiveMonitor.Core.Enums;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
@@ -9,12 +7,16 @@ namespace LiveMonitor.Desktop.Services;
 
 /// <summary>
 /// 在独立的 STA 线程上打开 WinForms + WebView2 登录窗。
-/// 登录成功后从 CookieManager 枚举 HttpOnly Cookie（SESSDATA / auth-token），
+/// 平台配置来自 <see cref="PlatformLoginProfiles"/>：B 站/Twitch/YouTube 会自动捕获命名 Cookie，
+/// 虎牙/斗鱼/抖音在用户点击「采集 Cookie」后捕获登录域下的全部 Cookie。
 /// 返回可直接用于 HTTP 请求的 Cookie 头；窗口关闭或超时返回 null。
 /// </summary>
 public sealed class WebViewLoginService
 {
     private static readonly TimeSpan LoginTimeout = TimeSpan.FromMinutes(5);
+
+    public static string DisplayName(PlatformType platform)
+        => PlatformLoginProfiles.TryGet(platform, out var profile) ? profile.DisplayName : platform.ToString();
 
     public async Task<string?> LoginAsync(PlatformType platform, CancellationToken ct = default)
     {
@@ -33,26 +35,7 @@ public sealed class WebViewLoginService
 
     private static void Run(PlatformType platform, TaskCompletionSource<string?> tcs, CancellationToken ct)
     {
-        var loginUrl = platform switch
-        {
-            PlatformType.Bilibili => "https://passport.bilibili.com/login",
-            PlatformType.Twitch => "https://www.twitch.tv/login",
-            _ => throw new NotSupportedException($"平台 {platform} 不支持 WebView2 登录。")
-        };
-
-        var cookieUri = platform switch
-        {
-            PlatformType.Bilibili => "https://www.bilibili.com",
-            PlatformType.Twitch => "https://www.twitch.tv",
-            _ => throw new NotSupportedException()
-        };
-
-        var cookieNames = platform switch
-        {
-            PlatformType.Bilibili => new[] { "SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "sid" },
-            PlatformType.Twitch => new[] { "auth-token", "persistent", "unique_id", "twilight-user" },
-            _ => Array.Empty<string>()
-        };
+        var profile = PlatformLoginProfiles.Get(platform);
 
         var userDataFolder = Path.Combine(
             ResolveUserDataRoot(),
@@ -102,7 +85,7 @@ public sealed class WebViewLoginService
 
             form = new WinForms.Form
             {
-                Text = platform == PlatformType.Bilibili ? "登录 B 站" : "登录 Twitch",
+                Text = $"登录 {profile.DisplayName}",
                 Width = 980,
                 Height = 760,
                 StartPosition = WinForms.FormStartPosition.CenterScreen,
@@ -111,7 +94,33 @@ public sealed class WebViewLoginService
             };
 
             webView = new WebView2 { Dock = WinForms.DockStyle.Fill };
+
+            var captureButton = new WinForms.Button
+            {
+                Text = "我已登录，采集 Cookie",
+                Dock = WinForms.DockStyle.Right,
+                Width = 170,
+            };
+            var hintLabel = new WinForms.Label
+            {
+                Dock = WinForms.DockStyle.Fill,
+                TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
+                Text = profile.CaptureAllCookies
+                    ? "登录完成后点击右侧按钮采集 Cookie。"
+                    : "登录完成后会自动捕获；若未自动完成，可点击右侧按钮手动采集。",
+                Padding = new WinForms.Padding(10, 0, 10, 0),
+            };
+            var bottomPanel = new WinForms.Panel
+            {
+                Dock = WinForms.DockStyle.Bottom,
+                Height = 46,
+            };
+            bottomPanel.Controls.Add(hintLabel);
+            bottomPanel.Controls.Add(captureButton);
+
             form.Controls.Add(webView);
+            form.Controls.Add(bottomPanel);
+
             form.FormClosed += (_, _) =>
             {
                 if (Interlocked.Exchange(ref finished, 1) == 0)
@@ -120,6 +129,42 @@ public sealed class WebViewLoginService
                 }
             };
 
+            async Task<string?> CaptureCookiesAsync()
+            {
+                // 多个 CookieUri 依次采集（如 YouTube 需要 youtube.com 与 accounts.google.com），
+                // 同名 Cookie 以先出现的为准。
+                var collected = new List<CoreWebView2Cookie>();
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var uri in profile.CookieUris)
+                {
+                    var cookies = await webView!.CoreWebView2.CookieManager.GetCookiesAsync(uri);
+                    foreach (var cookie in cookies)
+                    {
+                        if (string.IsNullOrEmpty(cookie.Value) || !seen.Add(cookie.Name))
+                        {
+                            continue;
+                        }
+
+                        collected.Add(cookie);
+                    }
+                }
+
+                var selected = profile.CaptureAllCookies
+                    ? collected
+                    : collected
+                        .Where(cookie => profile.CookieNames.Contains(cookie.Name, StringComparer.Ordinal))
+                        .ToList();
+
+                if (selected.Count == 0)
+                {
+                    return null;
+                }
+
+                var header = string.Join("; ", selected.Select(cookie => $"{cookie.Name}={cookie.Value}"));
+                Log($"captured {selected.Count} cookies: {string.Join(",", selected.Select(cookie => cookie.Name))}");
+                return header;
+            }
+
             form.Shown += async (_, _) =>
             {
                 try
@@ -127,11 +172,10 @@ public sealed class WebViewLoginService
                     Log($"creating environment {userDataFolder}");
                     var environment = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
                     await webView.EnsureCoreWebView2Async(environment);
-                    Log("webview ready; navigating " + loginUrl);
-                    webView.CoreWebView2.Navigate(loginUrl);
+                    Log("webview ready; navigating " + profile.LoginUrl);
+                    webView.CoreWebView2.Navigate(profile.LoginUrl);
 
-                    pollTimer = new WinForms.Timer { Interval = 1500 };
-                    pollTimer.Tick += async (_, _) =>
+                    captureButton.Click += async (_, _) =>
                     {
                         if (Volatile.Read(ref finished) != 0)
                         {
@@ -140,27 +184,62 @@ public sealed class WebViewLoginService
 
                         try
                         {
-                            var cookies = await webView.CoreWebView2.CookieManager.GetCookiesAsync(cookieUri);
-                            var matched = cookies
-                                .Where(cookie => cookieNames.Contains(cookie.Name, StringComparer.Ordinal))
-                                .Where(cookie => !string.IsNullOrEmpty(cookie.Value))
-                                .ToList();
-                            if (matched.Count == 0)
+                            var header = await CaptureCookiesAsync();
+                            if (string.IsNullOrWhiteSpace(header))
                             {
+                                hintLabel.Text = "未找到登录 Cookie，请确认已登录后重试。";
                                 return;
                             }
 
-                            var header = string.Join("; ", matched.Select(cookie => $"{cookie.Name}={cookie.Value}"));
-                            Log($"captured {matched.Count} cookies: {string.Join(",", matched.Select(cookie => cookie.Name))}");
                             pollTimer?.Stop();
                             Finish(header);
                         }
                         catch (Exception ex)
                         {
-                            Log("poll failed: " + ex.Message);
+                            Log("manual capture failed: " + ex.Message);
+                            hintLabel.Text = "采集 Cookie 失败：" + ex.Message;
                         }
                     };
-                    pollTimer.Start();
+
+                    // 命名 Cookie 的平台：轮询自动捕获所需的登录标记。
+                    var markers = profile.AutoCaptureMarkers;
+                    if (markers is { Count: > 0 })
+                    {
+                        pollTimer = new WinForms.Timer { Interval = 1500 };
+                        pollTimer.Tick += async (_, _) =>
+                        {
+                            if (Volatile.Read(ref finished) != 0)
+                            {
+                                return;
+                            }
+
+                            try
+                            {
+                                var cookies = await webView.CoreWebView2.CookieManager.GetCookiesAsync(profile.CookieUris[0]);
+                                var hasMarker = cookies.Any(cookie =>
+                                    markers.Contains(cookie.Name, StringComparer.Ordinal) &&
+                                    !string.IsNullOrEmpty(cookie.Value));
+                                if (!hasMarker)
+                                {
+                                    return;
+                                }
+
+                                var header = await CaptureCookiesAsync();
+                                if (string.IsNullOrWhiteSpace(header))
+                                {
+                                    return;
+                                }
+
+                                pollTimer?.Stop();
+                                Finish(header);
+                            }
+                            catch (Exception ex)
+                            {
+                                Log("poll failed: " + ex.Message);
+                            }
+                        };
+                        pollTimer.Start();
+                    }
 
                     timeoutTimer = new WinForms.Timer { Interval = (int)LoginTimeout.TotalMilliseconds };
                     timeoutTimer.Tick += (_, _) =>

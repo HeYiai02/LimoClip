@@ -19,30 +19,10 @@
                 CornerRadius="8" Padding="14">
           <StackPanel Spacing="10">
             <TextBlock Text="平台账号" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto,Auto">
-              <TextBlock Grid.Row="0" Grid.Column="0" Text="B 站"
-                         FontSize="12" Foreground="#A9B4C6" VerticalAlignment="Center" />
-              <TextBlock Grid.Row="0" Grid.Column="1" x:Name="BilibiliStatus"
-                         FontSize="11" Foreground="#7C8596" Margin="12,0"
-                         VerticalAlignment="Center" Text="未绑定" />
-              <Button Grid.Row="0" Grid.Column="2" Content="登录 B 站"
-                      FontSize="11" Padding="10,4" Click="OnBilibiliLogin" />
-              <Button Grid.Row="0" Grid.Column="3" Content="清除"
-                      FontSize="11" Padding="10,4" Margin="6,0,0,0" Click="OnClearBilibili" />
-
-              <TextBlock Grid.Row="1" Grid.Column="0" Text="Twitch"
-                         FontSize="12" Foreground="#A9B4C6" VerticalAlignment="Center"
-                         Margin="0,10,0,0" />
-              <TextBlock Grid.Row="1" Grid.Column="1" x:Name="TwitchStatus"
-                         FontSize="11" Foreground="#7C8596" Margin="12,10,0,0"
-                         VerticalAlignment="Center" Text="未绑定" />
-              <Button Grid.Row="1" Grid.Column="2" Content="登录 Twitch"
-                      FontSize="11" Padding="10,4" Margin="0,10,0,0" Click="OnTwitchLogin" />
-              <Button Grid.Row="1" Grid.Column="3" Content="清除"
-                      FontSize="11" Padding="10,4" Margin="6,10,0,0" Click="OnClearTwitch" />
-            </Grid>
+            <StackPanel x:Name="AccountRowsPanel" Spacing="6" />
             <TextBlock x:Name="AccountHint" FontSize="10" Foreground="#6B7484"
-                       TextWrapping="Wrap" />
+                       TextWrapping="Wrap"
+                       Text="支持 B 站 / Twitch / YouTube / 虎牙 / 斗鱼 / 抖音。登录态只保存在本机，使用 DPAPI 加密；YouTube 登录用于 yt-dlp 获取登录态画质，其余平台登录可用于提升画质与风控通过率。" />
           </StackPanel>
         </Border>
 
@@ -119,7 +99,7 @@
                          FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
               <TextBlock Grid.Row="1" Grid.Column="1" x:Name="PluginUpdateSummaryText" Margin="12,0"
                          FontSize="11" Foreground="#7C8596" VerticalAlignment="Center"
-                         Text="尚未检查（内置 B 站 / Twitch / YouTube）" TextWrapping="Wrap" />
+                         Text="尚未检查（内置 B 站 / Twitch / YouTube / 虎牙 / 斗鱼 / 抖音）" TextWrapping="Wrap" />
               <Button Grid.Row="1" Grid.Column="2" x:Name="CheckPluginsButton" Content="检查插件更新"
                       FontSize="11" Padding="10,4" Click="OnCheckPluginUpdates" />
               <Button Grid.Row="1" Grid.Column="3" x:Name="InstallPluginsButton" Content="下载并安装"
