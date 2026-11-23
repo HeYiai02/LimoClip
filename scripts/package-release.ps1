@@ -96,14 +96,19 @@ $OutToolsDir = Join-Path $PublishDir "tools"
 New-Item -ItemType Directory -Path $OutToolsDir -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $OutToolsDir "ffmpeg") -Force | Out-Null
 
+# 发布输出已通过 Desktop.csproj 自动带上根目录 libmpv-2.dll / yt-dlp.exe / cacert.crt 与 tools\ffmpeg\ffmpeg.exe；
+# 这里只补齐缺失项，避免把 120MB+ 的 libmpv 重复打进 tools/ 导致成品体积翻倍。
 Copy-Item (Join-Path $ToolsDir "cacert.crt") (Join-Path $OutToolsDir "cacert.crt") -Force
-Copy-Item (Join-Path $ToolsDir "libmpv-2.dll") (Join-Path $OutToolsDir "libmpv-2.dll") -Force
-Copy-Item (Join-Path $ToolsDir "yt-dlp.exe") (Join-Path $OutToolsDir "yt-dlp.exe") -Force
-Copy-Item (Join-Path $ToolsDir "ffmpeg\ffmpeg.exe") (Join-Path $OutToolsDir "ffmpeg\ffmpeg.exe") -Force
+if (-not (Test-Path (Join-Path $OutToolsDir "ffmpeg\ffmpeg.exe"))) {
+    Copy-Item (Join-Path $ToolsDir "ffmpeg\ffmpeg.exe") (Join-Path $OutToolsDir "ffmpeg\ffmpeg.exe") -Force
+}
 
-# 兼容程序直接从根目录加载 libmpv-2.dll 的场景
+# 兼容程序直接从根目录加载 libmpv-2.dll / yt-dlp.exe 的场景
 if (-not (Test-Path (Join-Path $PublishDir "libmpv-2.dll"))) {
     Copy-Item (Join-Path $ToolsDir "libmpv-2.dll") (Join-Path $PublishDir "libmpv-2.dll") -Force
+}
+if (-not (Test-Path (Join-Path $PublishDir "yt-dlp.exe"))) {
+    Copy-Item (Join-Path $ToolsDir "yt-dlp.exe") (Join-Path $PublishDir "yt-dlp.exe") -Force
 }
 
 $LicensePath = Join-Path $RepoRoot "LICENSE"
