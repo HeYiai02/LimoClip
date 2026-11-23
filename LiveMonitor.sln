@@ -37,6 +37,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LiveMonitor.Media.Tests", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LiveMonitor.Platforms.TestPlugin", "tests\LiveMonitor.Platforms.TestPlugin\LiveMonitor.Platforms.TestPlugin.csproj", "{2CBE7175-83CA-4F42-B1B0-DF81923224D1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LiveMonitor.Plugins.YouTube", "src\LiveMonitor.Plugins.YouTube\LiveMonitor.Plugins.YouTube.csproj", "{453F5918-4942-4530-803D-5719BE939DAA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -106,6 +108,10 @@ Global
 		{2CBE7175-83CA-4F42-B1B0-DF81923224D1}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2CBE7175-83CA-4F42-B1B0-DF81923224D1}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2CBE7175-83CA-4F42-B1B0-DF81923224D1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{453F5918-4942-4530-803D-5719BE939DAA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{453F5918-4942-4530-803D-5719BE939DAA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{453F5918-4942-4530-803D-5719BE939DAA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{453F5918-4942-4530-803D-5719BE939DAA}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{9597B118-CF97-4238-B837-F69DBD6C89B4} = {51692B11-722C-4BC0-A8F6-FF8CD063279E}
@@ -123,5 +129,6 @@ Global
 		{B1FDD603-AF49-477C-B531-CEC3DBD13129} = {51692B11-722C-4BC0-A8F6-FF8CD063279E}
 		{4E53AEA4-8E67-4433-A04F-4D57DDD1BF14} = {21C78379-5C0D-4A52-B7C1-5328978882EC}
 		{2CBE7175-83CA-4F42-B1B0-DF81923224D1} = {21C78379-5C0D-4A52-B7C1-5328978882EC}
+		{453F5918-4942-4530-803D-5719BE939DAA} = {51692B11-722C-4BC0-A8F6-FF8CD063279E}
 	EndGlobalSection
 EndGlobal

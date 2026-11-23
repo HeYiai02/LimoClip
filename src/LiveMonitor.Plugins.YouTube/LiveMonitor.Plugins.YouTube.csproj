@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>LiveMonitor.Plugins.YouTube</AssemblyName>
+    <RootNamespace>LiveMonitor.Plugins.YouTube</RootNamespace>
+    <!-- 平台插件：由主程序动态加载，共享 Core/Platforms.Common 类型（不随插件复制）。 -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LiveMonitor.Core\LiveMonitor.Core.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </ProjectReference>
+    <ProjectReference Include="..\LiveMonitor.Platforms.Common\LiveMonitor.Platforms.Common.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+</Project>
