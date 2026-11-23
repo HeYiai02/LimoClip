@@ -26,9 +26,9 @@
    * 断网后恢复，活跃弹幕客户端能在指数退避（3s → 10s → 30s）内自动重连。
 2. **过滤准确率**：
    * 单元测试覆盖 `BilibiliUnicycleFilter` 三条规则与 $\le 6$ 字短情绪词豁免；Twitch 弹幕确认仅过 `KeywordFilter`、不进入独轮车判定。
-   * 真实 B站高热度直播间挂载测试，独轮车拦截计数实时更新且无明显误杀正常互动。
+   * 真实 B站高热度直播间挂载测试，独轮车拦截**用户数**实时更新且无明显误杀正常互动。
 3. **渲染与高能空跑**：
-   * 6~9 路高热度直播间同时开启画面弹幕预览，UI 操作流畅无明显卡顿（记录相对 V0.1 基线的 CPU/内存增量）；若出现掉帧，记录数据以决定是否切入 `libmpv` 内置 `libass` 通道。
+   * 6~9 路高热度直播间同时开启画面弹幕预览，UI 操作无明显卡顿；若出现掉帧，记录数据以决定是否切入 `libmpv` 内置 `libass` 通道。**性能对比已确认不做**（不再与 V0.1 基线比对 CPU/内存/帧率）。
    * 高能检测器在冷清直播间（每分钟 $< 10$ 条弹幕）不产生误报；在真实团战/名场面爆发时能在 10 秒内准确打出 `HighlightEvent` 日志。
 
 ---
@@ -699,11 +699,11 @@ public sealed class BilibiliUnicycleFilter : IDanmakuFilter
   * 实现 `KeywordFilter`（联动 SQLite `DanmakuBlockKeywords` 热更新）、`BilibiliUnicycleFilter`（补齐三条规则与短词豁免单测）、`SlidingWindowDetector` 与按 `(Platform, RoomId)` 引用计数复用的 `DanmakuManager`。
   * *实际实现*：另加 `HighlightSettingsStore`（参数持久化）与 `HighlightEventRepository`（高能事件落盘，`HighlightEvents` 表）；manager 退避 3/10/30/60s、批量 50ms、`ReloadSettingsAsync`/`UpdateHighlightRulesAsync`/`SetUnicycleEnabledAsync` 热更新。Danmaku 88 测试、Data 21 测试。独轮车过滤器追加 `[表情]` 长度折算与 `IsSticker` 大表情豁免（2026-11-23 追加）。
 - [x] **Step 5：接入 `DanmakuOverlay` 与高能事件流面板（1.5 天）**
-  * 激活分屏底部控制条的「弹幕开/关」按钮与设置页开关，实现带同屏上限的 `DanmakuOverlay`（确保主分屏与焦点浮层共享单路弹幕流）；在主界面增加可折叠的「高能打点日志」面板与状态栏独轮车拦截计数。
+  * 激活分屏底部控制条的「弹幕开/关」按钮与设置页开关，实现带同屏上限的 `DanmakuOverlay`（确保主分屏与焦点浮层共享单路弹幕流）；在主界面增加可折叠的「高能打点日志」面板与状态栏「独轮车已拦: N 人」用户数计数。
   * *实际实现*：全局总闸只停渲染、不断连；面板放在工作区右侧叠加层（不写 Dock 结构）；设置页开放正则词条与高能参数卡片，关闭设置即热更新；启动回填最近 200 条高能事件。表情渲染默认文本化（`[doge]` / `[表情名]`），并新增 `DanmakuStickerVisible` 开关，纯表情包可仅统计不渲染（2026-11-23 追加）。
-- [~] **Step 6：真实直播联调与性能对比验收（1 天）**
-  * 对比 V0.1 基准数据，测试 6~9 路高热度直播间全开弹幕的 UI 帧率与内存占用；挂机验证 B站独轮车拦截准确率与高能检测阈值稳定性。
-  * *当前状态*：自动化测试与本地构建全部通过；**真实网络验证已完成**——B站 `getDanmuInfo` 补 WBI 签名后游客态收弹幕 24 条（房间 21452505）、Twitch 匿名 IRC 收弹幕 3 条（ludwig）、GUI 启动冒烟正常。剩余人工挂机：弹幕海性能、独轮车误杀率、高能阈值稳定性、B站登录态 uid 非 0。
+- [~] **Step 6：真实直播联调与人工验收（1 天；性能对比已确认不做）**
+  * 真实网络联调（WBI 签名、B站/Twitch 收弹幕、GUI 启动冒烟）已完成；人工部分验证 B站独轮车拦截准确率与高能检测阈值稳定性。
+  * *当前状态*：自动化测试与本地构建全部通过；**真实网络验证已完成**——B站 `getDanmuInfo` 补 WBI 签名后游客态收弹幕 24 条（房间 21452505）、Twitch 匿名 IRC 收弹幕 3 条（ludwig）、GUI 启动冒烟正常。剩余人工挂机：独轮车误杀率、高能阈值稳定性、B站登录态 uid 非 0；**不再做性能对比**。
 
 ---
 
@@ -740,4 +740,14 @@ public sealed class BilibiliUnicycleFilter : IDanmakuFilter
   - `DanmakuOverlay` 改为 `Segment` 混排（文本段 + 22px 高图片段），新增 `ShowEmoteImages`；`AppSettingKeys.DanmakuEmoteImagesVisible`（默认开）与设置页「显示表情图片（静态，多屏时建议关闭）」开关；`MpvPlayerView` / `MainWindowViewModel` 透传。
   - 同期渲染循环改为多窗格共享 `DanmakuRenderTicker`（60fps，替代每窗格 30fps DispatcherTimer）。
   - 测试 +8（`DanmakuEmoteTextTests`）；Release 全仓库 **310/310**。真实直播间（1741667419）截图验证行内表情显示为静态小图，关闭开关后退回 `[表情]` 文本。
+
+---
+
+## 9. 独轮车计数口径追加（2026-11-23）
+
+- 需求：状态栏「独轮车已拦」改为按**被拦截的用户数量**统计，而不是被拦截弹幕条数（同一用户多次刷屏只计 1 人）。
+- 实现：`DanmakuManager` 新增 `_unicycleBlockedUsers`（`HashSet<(PlatformType, string SenderUid)>` + 锁）；`OnUnicycleBlocked(session, message)` 去重后仅在新增用户时更新 `UnicycleBlockedUserCount` 并触发 `UnicycleBlockedUserCountChanged`（跨房间按 `(Platform, SenderUid)` 去重）；`DanmakuSessionHandle.BlockedCount` 改为 `BlockedUserCount`（该句柄观测到的被拦截不同用户数）；`BilibiliUnicycleFilter.BlockedCount` 仍为过滤器内部拦截条数（仅供单测，不对外）。
+- 界面：状态栏文案改为「独轮车已拦: N 人」。
+- 测试：新增「同一用户多条只计 1」「不同用户累加」「同一 uid 跨房间只计 1」覆盖；Danmaku 96、全仓库 **311/311**（Data 21、Platforms 120、Danmaku 96、Desktop 74）。
+- 文档口径：Step 6 剩余人工项与后续建议中移除性能对比要求（用户确认不做），HANDOFF/README 同步。
 

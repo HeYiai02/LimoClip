@@ -163,37 +163,67 @@ public class DanmakuManagerTests
         Assert.Equal(new[] { "hello", "world" }, received.Select(message => message.Content));
         await Task.Delay(100);
         Assert.Equal(2, handle.MessageCount);
-        Assert.Equal(0, handle.BlockedCount);
-        Assert.Equal(0, harness.Manager.UnicycleBlockedCount);
+        Assert.Equal(0, handle.BlockedUserCount);
+        Assert.Equal(0, harness.Manager.UnicycleBlockedUserCount);
     }
 
     [Fact]
-    public async Task UnicycleBlocked_IncrementsHandleAndGlobalCounts_AndRaisesEvent()
+    public async Task UnicycleBlocked_CountsDistinctUsersOnce_AndRaisesEvent()
     {
         await using var harness = new DanmakuManagerHarness();
         harness.Settings.Seed(AppSettingKeys.BlockUnicycleEnabled, "true");
         await harness.InitializeAsync();
 
         var handle = harness.Manager.Acquire(PlatformType.Bilibili, "1001");
-        var messagesTask = CollectBatchesAsync(handle, 2);
-        var globalCountTask = NextUnicycleCountAsync(harness.Manager, atLeast: 2);
+        var globalCountTask = NextUnicycleUserCountAsync(harness.Manager, atLeast: 2);
         var client = await WaitForSessionClientAsync(harness);
 
+        // 同一用户连发 4 条长文本：前两条放行，触发规则后第 3、4 条被拦；只应计 1 个用户。
         client.RaiseMessage(TestDanmaku.Create("第一条超长弹幕内容AAAAAAAAAAAA", uid: "9999"));
         client.RaiseMessage(TestDanmaku.Create("第二条超长弹幕内容BBBBBBBBBBBB", uid: "9999"));
         client.RaiseMessage(TestDanmaku.Create("第三条超长弹幕内容CCCCCCCCCCCC", uid: "9999"));
         client.RaiseMessage(TestDanmaku.Create("第四条超长弹幕内容DDDDDDDDDDDD", uid: "9999"));
 
+        await TestWait.WaitUntilAsync(() => handle.BlockedUserCount == 1, message: "同一用户只计一次");
+        Assert.Equal(1, handle.BlockedUserCount);
+        Assert.Equal(1, harness.Manager.UnicycleBlockedUserCount);
+
+        // 另一用户独立触发，累计被拦截用户数 +1。
+        client.RaiseMessage(TestDanmaku.Create("第五六条超长弹幕内容EEEEEEEE", uid: "8888"));
+        client.RaiseMessage(TestDanmaku.Create("第六六条超长弹幕内容FFFFFF", uid: "8888"));
+        client.RaiseMessage(TestDanmaku.Create("第七六条超长弹幕内容GGGGGG", uid: "8888"));
+
         var globalCount = await globalCountTask.WaitAsync(ShortWait);
         Assert.Equal(2, globalCount);
-        Assert.Equal(2, harness.Manager.UnicycleBlockedCount);
+        Assert.Equal(2, handle.BlockedUserCount);
+        Assert.Equal(2, harness.Manager.UnicycleBlockedUserCount);
+        await TestWait.WaitUntilAsync(() => handle.MessageCount == 4, message: "被拦消息不进入渲染批次");
+    }
 
-        var received = await messagesTask.WaitAsync(ShortWait);
-        Assert.Equal(2, received.Count);
-        Assert.Equal(2, handle.BlockedCount);
-        await TestWait.WaitUntilAsync(() => handle.MessageCount == 2, message: "拦截消息不进入渲染批次");
-        await Task.Delay(100);
-        Assert.Equal(2, handle.MessageCount);
+    [Fact]
+    public async Task UnicycleBlocked_SameUserAcrossRooms_CountsOnce()
+    {
+        await using var harness = new DanmakuManagerHarness();
+        harness.Settings.Seed(AppSettingKeys.BlockUnicycleEnabled, "true");
+        await harness.InitializeAsync();
+
+        var handle1 = harness.Manager.Acquire(PlatformType.Bilibili, "1001");
+        var handle2 = harness.Manager.Acquire(PlatformType.Bilibili, "1002");
+        var client1 = await WaitForSessionClientAsync(harness, roomId: "1001");
+        var client2 = await WaitForSessionClientAsync(harness, roomId: "1002");
+
+        // 同一 uid 在两个房间都被独轮车拦截：全局用户数仍只 +1。
+        client1.RaiseMessage(TestDanmaku.Create("第一条超长弹幕内容AAAAAAAAAAAA", uid: "9999", roomId: "1001"));
+        client1.RaiseMessage(TestDanmaku.Create("第二条超长弹幕内容BBBBBBBBBBBB", uid: "9999", roomId: "1001"));
+        client1.RaiseMessage(TestDanmaku.Create("第三条超长弹幕内容CCCCCCCCCCCC", uid: "9999", roomId: "1001"));
+
+        client2.RaiseMessage(TestDanmaku.Create("第四条超长弹幕内容DDDDDDDDDDDD", uid: "9999", roomId: "1002"));
+        client2.RaiseMessage(TestDanmaku.Create("第五条超长弹幕内容EEEEEEEEEEEE", uid: "9999", roomId: "1002"));
+        client2.RaiseMessage(TestDanmaku.Create("第六条超长弹幕内容FFFFFFFFFFFF", uid: "9999", roomId: "1002"));
+
+        await TestWait.WaitUntilAsync(() => handle1.BlockedUserCount == 1, message: "房间 1 计到该用户");
+        await TestWait.WaitUntilAsync(() => handle2.BlockedUserCount == 1, message: "房间 2 计到该用户");
+        Assert.Equal(1, harness.Manager.UnicycleBlockedUserCount);
     }
 
     [Fact]
@@ -212,8 +242,8 @@ public class DanmakuManagerTests
 
         var received = await messagesTask.WaitAsync(ShortWait);
         Assert.Equal(3, received.Count);
-        Assert.Equal(0, handle.BlockedCount);
-        Assert.Equal(0, harness.Manager.UnicycleBlockedCount);
+        Assert.Equal(0, handle.BlockedUserCount);
+        Assert.Equal(0, harness.Manager.UnicycleBlockedUserCount);
     }
 
     [Fact]
@@ -230,7 +260,7 @@ public class DanmakuManagerTests
         client.RaiseMessage(TestDanmaku.Create("第二条超长弹幕内容BBBBBBBBBBBB", uid: "9999"));
         client.RaiseMessage(TestDanmaku.Create("第三条超长弹幕内容CCCCCCCCCCCC", uid: "9999"));
         await messagesTask.WaitAsync(ShortWait);
-        Assert.Equal(0, handle.BlockedCount);
+        Assert.Equal(0, handle.BlockedUserCount);
 
         Assert.True(await harness.Manager.SetUnicycleEnabledAsync(true));
         Assert.Equal("true", harness.Settings.Snapshot[AppSettingKeys.BlockUnicycleEnabled]);
@@ -239,15 +269,15 @@ public class DanmakuManagerTests
         client.RaiseMessage(TestDanmaku.Create("第六条超长弹幕内容FFFFFFFFFFFF", uid: "9999"));
         client.RaiseMessage(TestDanmaku.Create("第七条超长弹幕内容GGGGGGGGGGGG", uid: "9999"));
 
-        await TestWait.WaitUntilAsync(() => handle.BlockedCount == 1, message: "启用后热更新过滤器");
+        await TestWait.WaitUntilAsync(() => handle.BlockedUserCount == 1, message: "启用后热更新过滤器");
         await TestWait.WaitUntilAsync(() => handle.MessageCount == 5, message: "启用后放行前两条长文");
-        Assert.Equal(1, harness.Manager.UnicycleBlockedCount);
+        Assert.Equal(1, harness.Manager.UnicycleBlockedUserCount);
 
         Assert.True(await harness.Manager.SetUnicycleEnabledAsync(false));
         Assert.Equal("false", harness.Settings.Snapshot[AppSettingKeys.BlockUnicycleEnabled]);
         client.RaiseMessage(TestDanmaku.Create("第八条超长弹幕内容HHHHHHHHHHHH", uid: "9999"));
         await TestWait.WaitUntilAsync(() => handle.MessageCount == 6, message: "关闭后全部放行");
-        Assert.Equal(1, handle.BlockedCount);
+        Assert.Equal(1, handle.BlockedUserCount);
     }
 
     [Fact]
@@ -631,11 +661,11 @@ public class DanmakuManagerTests
         return completion.Task;
     }
 
-    /// <summary>订阅下一次达到阈值的全局独轮车拦截计数。</summary>
-    private static Task<int> NextUnicycleCountAsync(DanmakuManager manager, int atLeast)
+    /// <summary>订阅下一次达到阈值的全局独轮车拦截用户数。</summary>
+    private static Task<int> NextUnicycleUserCountAsync(DanmakuManager manager, int atLeast)
     {
         var completion = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-        manager.UnicycleBlockedCountChanged += count =>
+        manager.UnicycleBlockedUserCountChanged += count =>
         {
             if (count >= atLeast)
             {

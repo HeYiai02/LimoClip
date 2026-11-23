@@ -70,7 +70,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private DispatcherTimer? _focusHintTimer;
     private bool _isFocusHintVisible;
     private bool _isHighlightPanelVisible;
-    private int _unicycleBlockedCount;
+    private int _unicycleBlockedUserCount;
     private const int MaxHighlightEvents = 200;
 
     // V0.2 弹幕：订阅所有权放在 ViewModel（不挂视觉树），每个窗格一条引用计数句柄。
@@ -160,8 +160,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _isHealthWarning, value);
     }
 
-    /// <summary>V0.2：由 DanmakuManager 推送的累计拦截数（当前会话）。</summary>
-    public string UnicycleBlockedText => $"独轮车已拦: {_unicycleBlockedCount}";
+    /// <summary>V0.2：由 DanmakuManager 推送的累计被拦截用户数。</summary>
+    public string UnicycleBlockedText => $"独轮车已拦: {_unicycleBlockedUserCount} 人";
 
     public string StatusText
     {
@@ -258,22 +258,22 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public bool IsHighlightEventsEmpty => HighlightEvents.Count == 0;
 
-    /// <summary>更新状态栏「独轮车已拦」计数（UI 线程或后台线程均可调用）。</summary>
-    public void SetUnicycleBlockedCount(int count)
+    /// <summary>更新状态栏「独轮车已拦」用户数（UI 线程或后台线程均可调用）。</summary>
+    public void SetUnicycleBlockedUserCount(int count)
     {
         if (!Dispatcher.UIThread.CheckAccess())
         {
-            Dispatcher.UIThread.Post(() => SetUnicycleBlockedCount(count));
+            Dispatcher.UIThread.Post(() => SetUnicycleBlockedUserCount(count));
             return;
         }
 
         var clamped = Math.Max(0, count);
-        if (clamped == _unicycleBlockedCount)
+        if (clamped == _unicycleBlockedUserCount)
         {
             return;
         }
 
-        _unicycleBlockedCount = clamped;
+        _unicycleBlockedUserCount = clamped;
         OnPropertyChanged(nameof(UnicycleBlockedText));
     }
 
@@ -381,7 +381,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         await _services.Danmaku.InitializeAsync(ct).ConfigureAwait(true);
         _danmakuReady = true;
         _services.Danmaku.HighlightTriggered += OnDanmakuHighlightTriggered;
-        _services.Danmaku.UnicycleBlockedCountChanged += SetUnicycleBlockedCount;
+        _services.Danmaku.UnicycleBlockedUserCountChanged += SetUnicycleBlockedUserCount;
 
         var recent = await _services.Danmaku
             .GetRecentHighlightEventsAsync(MaxHighlightEvents, ct)

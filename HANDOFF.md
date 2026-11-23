@@ -1,12 +1,12 @@
-﻿# LiveMonitor V0.2 交接（弹幕引擎与高能空跑）
+# LiveMonitor V0.2 交接（弹幕引擎与高能空跑）
 
 ## 状态
 
-- 仓库：`E:\code\liveSurveilance`，分支 `main`；最近提交 `95173db`（`feat(desktop): render emotes and share a 60fps danmaku render ticker`）与 `15c7bad`（`feat(danmaku): parse emote metadata and exempt/fold emotes in unicycle filter`）；工作树干净。
+- 仓库：`E:\code\liveSurveilance`，分支 `main`；最近提交见 `git log --oneline -5`（本轮为独轮车计数口径修正，前序 `95173db`、`15c7bad`、`690a4d6`）；工作树干净。
 - 构建：`dotnet build LiveMonitor.sln -c Release` 0 错误；已知警告仅 `MSB3277`（WebView2/WPF WindowsBase 冲突）、`CS9057`（Dock 分析器版本）、`WFAC010`、`AVLN3001`。
-- 测试：**310/310 通过** —— Data 21、Platforms 120、Danmaku 95、Desktop 74（Release）。
+- 测试：**311/311 通过** —— Data 21、Platforms 120、Danmaku 96、Desktop 74（Release）。
 - 工程：新增 `src/LiveMonitor.Danmaku`、`tests/LiveMonitor.Danmaku.Tests`，解决方案现 **12 个工程**。
-- 文档：`code_artifact.md` v1.4（长期架构）、`limoclip_v0_2.md`（V0.2 设计与实施记录）、`STEP8_REPORT.md`（V0.1 性能基线，仍是当前唯一整机压测数据）。
+- 文档：`code_artifact.md` v1.4（长期架构）、`limoclip_v0_2.md`（V0.2 设计与实施记录）、`STEP8_REPORT.md`（V0.1 性能基线，仅作历史参考；已确认不再做 Step 6 性能对比）。
 - 第三方二进制：`tools/` 下 `libmpv-2.dll`、`yt-dlp.exe`、`ffmpeg/`、`mpv/` 仍被 `.gitignore` 排除，按 `tools/README.md` 准备；`tools/cacert.crt` 已入库。
 
 ## V0.2 已实现内容
@@ -29,7 +29,7 @@
 - `Filters/BilibiliUnicycleFilter`：≤6 字短情绪词与游客 uid=0 放行、10 分钟静默、30s 长文本 / 15s 完全一致 / 60s 机械复读、15 分钟无发言状态驱逐；`FoldEmotes` 把每个 `[表情]` 折算 1 字符后再算长度/归一化，`IsSticker` 纯表情包直接放行（避免表情连发被误杀）。
 - `Analyzers/SlidingWindowDetector`：按房间 1 秒环形桶，加权短窗/基线、绝对条数下限、冷却、`666/草/神回/Pog` +0.5 权重。
 - `HighlightSettingsStore`：通过 `IAppSettingsRepository` 读写高能参数（InvariantCulture，非法值回落默认）。
-- `DanmakuManager`：按 `(Platform, RoomId)` 引用计数共享连接；Acquire 返回 `DanmakuSessionHandle`（批量 50ms `MessagesReceived`）；管线 = KeywordFilter → BilibiliUnicycleFilter → SlidingWindowDetector → 批量渲染；高能事件事件广播 + 异步落盘；退避 3s→10s→30s→60s（稳定 30s 重置），可注入 delay/clock；`ReloadSettingsAsync` / `UpdateHighlightRulesAsync` / `SetUnicycleEnabledAsync` 热更新；`DisposeAsync` 断连 + flush。
+- `DanmakuManager`：按 `(Platform, RoomId)` 引用计数共享连接；Acquire 返回 `DanmakuSessionHandle`（批量 50ms `MessagesReceived`）；管线 = KeywordFilter → BilibiliUnicycleFilter → SlidingWindowDetector → 批量渲染；高能事件事件广播 + 异步落盘；退避 3s→10s→30s→60s（稳定 30s 重置），可注入 delay/clock；`ReloadSettingsAsync` / `UpdateHighlightRulesAsync` / `SetUnicycleEnabledAsync` 热更新；`DisposeAsync` 断连 + flush。独轮车计数按「被拦截的不同用户数」统计（全局 key=`(Platform, SenderUid)`，跨房间去重，同一用户只计一次），事件 `UnicycleBlockedUserCountChanged` 推送累计用户数。
 
 ### Data
 
@@ -43,7 +43,7 @@
 - `MainWindowViewModel`：`_danmakuHandles` + `SyncDanmakuSubscriptions()` 在房间增删/换位/方案加载/重建/启动全部路径 reconcile；订阅只跟「房间在工作区」绑定；消息批量 UI 线程投递（tile 播放器 + 焦点浮层）；`InitializeDanmakuAsync` 启动回填高能事件；`ApplyDanmakuMasterSettingAsync` 应用全局总闸；`Dispose` 释放订阅并最多等 2s flush。
 - 焦点浮层：`ToggleFocusAsync` 里 `new MpvPlayerView { DataContext = tile }` 修复弹幕开关/标题绑定；同房间共享连接（不额外 Acquire）。
 - 高能事件面板：工作区右侧叠加 `Border`（不塞 Dock，避免污染 `DockLayoutJson`）；顶栏「高能事件」开关；内存 200 条 + 清空/收起 + 空态。
-- 状态栏：`UnicycleBlockedText` 接 manager 全局累计拦截数。
+- 状态栏：`UnicycleBlockedText` 接 manager 全局累计被拦截用户数（显示为「独轮车已拦: N 人」，同一用户只计一次）。
 - 设置页：屏蔽词条新增「正则」勾选；新增高能参数卡片（短窗/基线/倍数/绝对下限/冷却/加权关键词，保存/恢复默认）；新增「渲染纯表情包弹幕」开关（写 `DanmakuStickerVisible`，关闭后纯表情包仅统计与高能检测）与「显示表情图片（静态，多屏时建议关闭）」开关（写 `DanmakuEmoteImagesVisible`）；`MainWindow.OnSettings` 关闭后调用 `Danmaku.ReloadSettingsAsync()` + 重新应用全局总闸。
 
 ## 与 `limoclip_v0_2.md` 的关键偏差（以本文件为准）
@@ -56,6 +56,7 @@
 6. **面板落点**：右侧叠加层，不写 Dock 结构。
 7. **房间号**：弹幕客户端直接用 DB 中 `LiveRoom.RoomId`（B站为 `get_info` 返回的真实 room_id），不重走短号解析。
 8. **表情/表情包**：元数据保留（`IsSticker` / `Emotes`）+ 过滤防误杀（`FoldEmotes` 折算、`IsSticker` 豁免）+ 渲染可选降级；V0.2 后续按用户反馈补了「静态表情图片」渲染（默认开、可关，LRU 200 + 磁盘缓存，只解码首帧、不跑 GIF/WebP 动画）；高能统计照常计入表情弹幕；V0.4 导出 `.ass` 时行内表情保留 `[表情]` 文本。
+9. **独轮车计数口径**：按「被拦截的不同用户数」统计（全局 key=`(Platform, SenderUid)`，跨房间去重，同一用户被拦多条只计一次），不是拦截条数；状态栏显示为「独轮车已拦: N 人」。
 
 ## Step 6 真实网络验证（2026-11-22，自动化部分已完成）
 
@@ -67,12 +68,12 @@
 
 ## 已知限制 / 待验收
 
-1. **Step 6 剩余项（人工）**：6~9 路高热度直播间弹幕海下的 CPU/内存/UI 帧率、独轮车误杀率、高能阈值稳定性仍需人工挂机；阈值默认值可能有误报/漏报，需要拿真实直播调。B站游客态真实收发已验证通过（见上节）；登录态（SESSDATA）下 uid 非 0 与独轮车单用户识别待验证；Twitch 真实 wss 匿名收流已验证。
+1. **Step 6 剩余项（人工）**：独轮车误杀率、高能阈值稳定性仍需人工挂机；阈值默认值可能有误报/漏报，需要拿真实直播调。B站游客态真实收发已验证通过（见上节）；登录态（SESSDATA）下 uid 非 0 与独轮车单用户识别待验证；Twitch 真实 wss 匿名收流已验证。**性能对比已确认不需要做**（不再对比 STEP8 的 CPU/内存/UI 帧率）。
 2. Twitch 匿名每连接 JOIN 限速与 20~30 路 per-room WS 压力未测；Twitch 侧不做独轮车判定（符合设计）。
 3. B站 WBI 密钥来自匿名 `nav` 接口（缓存 1h）；若该接口后续收敛匿名访问，会抛 `InvalidOperationException`（消息含 "WBI"）并按退避重连，需要再评估备选密钥获取方式。
-3. 高能落盘 `DisposeAsync` flush 无超时（仓储异常会被吞并记日志，但极端挂起时退出最多被 VM 的 2s 等待兜住）。
-4. 弹幕渲染被全局关闭时仍保持连接；移出工作区才释放。
-5. `_wiredTiles` 只增不减等 V0.1 既有问题未修（不属 V0.2 范围）。
+4. 高能落盘 `DisposeAsync` flush 无超时（仓储异常会被吞并记日志，但极端挂起时退出最多被 VM 的 2s 等待兜住）。
+5. 弹幕渲染被全局关闭时仍保持连接；移出工作区才释放。
+6. `_wiredTiles` 只增不减等 V0.1 既有问题未修（不属 V0.2 范围）。
 
 ## 构建 / 测试
 
@@ -102,7 +103,7 @@ $env:TMP = $env:TEMP
 
 ## 后续建议顺序
 
-1. 人工 Step 6 剩余部分：添加 B站热门房 + Twitch 房间，开 6~9 路弹幕与全局总闸，对比 `STEP8_REPORT.md` 记录 CPU/内存/UI 帧率；同时观察状态栏独轮车计数与高能面板。
+1. 人工 Step 6 剩余部分：添加 B站热门房 + Twitch 房间，观察状态栏「独轮车已拦: N 人」计数与高能面板；性能对比不再要求（用户已确认）。
 2. 用真实直播回调高能参数（短窗 10s / 基线 180s / 3.0× / 下限 15 / 冷却 60），必要时改默认值并补文档。
 3. 验证 B站登录态（SESSDATA）下 uid 非 0、独轮车规则生效；确认游客态提示。
 4. 提交建议按层拆分：Core+Danmaku 契约/逻辑、Platforms 弹幕客户端、Data 落盘、Desktop 集成、docs。
@@ -117,4 +118,4 @@ $env:TMP = $env:TEMP
 
 ## 新 session 首条消息（可直接复制）
 
-> 你在 `E:\code\liveSurveilance`。先读 `HANDOFF.md`、`limoclip_v0_2.md`、`code_artifact.md`、`STEP8_REPORT.md`，不要改代码。复述当前 V0.2 实现状态、build/test 结果与未提交改动范围；随后按 HANDOFF 的「后续建议顺序」做 Step 6 真实直播联调与性能记录，不重构、不改平台/焦点/音频语义。
+> 你在 `E:\code\liveSurveilance`。先读 `HANDOFF.md`、`limoclip_v0_2.md`、`code_artifact.md`、`STEP8_REPORT.md`，不要改代码。复述当前 V0.2 实现状态、build/test 结果与未提交改动范围；随后按 HANDOFF 的「后续建议顺序」做 Step 6 真实直播联调验收（性能对比已确认不做），不重构、不改平台/焦点/音频语义。

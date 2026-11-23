@@ -68,7 +68,8 @@ public sealed class DanmakuManager : IAsyncDisposable
     private bool _unicycleEnabled;
     private bool _initialized;
     private int _disposed;
-    private long _unicycleBlockedCount;
+    private readonly object _unicycleUsersGate = new();
+    private readonly HashSet<(PlatformType Platform, string SenderUid)> _unicycleBlockedUsers = new();
 
     /// <summary>
     /// 创建弹幕会话管理器。构造后仍需 <see cref="InitializeAsync"/> 才能 <see cref="Acquire"/>。
@@ -113,11 +114,20 @@ public sealed class DanmakuManager : IAsyncDisposable
     /// <summary>每次检测到高能时触发（同步于消息管线线程）；随后由管理器异步落盘。</summary>
     public event Action<HighlightEvent>? HighlightTriggered;
 
-    /// <summary>全局累计独轮车拦截条数变化时触发，参数为变化后的累计值（非增量）。</summary>
-    public event Action<int>? UnicycleBlockedCountChanged;
+    /// <summary>全局累计被拦截的独轮车用户数变化时触发，参数为变化后的累计值（非增量）。</summary>
+    public event Action<int>? UnicycleBlockedUserCountChanged;
 
-    /// <summary>全局累计拦截的独轮车弹幕条数（跨所有会话，进程生命周期内累加）。</summary>
-    public int UnicycleBlockedCount => (int)Interlocked.Read(ref _unicycleBlockedCount);
+    /// <summary>全局累计被独轮车过滤器拦截的不同用户数（跨所有会话、进程生命周期内累加）。</summary>
+    public int UnicycleBlockedUserCount
+    {
+        get
+        {
+            lock (_unicycleUsersGate)
+            {
+                return _unicycleBlockedUsers.Count;
+            }
+        }
+    }
 
     /// <summary>
     /// 读取屏蔽词、独轮车开关与高能规则。可重复调用（幂等），会热更新已存在的会话；
@@ -615,7 +625,7 @@ public sealed class DanmakuManager : IAsyncDisposable
 
         if (!allowed)
         {
-            OnUnicycleBlocked(session);
+            OnUnicycleBlocked(session, message);
             return; // 独轮车屏蔽：不进入统计与渲染。
         }
 
@@ -634,8 +644,11 @@ public sealed class DanmakuManager : IAsyncDisposable
         }
     }
 
-    private void OnUnicycleBlocked(RoomSession session)
+    private void OnUnicycleBlocked(RoomSession session, DanmakuMessage message)
     {
+        // 独轮车计数按「被拦截的不同用户数」统计：同一用户被拦多条只计 1 个用户。
+        var senderUid = string.IsNullOrWhiteSpace(message.SenderUid) ? "0" : message.SenderUid;
+
         DanmakuSessionHandle[] handles;
         lock (session.Gate)
         {
@@ -646,12 +659,22 @@ public sealed class DanmakuManager : IAsyncDisposable
         {
             if (!handle.IsDisposed)
             {
-                handle.IncrementBlockedCount();
+                handle.RecordBlockedUser(senderUid);
             }
         }
 
-        var total = (int)Interlocked.Increment(ref _unicycleBlockedCount);
-        var handler = UnicycleBlockedCountChanged;
+        int total;
+        lock (_unicycleUsersGate)
+        {
+            if (!_unicycleBlockedUsers.Add((session.Platform, senderUid)))
+            {
+                return; // 该用户此前已被计数，不重复触发变更事件。
+            }
+
+            total = _unicycleBlockedUsers.Count;
+        }
+
+        var handler = UnicycleBlockedUserCountChanged;
         if (handler is null)
         {
             return;

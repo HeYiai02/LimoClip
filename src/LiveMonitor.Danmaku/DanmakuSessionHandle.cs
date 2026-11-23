@@ -17,7 +17,8 @@ public sealed class DanmakuSessionHandle : IDisposable
     private readonly object _deliveryGate = new();
     private int _disposed;
     private long _messageCount;
-    private long _blockedCount;
+    private readonly object _blockedUsersGate = new();
+    private readonly HashSet<string> _blockedUsers = new();
 
     internal DanmakuSessionHandle(DanmakuManager manager, RoomKey key, PlatformType platform, string roomId)
     {
@@ -38,8 +39,17 @@ public sealed class DanmakuSessionHandle : IDisposable
     /// <summary>该句柄累计收到的、已通过过滤的弹幕条数（按批量投递时累计）。</summary>
     public long MessageCount => Interlocked.Read(ref _messageCount);
 
-    /// <summary>该句柄累计被独轮车过滤器拦截的弹幕条数。</summary>
-    public long BlockedCount => Interlocked.Read(ref _blockedCount);
+    /// <summary>该句柄累计观测到的被独轮车过滤器拦截的不同用户数。</summary>
+    public int BlockedUserCount
+    {
+        get
+        {
+            lock (_blockedUsersGate)
+            {
+                return _blockedUsers.Count;
+            }
+        }
+    }
 
     /// <summary>批量弹幕事件（后台线程、每 batchInterval 触发一次）。</summary>
     public event Action<IReadOnlyList<DanmakuMessage>>? MessagesReceived;
@@ -67,7 +77,13 @@ public sealed class DanmakuSessionHandle : IDisposable
         Interlocked.Add(ref _messageCount, count);
     }
 
-    internal void IncrementBlockedCount() => Interlocked.Increment(ref _blockedCount);
+    internal void RecordBlockedUser(string senderUid)
+    {
+        lock (_blockedUsersGate)
+        {
+            _blockedUsers.Add(senderUid);
+        }
+    }
 
     internal void RaiseMessages(IReadOnlyList<DanmakuMessage> batch)
     {
