@@ -1698,6 +1698,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             // 退出时落盘失败不阻塞关闭。
         }
+
+        try
+        {
+            // V0.5-B：卸载平台插件并释放插件网络客户端（放在录制/弹幕之后，避免卸载仍在使用的插件类型）。
+            _services.DisposePluginResources();
+        }
+        catch
+        {
+            // 退出时插件卸载失败不阻塞关闭。
+        }
     }
 
     private async Task SelectProfileAsync(LayoutProfile? profile)

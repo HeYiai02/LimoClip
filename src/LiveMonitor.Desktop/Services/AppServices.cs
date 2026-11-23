@@ -6,6 +6,7 @@ using LiveMonitor.Media.Asr;
 using LiveMonitor.Media.Editing;
 using LiveMonitor.Media.Recording;
 using LiveMonitor.Platforms;
+using LiveMonitor.Platforms.Plugins;
 
 namespace LiveMonitor.Desktop.Services;
 
@@ -34,6 +35,10 @@ public sealed class AppServices
         IClipExporter clips,
         IAsrProvider asr,
         AsrSettingsStore asrSettings,
+        HttpClient pluginHttpClient,
+        PlatformPluginHost pluginHost,
+        PluginUpdateService pluginUpdates,
+        CliUpdater cliUpdater,
         ProcessJobGuard clipJobGuard)
     {
         Database = database;
@@ -55,6 +60,10 @@ public sealed class AppServices
         Clips = clips;
         Asr = asr;
         AsrSettings = asrSettings;
+        _pluginHttpClient = pluginHttpClient;
+        PluginHost = pluginHost;
+        PluginUpdates = pluginUpdates;
+        CliUpdater = cliUpdater;
         _clipJobGuard = clipJobGuard;
     }
 
@@ -108,8 +117,19 @@ public sealed class AppServices
     /// <summary>V0.5-A ASR 设置读写（预设、DPAPI 加密 Key、连通性测试）。</summary>
     public AsrSettingsStore AsrSettings { get; }
 
+    /// <summary>V0.5-B 平台插件宿主：内置插件版本登记、本地插件验签加载与运行期热替换。</summary>
+    public PlatformPluginHost PluginHost { get; }
+
+    /// <summary>V0.5-B 平台插件更新服务：拉取 providers-manifest.json、下载并验签安装。</summary>
+    public PluginUpdateService PluginUpdates { get; }
+
+    /// <summary>V0.5-B yt-dlp 更新器：检查 GitHub 最新版本并原子替换 tools 下的 yt-dlp.exe。</summary>
+    public CliUpdater CliUpdater { get; }
+
     private readonly ProcessJobGuard _clipJobGuard;
+    private readonly HttpClient _pluginHttpClient;
     private bool _clipResourcesDisposed;
+    private bool _pluginResourcesDisposed;
 
     /// <summary>窗口关闭时释放导出/ASR 用的 Job Object 与网络客户端（级联结束残留 ffmpeg）。</summary>
     public void DisposeClipExportResources()
@@ -132,6 +152,34 @@ public sealed class AppServices
         try
         {
             (Asr as IDisposable)?.Dispose();
+        }
+        catch
+        {
+            // 同上。
+        }
+    }
+
+    /// <summary>窗口关闭时卸载所有平台插件并释放插件网络客户端（应在录制/弹幕释放之后调用，避免卸载仍在使用的插件类型）。</summary>
+    public void DisposePluginResources()
+    {
+        if (_pluginResourcesDisposed)
+        {
+            return;
+        }
+
+        _pluginResourcesDisposed = true;
+        try
+        {
+            PluginHost.Dispose();
+        }
+        catch
+        {
+            // 退出阶段插件卸载失败不阻塞关闭。
+        }
+
+        try
+        {
+            _pluginHttpClient.Dispose();
         }
         catch
         {
@@ -253,6 +301,28 @@ public sealed class AppServices
             () => asrSettings.GetConfigAsync(),
             asrCacheDirectory);
 
+        // V0.5-B 平台插件：共享 HttpClient 供插件清单/下载与 yt-dlp 更新检查使用；
+        // 先登记内置 B 站/Twitch 插件版本，再加载本地已安装插件（验签失败自动回退内置实现）。
+        var pluginHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        pluginHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd("LimoClip-PluginHost/1.0.0");
+        var ytDlpPath = ToolLocator.ResolveYtDlpPath();
+        var pluginHost = new PlatformPluginHost(
+            pluginHttpClient,
+            ytDlpPath,
+            platforms,
+            danmakuFactory,
+            hasActiveTasks: () => recordings.GetActiveRecordings().Count > 0);
+        foreach (var builtInPlugin in BuiltInPlatformPlugins.CreateAll())
+        {
+            pluginHost.RegisterBuiltIn(builtInPlugin);
+        }
+
+        pluginHost.LoadInstalledPlugins();        var pluginUpdates = new PluginUpdateService(
+            pluginHttpClient,
+            pluginHost,
+            PluginVersionInfo.Resolve(typeof(AppServices).Assembly));
+        var cliUpdater = new CliUpdater(ytDlpPath, pluginHttpClient);
+
         return new AppServices(
             database,
             roomRepository,
@@ -273,6 +343,10 @@ public sealed class AppServices
             clips,
             asr,
             asrSettings,
+            pluginHttpClient,
+            pluginHost,
+            pluginUpdates,
+            cliUpdater,
             clipJobGuard);
     }
 }
