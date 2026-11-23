@@ -40,7 +40,7 @@ public sealed class DouyinProvider : IPlatformProvider
         string? authCookie = null,
         CancellationToken ct = default)
     {
-        var snapshot = await _api.GetRoomAsync(NormalizeRoomToken(roomId), ct).ConfigureAwait(false);
+        var snapshot = await _api.GetRoomAsync(NormalizeRoomToken(roomId), authCookie, ct).ConfigureAwait(false);
         if (!snapshot.IsLive)
             return RoomStatus.Offline(snapshot.WebRid, PlatformType.Douyin, snapshot.Title, snapshot.Nick);
 

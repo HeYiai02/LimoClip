@@ -134,4 +134,42 @@ public sealed class DouyuApiClientTests
         using var client = CreateClient(handler);
         await client.GetRoomAsync("9999");
     }
+
+    [Fact]
+    public async Task GetRoomAsync_WithCookie_SendsCookieToApiAndQualityHeaders()
+    {
+        const string cookie = "dy_auth=token123; acf_uid=42";
+        var handler = new TestHttpMessageHandler(request =>
+            request.RequestUri!.AbsolutePath.Contains("betard", StringComparison.Ordinal)
+                ? DouyuTestData.JsonResponse(DouyuTestData.BetardJson(true))
+                : DouyuTestData.JsonResponse(DouyuTestData.StreamJson()));
+
+        using var client = CreateClient(handler);
+        var snapshot = await client.GetRoomAsync("9999", cookie);
+
+        var quality = Assert.Single(snapshot.Qualities);
+        Assert.Equal(cookie, quality.RequiredHeaders["Cookie"]);
+
+        var betard = Assert.Single(handler.Requests.Where(r => r.RequestUri!.AbsolutePath.Contains("betard")));
+        Assert.Equal(cookie, Assert.Single(betard.Headers.GetValues("Cookie")));
+
+        var play = Assert.Single(handler.Requests.Where(r => r.RequestUri!.AbsolutePath.Contains("getH5Play")));
+        Assert.Equal(cookie, Assert.Single(play.Headers.GetValues("Cookie")));
+    }
+
+    [Fact]
+    public async Task GetRoomAsync_WithoutCookie_SendsNoCookieHeader()
+    {
+        var handler = new TestHttpMessageHandler(request =>
+            request.RequestUri!.AbsolutePath.Contains("betard", StringComparison.Ordinal)
+                ? DouyuTestData.JsonResponse(DouyuTestData.BetardJson(true))
+                : DouyuTestData.JsonResponse(DouyuTestData.StreamJson()));
+
+        using var client = CreateClient(handler);
+        var snapshot = await client.GetRoomAsync("9999");
+
+        var quality = Assert.Single(snapshot.Qualities);
+        Assert.False(quality.RequiredHeaders.ContainsKey("Cookie"));
+        Assert.All(handler.Requests, r => Assert.False(r.Headers.Contains("Cookie")));
+    }
 }

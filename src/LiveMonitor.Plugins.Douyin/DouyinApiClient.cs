@@ -84,7 +84,14 @@ public sealed class DouyinApiClient : IDisposable
     }
 
     /// <summary>查询直播间状态与清晰度列表。</summary>
-    public async Task<DouyinRoomSnapshot> GetRoomAsync(string roomIdOrLink, CancellationToken ct = default)
+    public Task<DouyinRoomSnapshot> GetRoomAsync(string roomIdOrLink, CancellationToken ct = default)
+        => GetRoomAsync(roomIdOrLink, cookie: null, ct);
+
+    /// <summary>
+    /// 查询直播间状态与清晰度列表；<paramref name="cookie"/> 为该平台登录 Cookie。
+    /// 抖音匿名态只能拿到部分清晰度且更容易触发风控，登录态下会把用户 Cookie 与匿名 ttwid 合并后一起发送。
+    /// </summary>
+    public async Task<DouyinRoomSnapshot> GetRoomAsync(string roomIdOrLink, string? cookie, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(roomIdOrLink))
             throw new ArgumentException("抖音直播间号不能为空。", nameof(roomIdOrLink));
@@ -96,18 +103,56 @@ public sealed class DouyinApiClient : IDisposable
             throw new ArgumentException($"无法识别的抖音直播间号：{roomIdOrLink}", nameof(roomIdOrLink));
 
         var ttwid = await GetTtwidAsync(ct).ConfigureAwait(false);
+        var cookieHeader = BuildCookieHeader(cookie, ttwid);
         using var request = new HttpRequestMessage(HttpMethod.Get, BuildEnterUrl(webRid));
         request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
         request.Headers.TryAddWithoutValidation("Accept-Language", "zh-CN,zh;q=0.9");
         request.Headers.TryAddWithoutValidation("Referer", DouyinUrlParser.BuildLiveUrl(webRid));
-        request.Headers.TryAddWithoutValidation("Cookie", $"ttwid={ttwid}");
+        request.Headers.TryAddWithoutValidation("Cookie", cookieHeader);
 
         using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException($"抖音直播间查询失败（HTTP {(int)response.StatusCode}），请稍后重试。");
 
-        return ParseRoom(body, webRid, ttwid);
+        return ParseRoom(body, webRid, ttwid, cookieHeader);
+    }
+
+    /// <summary>把登录 Cookie 与匿名 ttwid 合并成一条 Cookie 请求头（已含 ttwid 时不重复追加）。</summary>
+    internal static string BuildCookieHeader(string? cookie, string ttwid)
+    {
+        var trimmed = NormalizeCookie(cookie);
+        if (string.IsNullOrEmpty(ttwid))
+        {
+            return trimmed ?? string.Empty;
+        }
+
+        if (trimmed is null)
+        {
+            return $"ttwid={ttwid}";
+        }
+
+        return trimmed.Contains("ttwid=", StringComparison.OrdinalIgnoreCase)
+            ? trimmed
+            : $"{trimmed}; ttwid={ttwid}";
+    }
+
+    /// <summary>清洗 Cookie：去掉换行，空值返回 null（防止请求头注入）。</summary>
+    internal static string? NormalizeCookie(string? cookie)
+    {
+        if (string.IsNullOrWhiteSpace(cookie))
+        {
+            return null;
+        }
+
+        var builder = new System.Text.StringBuilder(cookie.Trim().Length);
+        foreach (var ch in cookie.Trim())
+        {
+            builder.Append(ch is '\r' or '\n' ? ' ' : ch);
+        }
+
+        var result = builder.ToString().Trim();
+        return result.Length == 0 ? null : result;
     }
 
     internal static string BuildEnterUrl(string webRid) =>
@@ -132,7 +177,7 @@ public sealed class DouyinApiClient : IDisposable
         return null;
     }
 
-    internal static DouyinRoomSnapshot ParseRoom(string json, string webRid, string ttwid)
+    internal static DouyinRoomSnapshot ParseRoom(string json, string webRid, string ttwid, string? cookieHeader = null)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
@@ -170,19 +215,19 @@ public sealed class DouyinApiClient : IDisposable
 
         var live = status == 2;
         var qualities = live
-            ? ParseQualities(room, webRid)
+            ? ParseQualities(room, webRid, cookieHeader)
             : Array.Empty<StreamQuality>();
 
         return new DouyinRoomSnapshot(webRid, roomId, title, nick, ownerUid, 0, live, ttwid, qualities);
     }
 
-    internal static IReadOnlyList<StreamQuality> ParseQualities(JsonElement room, string webRid)
+    internal static IReadOnlyList<StreamQuality> ParseQualities(JsonElement room, string webRid, string? cookieHeader = null)
     {
         var result = new List<StreamQuality>();
         if (!room.TryGetProperty("stream_url", out var streamUrl) || streamUrl.ValueKind != JsonValueKind.Object)
             return result;
 
-        var headers = BuildStreamHeaders(webRid);
+        var headers = BuildStreamHeaders(webRid, cookieHeader);
         var flv = streamUrl.TryGetProperty("flv_pull_url", out var flvElement) && flvElement.ValueKind == JsonValueKind.Object
             ? flvElement
             : default;
@@ -206,11 +251,20 @@ public sealed class DouyinApiClient : IDisposable
         return result;
     }
 
-    private static Dictionary<string, string> BuildStreamHeaders(string webRid) => new(StringComparer.Ordinal)
+    private static Dictionary<string, string> BuildStreamHeaders(string webRid, string? cookieHeader = null)
     {
-        ["User-Agent"] = UserAgent,
-        ["Referer"] = DouyinUrlParser.BuildLiveUrl(webRid),
-    };
+        var headers = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["User-Agent"] = UserAgent,
+            ["Referer"] = DouyinUrlParser.BuildLiveUrl(webRid),
+        };
+        if (!string.IsNullOrWhiteSpace(cookieHeader))
+        {
+            headers["Cookie"] = cookieHeader;
+        }
+
+        return headers;
+    }
 
     private static string? GetUrlFromMap(JsonElement map, string key)
         => map.ValueKind == JsonValueKind.Object &&

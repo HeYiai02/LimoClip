@@ -77,7 +77,7 @@ public sealed class DouyinDanmakuClient : IDanmakuClient
 
         try
         {
-            var snapshot = await _api.GetRoomAsync(RoomId, cancellationToken).ConfigureAwait(false);
+            var snapshot = await _api.GetRoomAsync(RoomId, _authCookie, cancellationToken).ConfigureAwait(false);
             if (!snapshot.IsLive)
                 throw new InvalidOperationException(
                     $"抖音直播间 {RoomId} 当前未开播，无法连接弹幕。");
@@ -301,11 +301,7 @@ public sealed class DouyinDanmakuClient : IDanmakuClient
         }
     }
 
-    private string BuildCookieHeader()
-    {
-        if (!string.IsNullOrWhiteSpace(_authCookie)) return _authCookie;
-        return string.IsNullOrEmpty(_ttwid) ? string.Empty : $"ttwid={_ttwid}";
-    }
+    private string BuildCookieHeader() => DouyinApiClient.BuildCookieHeader(_authCookie, _ttwid ?? string.Empty);
 
     private async Task WaitLoopsAsync()
     {

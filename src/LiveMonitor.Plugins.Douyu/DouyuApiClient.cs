@@ -64,15 +64,23 @@ public sealed class DouyuApiClient : IDisposable
     }
 
     /// <summary>查询房间状态；开播时附带给出一路可拉流地址。</summary>
-    public async Task<DouyuRoomSnapshot> GetRoomAsync(string roomId, CancellationToken ct = default)
+    public Task<DouyuRoomSnapshot> GetRoomAsync(string roomId, CancellationToken ct = default)
+        => GetRoomAsync(roomId, cookie: null, ct);
+
+    /// <summary>
+    /// 查询房间状态；<paramref name="cookie"/> 为该平台登录 Cookie。
+    /// 斗鱼匿名也能拿到可播地址，但登录态才能在 getH5Play 里协商到蓝光档位，因此统一透传。
+    /// </summary>
+    public async Task<DouyuRoomSnapshot> GetRoomAsync(string roomId, string? cookie, CancellationToken ct = default)
     {
         if (!DouyuUrlParser.IsRoomNumber(roomId))
         {
             throw new ArgumentException($"斗鱼房间号必须为数字：{roomId}", nameof(roomId));
         }
 
+        var safeCookie = NormalizeCookie(cookie);
         var betardUrl = string.Format(BetardEndpoint, Uri.EscapeDataString(roomId));
-        using var betard = await GetJsonAsync(betardUrl, ct);
+        using var betard = await GetJsonAsync(betardUrl, safeCookie, ct);
         if (!betard.RootElement.TryGetProperty("room", out var room) || room.ValueKind != JsonValueKind.Object)
         {
             throw new InvalidOperationException($"斗鱼房间信息格式异常（缺少 room 对象）：{roomId}");
@@ -105,12 +113,12 @@ public sealed class DouyuApiClient : IDisposable
             return new DouyuRoomSnapshot(normalizedRoomId, roomName, nick, ownerUid, false, Array.Empty<StreamQuality>());
         }
 
-        var quality = await GetStreamQualityAsync(normalizedRoomId, ct);
+        var quality = await GetStreamQualityAsync(normalizedRoomId, safeCookie, ct);
         var qualities = quality is null ? Array.Empty<StreamQuality>() : new[] { quality };
         return new DouyuRoomSnapshot(normalizedRoomId, roomName, nick, ownerUid, true, qualities);
     }
 
-    private async Task<StreamQuality?> GetStreamQualityAsync(string roomId, CancellationToken ct)
+    private async Task<StreamQuality?> GetStreamQualityAsync(string roomId, string? cookie, CancellationToken ct)
     {
         var signature = await _signProvider(roomId, ct);
         var form = new Dictionary<string, string>(signature, StringComparer.Ordinal)
@@ -119,7 +127,16 @@ public sealed class DouyuApiClient : IDisposable
         };
 
         var url = string.Format(GetH5PlayEndpoint, Uri.EscapeDataString(roomId));
-        using var response = await _httpClient.PostAsync(url, new FormUrlEncodedContent(form), ct);
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = new FormUrlEncodedContent(form),
+        };
+        if (cookie is not null)
+        {
+            request.Headers.TryAddWithoutValidation("Cookie", cookie);
+        }
+
+        using var response = await _httpClient.SendAsync(request, ct);
         var body = await ReadBodyAsync(response, ct);
         using var document = JsonDocument.Parse(body);
         var root = document.RootElement;
@@ -150,6 +167,10 @@ public sealed class DouyuApiClient : IDisposable
             ["User-Agent"] = UserAgent,
             ["Referer"] = "https://www.douyu.com/" + roomId,
         };
+        if (cookie is not null)
+        {
+            headers["Cookie"] = cookie;
+        }
 
         return new StreamQuality(
             Id: "douyu-" + rate.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -192,11 +213,36 @@ public sealed class DouyuApiClient : IDisposable
         return "原画";
     }
 
-    private async Task<JsonDocument> GetJsonAsync(string url, CancellationToken ct)
+    private async Task<JsonDocument> GetJsonAsync(string url, string? cookie, CancellationToken ct)
     {
-        using var response = await _httpClient.GetAsync(url, ct);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
+        if (cookie is not null)
+        {
+            request.Headers.TryAddWithoutValidation("Cookie", cookie);
+        }
+
+        using var response = await _httpClient.SendAsync(request, ct);
         var body = await ReadBodyAsync(response, ct);
         return JsonDocument.Parse(body);
+    }
+
+    /// <summary>清洗 Cookie：去掉换行，空值返回 null（防止请求头注入）。</summary>
+    internal static string? NormalizeCookie(string? cookie)
+    {
+        if (string.IsNullOrWhiteSpace(cookie))
+        {
+            return null;
+        }
+
+        var builder = new StringBuilder(cookie.Trim().Length);
+        foreach (var ch in cookie.Trim())
+        {
+            builder.Append(ch is '\r' or '\n' ? ' ' : ch);
+        }
+
+        var result = builder.ToString().Trim();
+        return result.Length == 0 ? null : result;
     }
 
     private static async Task<string> ReadBodyAsync(HttpResponseMessage response, CancellationToken ct)

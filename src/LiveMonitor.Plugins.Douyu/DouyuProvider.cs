@@ -40,9 +40,8 @@ public sealed class DouyuProvider : IPlatformProvider
 
     public async Task<RoomStatus> GetRoomStatusAsync(string roomId, string? cookie = null, CancellationToken ct = default)
     {
-        _ = cookie; // 斗鱼匿名接口无需 Cookie
         var normalized = NormalizeRoomToken(roomId);
-        var snapshot = await _api.GetRoomAsync(normalized, ct);
+        var snapshot = await _api.GetRoomAsync(normalized, cookie, ct);
         if (!snapshot.IsLive)
         {
             return RoomStatus.Offline(snapshot.RoomId, PlatformType.Douyu, snapshot.RoomName, snapshot.Nick);

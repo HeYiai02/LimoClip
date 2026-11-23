@@ -126,4 +126,47 @@ public sealed class DouyinApiClientTests
         Assert.All(qualities, q => Assert.Contains("pull-flv.example", q.StreamUrl, StringComparison.Ordinal));
         Assert.Equal("https://live.douyin.com/141601416352", qualities[0].RequiredHeaders["Referer"]);
     }
+
+    [Fact]
+    public async Task GetRoomAsync_WithCookie_MergesLoginCookieWithTtwid()
+    {
+        const string cookie = "sessionid=abc123; uid_tt=42";
+        var handler = new DouyinTestData.StubHandler(request =>
+            request.RequestUri!.AbsolutePath == "/"
+                ? DouyinTestData.HomepageResponse("ttwid-abc")
+                : DouyinTestData.JsonResponse(DouyinTestData.LiveJson));
+        using var http = DouyinTestData.CreateHttpClient(handler);
+        using var client = new DouyinApiClient(http);
+
+        var snapshot = await client.GetRoomAsync("141601416352", cookie);
+
+        Assert.True(snapshot.IsLive);
+        var expected = "sessionid=abc123; uid_tt=42; ttwid=ttwid-abc";
+        var enterRequest = Assert.Single(handler.Requests, r => r.RequestUri!.AbsoluteUri.Contains("webcast/room/web/enter", StringComparison.Ordinal));
+        Assert.Equal(expected, Assert.Single(enterRequest.Headers.GetValues("Cookie")));
+        Assert.All(snapshot.Qualities, q => Assert.Equal(expected, q.RequiredHeaders["Cookie"]));
+    }
+
+    [Theory]
+    [InlineData(null, "ttwid-abc", "ttwid=ttwid-abc")]
+    [InlineData("sessionid=abc", "ttwid-abc", "sessionid=abc; ttwid=ttwid-abc")]
+    [InlineData("sessionid=abc; ttwid=existing", "ttwid-abc", "sessionid=abc; ttwid=existing")]
+    [InlineData("sessionid=abc", "", "sessionid=abc")]
+    public void BuildCookieHeader_MergesLoginCookieAndTtwid(string? cookie, string ttwid, string expected)
+    {
+        Assert.Equal(expected, DouyinApiClient.BuildCookieHeader(cookie, ttwid));
+    }
+
+    [Fact]
+    public void ParseQualities_WithCookie_IncludesCookieHeader()
+    {
+        var room = System.Text.Json.JsonDocument.Parse(DouyinTestData.LiveJson)
+            .RootElement.GetProperty("data").GetProperty("data")[0];
+
+        const string cookieHeader = "sessionid=abc; ttwid=ttwid-abc";
+        var qualities = DouyinApiClient.ParseQualities(room, "141601416352", cookieHeader);
+
+        Assert.Equal(4, qualities.Count);
+        Assert.All(qualities, q => Assert.Equal(cookieHeader, q.RequiredHeaders["Cookie"]));
+    }
 }
