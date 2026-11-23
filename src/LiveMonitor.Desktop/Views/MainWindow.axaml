@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:dock="using:Dock.Avalonia.Controls"
+        xmlns:views="using:LiveMonitor.Desktop.Views"
         x:Class="LiveMonitor.Desktop.Views.MainWindow"
         Title="LiveMonitor"
         Width="1440" Height="900"
@@ -46,6 +47,13 @@
           <TextBlock Text="V0.1" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" />
           <TextBlock Text="●" FontSize="12" Foreground="#F59E0B" IsVisible="{Binding IsDirty}"
                      ToolTip.Tip="方案有未保存修改" VerticalAlignment="Center" />
+          <Border Width="1" Height="16" Background="#2E323C" Margin="6,0" VerticalAlignment="Center" />
+          <Button x:Name="WorkspaceTabButton" Classes="group-pill active" Content="📺 监控工作区"
+                  Click="OnSwitchToWorkspace" VerticalAlignment="Center"
+                  ToolTip.Tip="查看并管理监控工作区" />
+          <Button x:Name="RecordingTabButton" Classes="group-pill" Content="⏺ 录制中心"
+                  Click="OnSwitchToRecordingCenter" VerticalAlignment="Center"
+                  ToolTip.Tip="管理各直播间的录制与历史录像" />
         </StackPanel>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="16,0,0,0">
@@ -240,6 +248,13 @@
           </StackPanel>
         </Border>
       </Grid>
+    </Border>
+
+    <!-- V0.3 录制中心：独立全屏视图，覆盖工作区；切换视图不销毁 Dock 与播放器 -->
+    <Border x:Name="RecordingCenterHost" Grid.Row="1" Grid.ColumnSpan="2"
+            Background="#0F1115"
+            IsVisible="{Binding IsRecordingCenterVisible}">
+      <views:RecordingCenterView DataContext="{Binding RecordingCenter}" />
     </Border>
 
     <!-- Status bar -->

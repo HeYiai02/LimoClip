@@ -63,6 +63,8 @@ public sealed class DanmakuManager : IAsyncDisposable
 
     private readonly Task _highlightPersistenceTask;
 
+    private volatile IHighlightEventEnricher? _highlightEventEnricher;
+
     private IReadOnlyList<DanmakuBlockKeyword> _keywords = Array.Empty<DanmakuBlockKeyword>();
     private HighlightRuleOptions _highlightRules = HighlightRuleOptions.Default;
     private bool _unicycleEnabled;
@@ -127,6 +129,17 @@ public sealed class DanmakuManager : IAsyncDisposable
                 return _unicycleBlockedUsers.Count;
             }
         }
+    }
+
+    /// <summary>
+    /// 可选的广播/落盘前补全钩子。录制中心在开始录制后挂接，用于把高能事件绑定到
+    /// 当前录制会话与相对偏移；钩子运行在消息管线线程上，必须保持无阻塞且不抛异常
+    /// （异常会被记录并忽略，仍按原始事件广播与落盘）。
+    /// </summary>
+    public IHighlightEventEnricher? HighlightEventEnricher
+    {
+        get => _highlightEventEnricher;
+        set => _highlightEventEnricher = value;
     }
 
     /// <summary>
@@ -692,12 +705,26 @@ public sealed class DanmakuManager : IAsyncDisposable
 
     private void OnHighlightDetected(RoomSession session, HighlightEvent highlightEvent)
     {
+        var enriched = highlightEvent;
+        var enricher = _highlightEventEnricher;
+        if (enricher is not null)
+        {
+            try
+            {
+                enriched = enricher.Enrich(highlightEvent);
+            }
+            catch (Exception ex)
+            {
+                Log($"[{session.Platform}:{session.RoomId}] 高能事件补全异常：{ex.Message}");
+            }
+        }
+
         var handler = HighlightTriggered;
         if (handler is not null)
         {
             try
             {
-                handler(highlightEvent);
+                handler(enriched);
             }
             catch (Exception ex)
             {
@@ -705,7 +732,7 @@ public sealed class DanmakuManager : IAsyncDisposable
             }
         }
 
-        if (!_highlightChannel.Writer.TryWrite(highlightEvent))
+        if (!_highlightChannel.Writer.TryWrite(enriched))
         {
             Log($"[{session.Platform}:{session.RoomId}] 高能事件未能写入落盘队列（管理器已释放）。");
         }

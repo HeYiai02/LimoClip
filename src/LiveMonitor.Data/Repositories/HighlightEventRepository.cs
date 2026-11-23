@@ -14,7 +14,8 @@ namespace LiveMonitor.Data.Repositories;
 public sealed class HighlightEventRepository : IHighlightEventRepository
 {
     private const string SelectColumns =
-        "Id, Platform, RoomId, TriggerTime, CurrentRatePerSec, BaselineRatePerSec, TriggerReason";
+        "Id, Platform, RoomId, TriggerTime, CurrentRatePerSec, BaselineRatePerSec, TriggerReason, " +
+        "RecordingSessionId, RecordingOffsetMs";
 
     private readonly LiveMonitorDatabase _database;
 
@@ -38,9 +39,11 @@ public sealed class HighlightEventRepository : IHighlightEventRepository
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT OR REPLACE INTO HighlightEvents
-                (Id, Platform, RoomId, TriggerTime, CurrentRatePerSec, BaselineRatePerSec, TriggerReason)
+                (Id, Platform, RoomId, TriggerTime, CurrentRatePerSec, BaselineRatePerSec, TriggerReason,
+                 RecordingSessionId, RecordingOffsetMs)
             VALUES
-                ($id, $platform, $roomId, $triggerTime, $currentRate, $baselineRate, $triggerReason);
+                ($id, $platform, $roomId, $triggerTime, $currentRate, $baselineRate, $triggerReason,
+                 $recordingSessionId, $recordingOffsetMs);
             """;
         command.Parameters.AddWithValue("$id", SqliteValues.ToDb(id));
         command.Parameters.AddWithValue("$platform", (int)highlightEvent.Platform);
@@ -49,6 +52,14 @@ public sealed class HighlightEventRepository : IHighlightEventRepository
         command.Parameters.AddWithValue("$currentRate", highlightEvent.CurrentRatePerSec);
         command.Parameters.AddWithValue("$baselineRate", highlightEvent.BaselineRatePerSec);
         command.Parameters.AddWithValue("$triggerReason", highlightEvent.TriggerReason);
+        command.Parameters.AddWithValue(
+            "$recordingSessionId",
+            highlightEvent.RecordingSessionId is { } sessionId && sessionId != Guid.Empty
+                ? SqliteValues.ToDb(sessionId)
+                : (object)DBNull.Value);
+        command.Parameters.AddWithValue(
+            "$recordingOffsetMs",
+            highlightEvent.RecordingOffsetMs is { } offsetMs ? offsetMs : (object)DBNull.Value);
 
         await command.ExecuteNonQueryAsync(ct);
     }
@@ -109,7 +120,11 @@ public sealed class HighlightEventRepository : IHighlightEventRepository
             reader.GetDouble(5),
             reader.GetString(6))
         {
-            Id = id
+            Id = id,
+            RecordingSessionId = reader.IsDBNull(7)
+                ? null
+                : SqliteValues.ToGuid(reader.GetString(7)),
+            RecordingOffsetMs = reader.IsDBNull(8) ? null : reader.GetInt64(8)
         };
     }
 

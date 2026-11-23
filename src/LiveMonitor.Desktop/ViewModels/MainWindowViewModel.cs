@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using Dock.Model.Controls;
 using Dock.Model.Core;
 using Dock.Model.Mvvm.Controls;
@@ -21,7 +22,7 @@ namespace LiveMonitor.Desktop.ViewModels;
 /// Step 6 主窗口：左侧主库、方案工具栏、Dock 工作区。
 /// 所有仓储调用都走 AppServices，ViewModel 不直接接触 SQLite。
 /// </summary>
-public sealed class MainWindowViewModel : ObservableObject, IDisposable
+public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private readonly AppServices _services;
     private readonly WorkspacePlayerManager _players;
@@ -70,6 +71,11 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private DispatcherTimer? _focusHintTimer;
     private bool _isFocusHintVisible;
     private bool _isHighlightPanelVisible;
+
+    /// <summary>V0.3：true 表示顶栏切到「录制中心」视图；监控工作区仍保留在视觉树中。</summary>
+    [ObservableProperty]
+    private bool _isRecordingCenterVisible;
+
     private int _unicycleBlockedUserCount;
     private const int MaxHighlightEvents = 200;
 
@@ -117,6 +123,33 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     /// <summary>由 View 注入：脏方案切换时弹「保存并切换/放弃修改/取消」。</summary>
     public Func<Task<ProfileSwitchChoice>>? ConfirmProfileSwitchAsync { get; set; }
+
+    /// <summary>由 View 注入：删除历史录像前弹确认窗，返回 true 表示确认删除。</summary>
+    public Func<RecordingHistoryItemViewModel, Task<bool>>? ConfirmRecordingDeleteAsync { get; set; }
+
+    /// <summary>由 View 注入：选择录像保存目录，返回绝对路径；null 表示用户取消。</summary>
+    public Func<Task<string?>>? PickRecordingDirectoryAsync { get; set; }
+
+    /// <summary>V0.3 录制中心 ViewModel（懒创建，视图与窗口生命周期内常驻）。</summary>
+    public RecordingCenterViewModel RecordingCenter => _recordingCenter ??= CreateRecordingCenter();
+
+    private RecordingCenterViewModel? _recordingCenter;
+
+    private RecordingCenterViewModel CreateRecordingCenter()
+    {
+        var center = new RecordingCenterViewModel(
+            _services.Rooms,
+            _services.RecordingTargets,
+            _services.RecordingSessions,
+            _services.Settings,
+            _services.Recordings);
+
+        center.ConfirmDeleteAsync = item =>
+            ConfirmRecordingDeleteAsync?.Invoke(item) ?? Task.FromResult(false);
+        center.PickDirectoryAsync = () =>
+            PickRecordingDirectoryAsync?.Invoke() ?? Task.FromResult<string?>(null);
+        return center;
+    }
 
     public IRootDock? Layout
     {
@@ -380,6 +413,21 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     {
         await _services.Danmaku.InitializeAsync(ct).ConfigureAwait(true);
         _danmakuReady = true;
+
+        // V0.3：录制引擎在弹幕初始化之后启动；失败只记录状态，不阻断主界面启动。
+        try
+        {
+            await _services.Recordings.InitializeAsync(ct).ConfigureAwait(true);
+
+            // 录制中心必须在初始化时订阅录制引擎事件并首次刷新；否则录制中的
+            // 时长/码率/大小等实时指标不会更新（历史录像也只在打开视图时刷新）。
+            await RecordingCenter.InitializeAsync(ct).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"录制引擎初始化失败：{ex.Message}");
+        }
+
         _services.Danmaku.HighlightTriggered += OnDanmakuHighlightTriggered;
         _services.Danmaku.UnicycleBlockedUserCountChanged += SetUnicycleBlockedUserCount;
 
@@ -389,6 +437,27 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         LoadHighlightEvents(recent);
         await ApplyDanmakuMasterSettingAsync(ct).ConfigureAwait(true);
         SyncDanmakuSubscriptions();
+    }
+
+    /// <summary>顶栏切换：回到监控工作区；Dock、播放器与后台录制均保持运行。</summary>
+    [RelayCommand]
+    private void SwitchToWorkspace() => IsRecordingCenterVisible = false;
+
+    /// <summary>顶栏切换：进入录制中心并刷新直播间/历史录像列表。</summary>
+    [RelayCommand]
+    private async Task SwitchToRecordingCenterAsync()
+    {
+        IsRecordingCenterVisible = true;
+        try
+        {
+            // 幂等：启动阶段通常已完成订阅；这里兜底，避免初始化失败后永远收不到实时进度。
+            await RecordingCenter.InitializeAsync().ConfigureAwait(true);
+            await RecordingCenter.RefreshAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"刷新录制中心失败：{ex.Message}");
+        }
     }
 
     private void OnDanmakuHighlightTriggered(HighlightEvent highlightEvent) => AddHighlightEvent(highlightEvent);
@@ -1169,6 +1238,22 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // 删除直播间前先停止该房间的录制：历史录像保留（LiveRoomId 由外键置空），
+        // 但不允许在直播间被删除后仍有一个正在写入的录制会话。
+        if (_services.Recordings.IsRecording(roomId))
+        {
+            try
+            {
+                await _services.Recordings.StopAsync(roomId, ct).ConfigureAwait(true);
+                SetStatus($"已停止 {room.Alias} 的录制。");
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"停止录制失败，已取消删除：{ex.Message}");
+                return;
+            }
+        }
+
         if (Layout is not null)
         {
             foreach (var tile in WorkspaceDockBuilder.EnumerateTiles(Layout).Where(tile => tile.LiveRoomId == roomId).ToList())
@@ -1491,6 +1576,27 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         DisposePlayers(Layout);
         _players.Dispose();
         _metrics.Dispose();
+
+        try
+        {
+            _recordingCenter?.Dispose();
+            _recordingCenter = null;
+        }
+        catch
+        {
+            // 录制中心释放失败不阻塞窗口关闭。
+        }
+
+        try
+        {
+            // 录制引擎退出前停止所有录制并 flush 弹幕文件；最多等 5 秒，失败不阻塞关闭。
+            Task.Run(async () => await _services.Recordings.DisposeAsync().ConfigureAwait(false))
+                .Wait(TimeSpan.FromSeconds(5));
+        }
+        catch
+        {
+            // 退出时录制收尾失败不阻塞关闭。
+        }
 
         try
         {

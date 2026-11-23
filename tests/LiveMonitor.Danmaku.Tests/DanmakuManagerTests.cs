@@ -1,6 +1,7 @@
 using LiveMonitor.Core;
 using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Enums;
+using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Core.Models;
 using Xunit;
 
@@ -359,6 +360,68 @@ public class DanmakuManagerTests
     }
 
     [Fact]
+    public async Task HighlightEventEnricher_EnrichesBroadcastAndPersistedEvent()
+    {
+        await using var harness = new DanmakuManagerHarness();
+        SeedSensitiveHighlightSettings(harness);
+        await harness.InitializeAsync();
+
+        var sessionId = Guid.NewGuid();
+        var enricher = new RecordingHighlightEventEnricher(sessionId, 125_000);
+        harness.Manager.HighlightEventEnricher = enricher;
+
+        var handle = harness.Manager.Acquire(PlatformType.Bilibili, "1001");
+        var highlightTask = NextHighlightAsync(harness.Manager);
+        var client = await WaitForSessionClientAsync(harness);
+
+        client.RaiseMessage(TestDanmaku.Create("666"));
+
+        var highlight = await highlightTask.WaitAsync(ShortWait);
+        Assert.Equal(1, enricher.Calls);
+        Assert.Equal(sessionId, highlight.RecordingSessionId);
+        Assert.Equal(125_000, highlight.RecordingOffsetMs);
+
+        await TestWait.WaitUntilAsync(
+            () => harness.Highlights.Snapshot.Count == 1,
+            message: "补全后的高能事件落盘");
+        var persisted = Assert.Single(harness.Highlights.Snapshot);
+        Assert.Equal(highlight.Id, persisted.Id);
+        Assert.Equal(sessionId, persisted.RecordingSessionId);
+        Assert.Equal(125_000, persisted.RecordingOffsetMs);
+        await TestWait.WaitUntilAsync(() => handle.MessageCount == 1, message: "高能消息仍进入渲染批次");
+    }
+
+    [Fact]
+    public async Task HighlightEventEnricher_Throws_KeepsOriginalEventAndPipeline()
+    {
+        await using var harness = new DanmakuManagerHarness();
+        SeedSensitiveHighlightSettings(harness);
+        await harness.InitializeAsync();
+
+        harness.Manager.HighlightEventEnricher = new ThrowingHighlightEventEnricher();
+
+        var handle = harness.Manager.Acquire(PlatformType.Bilibili, "1001");
+        var highlightTask = NextHighlightAsync(harness.Manager);
+        var client = await WaitForSessionClientAsync(harness);
+
+        client.RaiseMessage(TestDanmaku.Create("666"));
+
+        var highlight = await highlightTask.WaitAsync(ShortWait);
+        Assert.Null(highlight.RecordingSessionId);
+        Assert.Null(highlight.RecordingOffsetMs);
+
+        await TestWait.WaitUntilAsync(
+            () => harness.Highlights.Snapshot.Count == 1,
+            message: "补全失败仍按原始事件落盘");
+        Assert.Null(harness.Highlights.Snapshot[0].RecordingSessionId);
+        Assert.Null(harness.Highlights.Snapshot[0].RecordingOffsetMs);
+        await TestWait.WaitUntilAsync(
+            () => harness.Logs.Any(message => message.Contains("高能事件补全异常")),
+            message: "补全异常被记录");
+        await TestWait.WaitUntilAsync(() => handle.MessageCount == 1, message: "管线不受补全异常影响");
+    }
+
+    [Fact]
     public async Task DisposeAsync_FlushesPendingHighlightEvents_AndIsIdempotent()
     {
         await using var harness = new DanmakuManagerHarness();
@@ -673,5 +736,38 @@ public class DanmakuManagerTests
             }
         };
         return completion.Task;
+    }
+
+    /// <summary>测试用补全器：记录调用次数并给高能事件附加录制会话绑定。</summary>
+    private sealed class RecordingHighlightEventEnricher : IHighlightEventEnricher
+    {
+        private readonly Guid? _sessionId;
+
+        public RecordingHighlightEventEnricher(Guid? sessionId, long? offsetMs)
+        {
+            _sessionId = sessionId;
+            OffsetMs = offsetMs;
+        }
+
+        public long? OffsetMs { get; }
+
+        public int Calls { get; private set; }
+
+        public HighlightEvent Enrich(HighlightEvent highlightEvent)
+        {
+            Calls++;
+            return highlightEvent with
+            {
+                RecordingSessionId = _sessionId,
+                RecordingOffsetMs = OffsetMs,
+            };
+        }
+    }
+
+    /// <summary>测试用补全器：始终抛异常，验证异常不会破坏广播/落盘/消息管线。</summary>
+    private sealed class ThrowingHighlightEventEnricher : IHighlightEventEnricher
+    {
+        public HighlightEvent Enrich(HighlightEvent highlightEvent)
+            => throw new InvalidOperationException("高能补全失败（测试注入）");
     }
 }

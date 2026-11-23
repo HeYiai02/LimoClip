@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>LiveMonitor.Media</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LiveMonitor.Core\LiveMonitor.Core.csproj" />
+    <ProjectReference Include="..\LiveMonitor.Danmaku\LiveMonitor.Danmaku.csproj" />
+  </ItemGroup>
+</Project>

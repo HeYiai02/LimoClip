@@ -2,6 +2,7 @@ using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Danmaku;
 using LiveMonitor.Data;
 using LiveMonitor.Data.Repositories;
+using LiveMonitor.Media.Recording;
 using LiveMonitor.Platforms;
 
 namespace LiveMonitor.Desktop.Services;
@@ -21,7 +22,10 @@ public sealed class AppServices
         IHighlightEventRepository highlightEvents,
         IDanmakuClientFactory danmakuFactory,
         DanmakuManager danmaku,
-        PlatformFactory platforms)
+        PlatformFactory platforms,
+        IRecordingTargetRepository recordingTargets,
+        IRecordingSessionRepository recordingSessions,
+        RecordingManager recordings)
     {
         Database = database;
         Rooms = rooms;
@@ -33,6 +37,9 @@ public sealed class AppServices
         DanmakuFactory = danmakuFactory;
         Danmaku = danmaku;
         Platforms = platforms;
+        RecordingTargets = recordingTargets;
+        RecordingSessions = recordingSessions;
+        Recordings = recordings;
     }
 
     public LiveMonitorDatabase Database { get; }
@@ -57,6 +64,15 @@ public sealed class AppServices
     public DanmakuManager Danmaku { get; }
 
     public PlatformFactory Platforms { get; }
+
+    /// <summary>V0.3 录制目标仓储：每个直播间的自动录制开关与独立保存目录。</summary>
+    public IRecordingTargetRepository RecordingTargets { get; }
+
+    /// <summary>V0.3 录制会话仓储：录制中心历史录像的数据来源。</summary>
+    public IRecordingSessionRepository RecordingSessions { get; }
+
+    /// <summary>V0.3 录制引擎：后台录制、自动录制轮询与实时进度事件。</summary>
+    public RecordingManager Recordings { get; }
 
     private static async Task<LiveMonitorDatabase> CreateDatabaseAsync(CancellationToken ct)
     {
@@ -119,9 +135,32 @@ public sealed class AppServices
             settings,
             highlightEvents);
 
+        var roomRepository = new RoomRepository(database);
+        var recordingTargets = new RecordingTargetRepository(database);
+        var recordingSessions = new RecordingSessionRepository(database);
+        var recordings = new RecordingManager(
+            roomRepository,
+            recordingTargets,
+            recordingSessions,
+            settings,
+            credentials,
+            platform =>
+            {
+                try
+                {
+                    return platforms.GetProvider(platform);
+                }
+                catch (NotSupportedException)
+                {
+                    // 未注册 Provider 的平台（Douyin/Douyu/Huya/YouTube）仅不支持开录，不阻塞应用启动。
+                    return null;
+                }
+            },
+            danmaku);
+
         return new AppServices(
             database,
-            new RoomRepository(database),
+            roomRepository,
             new LayoutProfileRepository(database),
             credentials,
             blocklist,
@@ -129,6 +168,9 @@ public sealed class AppServices
             highlightEvents,
             danmakuFactory,
             danmaku,
-            platforms);
+            platforms,
+            recordingTargets,
+            recordingSessions,
+            recordings);
     }
 }

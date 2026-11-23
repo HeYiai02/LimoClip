@@ -15,4 +15,10 @@ public sealed record HighlightEvent(
     string TriggerReason)
 {
     public Guid Id { get; init; } = Guid.NewGuid();
+
+    /// <summary>触发时正在录制的高能所属会话 Id；未录制或无法关联时为 null。</summary>
+    public Guid? RecordingSessionId { get; init; }
+
+    /// <summary>相对该录制会话起点的毫秒偏移；未录制或无法关联时为 null。</summary>
+    public long? RecordingOffsetMs { get; init; }
 }

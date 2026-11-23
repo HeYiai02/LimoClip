@@ -1,0 +1,69 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:LiveMonitor.Desktop.ViewModels"
+        x:Class="LiveMonitor.Desktop.Views.ConfirmDeleteRecordingWindow"
+        Title="删除录制记录"
+        Width="560" Height="300"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Background="#0F1115"
+        RequestedThemeVariant="Dark">
+
+    <Window.Styles>
+        <Style Selector="Button.rc">
+            <Setter Property="Background" Value="#1B2130" />
+            <Setter Property="BorderBrush" Value="#2C3444" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="#D5DBE5" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="12,5" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+        <Style Selector="Button.rc:pointerover">
+            <Setter Property="Background" Value="#232B3C" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+        </Style>
+    </Window.Styles>
+
+    <Grid RowDefinitions="Auto,*,Auto" Margin="20">
+        <StackPanel Grid.Row="0" Spacing="4">
+            <TextBlock Text="删除录制记录" FontSize="20" FontWeight="SemiBold" Foreground="#E6E8EE" />
+            <TextBlock Text="此操作会同时删除录像文件与弹幕文件，且无法恢复。"
+                       FontSize="12" Foreground="#F87171" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <Border Grid.Row="1" Margin="0,14,0,0" Background="#151923" BorderBrush="#262B36"
+                BorderThickness="1" CornerRadius="8" Padding="14">
+            <StackPanel Spacing="8">
+                <Grid ColumnDefinitions="Auto,*">
+                    <TextBlock Text="直播间" FontSize="11" Foreground="#7C8596" Width="70" />
+                    <TextBlock Grid.Column="1" Text="{Binding RoomTitle}" FontSize="12"
+                               Foreground="#E6E8EE" TextTrimming="CharacterEllipsis" />
+                </Grid>
+                <Grid ColumnDefinitions="Auto,*">
+                    <TextBlock Text="开始时间" FontSize="11" Foreground="#7C8596" Width="70" />
+                    <TextBlock Grid.Column="1" Text="{Binding StartedAtText}" FontSize="12"
+                               Foreground="#E6E8EE" />
+                </Grid>
+                <Grid ColumnDefinitions="Auto,*">
+                    <TextBlock Text="视频文件" FontSize="11" Foreground="#7C8596" Width="70" />
+                    <TextBlock Grid.Column="1" Text="{Binding VideoFileName}" FontSize="12"
+                               Foreground="#E6E8EE" TextTrimming="CharacterEllipsis"
+                               ToolTip.Tip="{Binding VideoFilePath}" />
+                </Grid>
+                <Grid ColumnDefinitions="Auto,*">
+                    <TextBlock Text="弹幕文件" FontSize="11" Foreground="#7C8596" Width="70" />
+                    <TextBlock Grid.Column="1" Text="{Binding DanmakuFileName}" FontSize="12"
+                               Foreground="#E6E8EE" TextTrimming="CharacterEllipsis" />
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="10"
+                    HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Classes="rc" Content="取消" Click="OnCancelClick" />
+            <Button Classes="rc" Content="删除记录" Background="#3B1D22" Foreground="#FCA5A5"
+                    Click="OnDeleteClick" />
+        </StackPanel>
+    </Grid>
+</Window>

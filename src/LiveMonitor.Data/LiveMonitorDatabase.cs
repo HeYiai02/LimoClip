@@ -70,13 +70,46 @@ public sealed class LiveMonitorDatabase
             TriggerTime TEXT NOT NULL,
             CurrentRatePerSec REAL NOT NULL,
             BaselineRatePerSec REAL NOT NULL,
-            TriggerReason TEXT NOT NULL
+            TriggerReason TEXT NOT NULL,
+            RecordingSessionId TEXT,
+            RecordingOffsetMs INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS RecordingTargets (
+            LiveRoomId TEXT PRIMARY KEY,
+            AutoRecordEnabled INTEGER NOT NULL DEFAULT 0,
+            CustomSaveDirectory TEXT,
+            UpdatedAt TEXT NOT NULL,
+            FOREIGN KEY (LiveRoomId) REFERENCES LiveRooms(Id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS RecordingSessions (
+            Id TEXT PRIMARY KEY,
+            LiveRoomId TEXT,
+            Platform INTEGER NOT NULL,
+            RoomId TEXT NOT NULL,
+            RoomDisplayName TEXT NOT NULL,
+            StreamTitle TEXT NOT NULL DEFAULT '',
+            Status INTEGER NOT NULL DEFAULT 0,
+            VideoFilePath TEXT NOT NULL,
+            DanmakuFilePath TEXT NOT NULL,
+            StartedAt TEXT NOT NULL,
+            EndedAt TEXT,
+            DurationSeconds REAL NOT NULL DEFAULT 0,
+            FileSizeBytes INTEGER NOT NULL DEFAULT 0,
+            DanmakuCount INTEGER NOT NULL DEFAULT 0,
+            HighlightCount INTEGER NOT NULL DEFAULT 0,
+            ErrorMessage TEXT,
+            FOREIGN KEY (LiveRoomId) REFERENCES LiveRooms(Id) ON DELETE SET NULL
         );
 
         CREATE INDEX IF NOT EXISTS IX_LayoutSlots_ProfileId ON LayoutSlots(LayoutProfileId);
         CREATE INDEX IF NOT EXISTS IX_LayoutSlots_LiveRoomId ON LayoutSlots(LiveRoomId);
         CREATE UNIQUE INDEX IF NOT EXISTS UX_LayoutSlots_ProfileRoom ON LayoutSlots(LayoutProfileId, LiveRoomId);
         CREATE INDEX IF NOT EXISTS IX_HighlightEvents_TriggerTime ON HighlightEvents(TriggerTime DESC);
+        CREATE INDEX IF NOT EXISTS IX_RecordingSessions_StartedAt ON RecordingSessions(StartedAt DESC);
+        CREATE INDEX IF NOT EXISTS IX_RecordingSessions_LiveRoomId ON RecordingSessions(LiveRoomId);
+        CREATE INDEX IF NOT EXISTS IX_RecordingSessions_PlatformRoom ON RecordingSessions(Platform, RoomId);
         """;
 
     private readonly string _connectionString;
@@ -132,10 +165,14 @@ public sealed class LiveMonitorDatabase
             "INTEGER NOT NULL DEFAULT 0", ct).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "LayoutSlots", "DefaultDanmakuVisible",
             "INTEGER NOT NULL DEFAULT 0", ct).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "HighlightEvents", "RecordingSessionId",
+            "TEXT", ct).ConfigureAwait(false);
+        await EnsureColumnAsync(connection, "HighlightEvents", "RecordingOffsetMs",
+            "INTEGER", ct).ConfigureAwait(false);
 
         await using (var version = connection.CreateCommand())
         {
-            version.CommandText = "PRAGMA user_version = 3;";
+            version.CommandText = "PRAGMA user_version = 4;";
             await version.ExecuteNonQueryAsync(ct);
         }
     }

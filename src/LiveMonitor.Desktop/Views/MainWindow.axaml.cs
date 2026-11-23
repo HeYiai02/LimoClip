@@ -1,8 +1,9 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
 using Dock.Controls.ProportionalStackPanel;
 using Dock.Model.Core;
@@ -18,6 +19,7 @@ public partial class MainWindow : Window
     private MainWindowViewModel? _viewModel;
     private AppServices? _services;
     private bool _initializing;
+    private bool _sidebarVisible = true;
     private Guid? _lastRoomClickId;
     private DateTime _lastRoomClickAt;
 
@@ -112,6 +114,20 @@ public partial class MainWindow : Window
                 var dialog = new UnsavedChangesWindow();
                 return await dialog.ShowDialog<ProfileSwitchChoice>(this);
             };
+            _viewModel.ConfirmRecordingDeleteAsync = async item =>
+            {
+                var dialog = new ConfirmDeleteRecordingWindow(item);
+                return await dialog.ShowDialog<bool>(this);
+            };
+            _viewModel.PickRecordingDirectoryAsync = async () =>
+            {
+                var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+                {
+                    Title = "选择录像保存目录",
+                    AllowMultiple = false
+                });
+                return folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
+            };
             DataContext = _viewModel;
             _viewModel.ProportionsRestored += (_, _) => SyncVisualProportions();
             _viewModel.Groups.CollectionChanged += (_, _) => RefreshGroupPills();
@@ -123,7 +139,11 @@ public partial class MainWindow : Window
                 }
                 else if (args.PropertyName == nameof(MainWindowViewModel.IsFocused))
                 {
-                    ApplyFocusLayout();
+                    ApplyShellLayout();
+                }
+                else if (args.PropertyName == nameof(MainWindowViewModel.IsRecordingCenterVisible))
+                {
+                    ApplyShellLayout();
                 }
                 else if (args.PropertyName == nameof(MainWindowViewModel.GroupFilter))
                 {
@@ -170,23 +190,46 @@ public partial class MainWindow : Window
         _viewModel?.Dispose();
     }
 
-    private void ApplyFocusLayout()
+    /// <summary>
+    /// 按「焦点模式 / 录制中心 / 普通工作区」三种状态统一布局外壳：
+    /// 录制中心隐藏侧栏与底部状态栏但保留顶栏切换，且不销毁 Dock 与播放器。
+    /// </summary>
+    private void ApplyShellLayout()
     {
         if (_viewModel is null)
         {
             return;
         }
 
-        var focused = _viewModel.IsFocused;
-        Sidebar.IsVisible = !focused;
+        var recording = _viewModel.IsRecordingCenterVisible;
+        var focused = !recording && _viewModel.IsFocused;
+        var sidebarVisible = !recording && !focused && _sidebarVisible;
+
+        Sidebar.IsVisible = sidebarVisible;
         TopBar.IsVisible = !focused;
-        StatusBar.IsVisible = !focused;
-        RootGrid.ColumnDefinitions[0].Width = focused ? new GridLength(0) : new GridLength(260);
+        StatusBar.IsVisible = !recording && !focused;
+        RootGrid.ColumnDefinitions[0].Width =
+            sidebarVisible ? new GridLength(260) : new GridLength(0);
         RootGrid.RowDefinitions[0].Height = focused ? new GridLength(0) : new GridLength(48);
-        RootGrid.RowDefinitions[2].Height = focused ? new GridLength(0) : new GridLength(28);
+        RootGrid.RowDefinitions[2].Height =
+            recording || focused ? new GridLength(0) : new GridLength(28);
+
+        WorkspaceTabButton.Classes.Set("active", !recording);
+        RecordingTabButton.Classes.Set("active", recording);
+
         Dock.InvalidateMeasure();
         Dock.InvalidateArrange();
         Dock.UpdateLayout();
+    }
+
+    private void OnSwitchToWorkspace(object? sender, RoutedEventArgs e)
+    {
+        _viewModel?.SwitchToWorkspaceCommand.Execute(null);
+    }
+
+    private void OnSwitchToRecordingCenter(object? sender, RoutedEventArgs e)
+    {
+        _viewModel?.SwitchToRecordingCenterCommand.Execute(null);
     }
 
     private void OnFocusDoubleTapped(object? sender, TappedEventArgs e)
@@ -210,6 +253,13 @@ public partial class MainWindow : Window
 
     private void OnWindowKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
     {
+        if (e.Key == Key.Escape && _viewModel?.IsRecordingCenterVisible == true)
+        {
+            _viewModel.SwitchToWorkspaceCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Escape && _viewModel?.IsFocused == true)
         {
             _viewModel.ExitFocus();
@@ -471,8 +521,12 @@ public partial class MainWindow : Window
 
     private void OnToggleSidebar(object? sender, RoutedEventArgs e)
     {
-        var visible = !Sidebar.IsVisible;
-        Sidebar.IsVisible = visible;
-        RootGrid.ColumnDefinitions[0].Width = visible ? new GridLength(260) : new GridLength(0);
+        if (_viewModel?.IsRecordingCenterVisible == true)
+        {
+            return;
+        }
+
+        _sidebarVisible = !_sidebarVisible;
+        ApplyShellLayout();
     }
 }

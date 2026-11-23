@@ -25,4 +25,11 @@ public static class AppSettingKeys
     public const string HighlightMinShortWindowCount = "HighlightMinShortWindowCount";
     public const string HighlightCooldownSeconds = "HighlightCooldownSeconds";
     public const string HighlightBoostKeywords = "HighlightBoostKeywords";
+
+    // V0.3 录制中心
+    /// <summary>录像默认保存目录；缺省为 %UserProfile%\Videos\LimoClip。</summary>
+    public const string RecordingDefaultDirectory = "RecordingDefaultDirectory";
+
+    /// <summary>自动录制的开播轮询间隔（秒），默认 60；取值 10~600。</summary>
+    public const string RecordingPollIntervalSeconds = "RecordingPollIntervalSeconds";
 }
