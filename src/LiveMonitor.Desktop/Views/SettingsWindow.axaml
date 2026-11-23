@@ -79,8 +79,14 @@
             <CheckBox x:Name="DanmakuPreviewToggle" Content="监控画面弹幕预览"
                       FontSize="11" VerticalAlignment="Center"
                       Checked="OnDanmakuPreviewChanged" Unchecked="OnDanmakuPreviewChanged" />
+            <CheckBox x:Name="DanmakuStickerToggle" Content="渲染纯表情包弹幕（关闭后仅统计与高能检测）"
+                      FontSize="11" VerticalAlignment="Center"
+                      Checked="OnDanmakuStickerChanged" Unchecked="OnDanmakuStickerChanged" />
+            <CheckBox x:Name="DanmakuEmoteImagesToggle" Content="显示表情图片（静态，多屏时建议关闭）"
+                      FontSize="11" VerticalAlignment="Center"
+                      Checked="OnDanmakuEmoteImagesChanged" Unchecked="OnDanmakuEmoteImagesChanged" />
             <TextBlock FontSize="10" Foreground="#6B7484" TextWrapping="Wrap"
-                       Text="支持包含匹配与正则（勾选「正则」）。实时过滤已接入 V0.2；独轮车规则仅对 B 站生效。" />
+                       Text="支持包含匹配与正则（勾选「正则」）。实时过滤已接入 V0.2；独轮车规则仅对 B 站生效。默认行内表情按 [表情] 文本显示、纯大表情包显示为 [表情名]；勾选「显示表情图片」后会把命中表情渲染成静态小图（不跑 GIF/动画）。" />
           </StackPanel>
         </Border>
 

@@ -42,6 +42,16 @@ public partial class SettingsWindow : Window
             var preview = await _services.Settings.GetAsync(AppSettingKeys.DanmakuPreviewEnabled);
             DanmakuPreviewToggle.IsChecked = string.Equals(preview, "true", StringComparison.OrdinalIgnoreCase);
 
+            var sticker = await _services.Settings.GetAsync(AppSettingKeys.DanmakuStickerVisible);
+            // 键缺失时默认开启渲染（与代码默认值保持一致）。
+            DanmakuStickerToggle.IsChecked = string.IsNullOrWhiteSpace(sticker)
+                || !string.Equals(sticker, "false", StringComparison.OrdinalIgnoreCase);
+
+            var emoteImages = await _services.Settings.GetAsync(AppSettingKeys.DanmakuEmoteImagesVisible);
+            // 键缺失时默认开启（与 UI 代码默认值保持一致）；只有显式 false 才关闭。
+            DanmakuEmoteImagesToggle.IsChecked = string.IsNullOrWhiteSpace(emoteImages)
+                || !string.Equals(emoteImages, "false", StringComparison.OrdinalIgnoreCase);
+
             await LoadHighlightSettingsAsync();
         }
         catch (Exception ex)
@@ -286,6 +296,50 @@ public partial class SettingsWindow : Window
         catch (Exception ex)
         {
             StatusText.Text = $"保存弹幕预览开关失败：{ex.Message}";
+        }
+    }
+
+    private async void OnDanmakuStickerChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_loading || _services is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _services.Settings.SetAsync(
+                AppSettingKeys.DanmakuStickerVisible,
+                DanmakuStickerToggle.IsChecked == true ? "true" : "false");
+            StatusText.Text = DanmakuStickerToggle.IsChecked == true
+                ? "纯表情包会渲染为 [表情名] 文本。"
+                : "纯表情包仅参与统计与高能检测，不再渲染。";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"保存表情包渲染开关失败：{ex.Message}";
+        }
+    }
+
+    private async void OnDanmakuEmoteImagesChanged(object? sender, RoutedEventArgs e)
+    {
+        if (_loading || _services is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _services.Settings.SetAsync(
+                AppSettingKeys.DanmakuEmoteImagesVisible,
+                DanmakuEmoteImagesToggle.IsChecked == true ? "true" : "false");
+            StatusText.Text = DanmakuEmoteImagesToggle.IsChecked == true
+                ? "表情图片已开启（仅渲染静态帧，未加载成功的表情先显示 [表情名]）。"
+                : "表情图片已关闭，表情按 [表情] 文本显示。";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"保存表情图片开关失败：{ex.Message}";
         }
     }
 

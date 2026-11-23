@@ -101,7 +101,7 @@
                       Padding="6,2"
                       Margin="0,0,6,0"
                       FontSize="10"
-                      ToolTip.Tip="弹幕开关（V0.1 占位）"
+                      ToolTip.Tip="弹幕开关（关闭渲染后仍参与高能统计）"
                       IsChecked="{Binding IsDanmakuVisible, Mode=TwoWay}">
           <TextBlock Text="弹" FontSize="11" VerticalAlignment="Center" />
         </ToggleButton>

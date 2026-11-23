@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Input;
@@ -96,8 +96,7 @@ public partial class MainWindow : Window
     }
 
     private async void OnOpened(object? sender, EventArgs e)
-    {
-        if (_initializing || _viewModel is not null)
+    {        if (_initializing || _viewModel is not null)
         {
             return;
         }
@@ -164,6 +163,7 @@ public partial class MainWindow : Window
             _initializing = false;
         }
     }
+
 
     private void OnClosing(object? sender, WindowClosingEventArgs e)
     {

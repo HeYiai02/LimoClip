@@ -41,6 +41,8 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
     private int _suppressVolumeChange;
     private RoomTileViewModel? _boundTile;
     private bool _danmakuMasterEnabled = true;
+    private bool _danmakuStickersEnabled = true;
+    private bool _danmakuEmoteImagesEnabled;
 
     private PlayerState _state = PlayerState.Offline;
     private PlayerHealthMetrics _metrics = PlayerHealthMetrics.Empty;
@@ -318,6 +320,43 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
 
             _danmakuMasterEnabled = value;
             UpdateDanmakuLayerVisibility();
+        }
+    }
+
+    /// <summary>
+    /// 是否渲染纯大表情包弹幕（设置页开关）。关闭时只跳过渲染，高能统计与连接不受影响。
+    /// </summary>
+    public bool DanmakuStickersEnabled
+    {
+        get => _danmakuStickersEnabled;
+        set
+        {
+            if (_danmakuStickersEnabled == value)
+            {
+                return;
+            }
+
+            _danmakuStickersEnabled = value;
+            DanmakuLayer.ShowStickers = value;
+        }
+    }
+
+    /// <summary>
+    /// 是否把表情渲染成静态图片（设置页开关，默认关闭）。
+    /// 关闭时行内表情显示 [doge] 文本、纯大表情显示 [表情名]。
+    /// </summary>
+    public bool DanmakuEmoteImagesEnabled
+    {
+        get => _danmakuEmoteImagesEnabled;
+        set
+        {
+            if (_danmakuEmoteImagesEnabled == value)
+            {
+                return;
+            }
+
+            _danmakuEmoteImagesEnabled = value;
+            DanmakuLayer.ShowEmoteImages = value;
         }
     }
 

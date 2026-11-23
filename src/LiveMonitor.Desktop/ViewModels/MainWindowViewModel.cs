@@ -78,6 +78,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private readonly Dictionary<RoomTileViewModel, DanmakuSubscription> _danmakuHandles =
         new(ReferenceEqualityComparer.Instance);
     private bool _danmakuMasterEnabled = true;
+    private bool _danmakuStickersEnabled = true;
+    private bool _danmakuEmoteImagesEnabled;
     private bool _danmakuReady;
 
     private sealed record DanmakuSubscription(DanmakuSessionHandle Handle, PlatformType Platform, string RoomId);
@@ -399,6 +401,20 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             .ConfigureAwait(true);
         _danmakuMasterEnabled = string.IsNullOrWhiteSpace(raw)
             || !string.Equals(raw.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+
+        var stickerRaw = await _services.Settings
+            .GetAsync(AppSettingKeys.DanmakuStickerVisible, ct)
+            .ConfigureAwait(true);
+        _danmakuStickersEnabled = string.IsNullOrWhiteSpace(stickerRaw)
+            || !string.Equals(stickerRaw.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+
+        // 表情图片默认开启（用户反馈"[文本]看不出来"）：只有设置页显式保存 false 才关闭；只渲染静态帧。
+        var emoteImagesRaw = await _services.Settings
+            .GetAsync(AppSettingKeys.DanmakuEmoteImagesVisible, ct)
+            .ConfigureAwait(true);
+        _danmakuEmoteImagesEnabled = string.IsNullOrWhiteSpace(emoteImagesRaw)
+            || !string.Equals(emoteImagesRaw.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+
         ApplyDanmakuMasterEnabled();
     }
 
@@ -411,6 +427,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 if (tile.PlayerView is { } player)
                 {
                     player.DanmakuMasterEnabled = _danmakuMasterEnabled;
+                    player.DanmakuStickersEnabled = _danmakuStickersEnabled;
+                    player.DanmakuEmoteImagesEnabled = _danmakuEmoteImagesEnabled;
                 }
             }
         }
@@ -418,6 +436,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         if (_focusPlayer is { } focusPlayer)
         {
             focusPlayer.DanmakuMasterEnabled = _danmakuMasterEnabled;
+            focusPlayer.DanmakuStickersEnabled = _danmakuStickersEnabled;
+            focusPlayer.DanmakuEmoteImagesEnabled = _danmakuEmoteImagesEnabled;
         }
     }
 
@@ -973,6 +993,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         // DataContext 指向原窗格 tile：弹幕开关、标题等绑定在浮层里同样生效。
         var player = new MpvPlayerView { RoomTitle = tile.DisplayTitle, DataContext = tile };
         player.DanmakuMasterEnabled = _danmakuMasterEnabled;
+        player.DanmakuStickersEnabled = _danmakuStickersEnabled;
+        player.DanmakuEmoteImagesEnabled = _danmakuEmoteImagesEnabled;
         if (IsMasterMuted)
         {
             player.SetMute(true);
