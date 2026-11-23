@@ -344,7 +344,8 @@
         <!-- 底：双波形时间轴 -->
         <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Background="#11151D"
                 BorderBrush="#262B36" BorderThickness="1" CornerRadius="8" Padding="8">
-            <controls:ClipTimelineControl x:Name="Timeline" Height="156" />
+            <controls:ClipTimelineControl x:Name="Timeline" Height="156"
+                                          ToolTip.Tip="双波形时间轴：蓝色=音频波形，橙色=弹幕密度，红色竖线=播放头，左/右蓝色竖线=入点/出点，蓝色区域=剪辑选区。点击或拖动上方三角定位播放头；拖动 IN/OUT 手柄调整选区；滚轮缩放，双击复位。" />
         </Border>
     </Grid>
 </UserControl>

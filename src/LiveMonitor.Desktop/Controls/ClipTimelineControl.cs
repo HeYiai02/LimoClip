@@ -644,28 +644,47 @@ public sealed class ClipTimelineControl : Control
         var width = (int)Math.Ceiling(layout.Wave.Width);
         var stepPx = visible / Math.Max(1, layout.Wave.Width);
 
+        // 先按像素采样上下包络，再拼成闭合多边形填充（旧实现用非闭合线段填充，实际什么也画不出来）。
+        var envelope = new double[Math.Max(2, width)];
+        var maxPeak = 0.0;
+        for (var i = 0; i < envelope.Length; i++)
+        {
+            var sec = _viewStartSeconds + (i + 0.5) * stepPx;
+            var peak = Math.Clamp(SampleEnvelope(peaks, sec, bucketSec), 0f, 1f);
+            if (peak > maxPeak)
+            {
+                maxPeak = peak;
+            }
+
+            // 开方压缩动态范围：安静录像（峰值 ~0.01）也能看出起伏，响的段仍接近满幅。
+            envelope[i] = Math.Max(0.6, Math.Sqrt(peak) * halfHeight);
+        }
+
+        if (maxPeak <= 0.001)
+        {
+            DrawText(context, "（该视频没有可用的音频波形）", layout.Wave.Left + 12, layout.Wave.Top + layout.Wave.Height / 2 - 7, 10, MutedTextBrush);
+            return;
+        }
+
         var geometry = new StreamGeometry();
         using (var g = geometry.Open())
         {
-            for (var i = 0; i < width; i++)
+            var firstX = layout.Wave.Left + 0.5;
+            g.BeginFigure(new Point(firstX, centerY - envelope[0]), true);
+            for (var i = 1; i < envelope.Length; i++)
             {
-                var sec = _viewStartSeconds + (i + 0.5) * stepPx;
-                var peak = SampleEnvelope(peaks, sec, bucketSec);
-                if (peak <= 0.001)
-                {
-                    continue;
-                }
-
-                var x = layout.Wave.Left + i + 0.5;
-                // 开方压缩动态范围：安静录像（峰值 ~0.01）也能看出起伏，响的段仍接近满幅。
-                var h = Math.Max(0.6, Math.Sqrt(Math.Clamp(peak, 0f, 1f)) * halfHeight);
-                g.BeginFigure(new Point(x, centerY - h), false);
-                g.LineTo(new Point(x, centerY + h));
-                g.EndFigure(false);
+                g.LineTo(new Point(layout.Wave.Left + i + 0.5, centerY - envelope[i]));
             }
+
+            for (var i = envelope.Length - 1; i >= 0; i--)
+            {
+                g.LineTo(new Point(layout.Wave.Left + i + 0.5, centerY + envelope[i]));
+            }
+
+            g.EndFigure(true);
         }
 
-        context.DrawGeometry(WaveBrush, null, geometry);
+        context.DrawGeometry(WaveBrush, WaveOutlinePen, geometry);
         context.DrawLine(WaveOutlinePen, new Point(layout.Plot.Left, centerY - 0.5), new Point(layout.Plot.Right, centerY - 0.5));
     }
 
