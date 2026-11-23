@@ -1,10 +1,10 @@
-# LiveMonitor V0.2 交接（弹幕引擎与高能空跑）
+﻿# LiveMonitor V0.2 交接（弹幕引擎与高能空跑）
 
 ## 状态
 
-- 仓库：`E:\code\liveSurveilance`，分支 `main`；V0.2 改动**尚未提交**（全部在工作区，上次提交 `d60477b`）。
-- 构建：`dotnet build LiveMonitor.sln` 0 错误；已知警告仅 `MSB3277`（WebView2/WPF WindowsBase 冲突）、`CS9057`（Dock 分析器版本）、`WFAC010`、`AVLN3001`。
-- 测试：**281/281 通过** —— Data 21、Platforms 114、Danmaku 88、Desktop 58。
+- 仓库：`E:\code\liveSurveilance`，分支 `main`；最近提交 `95173db`（`feat(desktop): render emotes and share a 60fps danmaku render ticker`）与 `15c7bad`（`feat(danmaku): parse emote metadata and exempt/fold emotes in unicycle filter`）；工作树干净。
+- 构建：`dotnet build LiveMonitor.sln -c Release` 0 错误；已知警告仅 `MSB3277`（WebView2/WPF WindowsBase 冲突）、`CS9057`（Dock 分析器版本）、`WFAC010`、`AVLN3001`。
+- 测试：**310/310 通过** —— Data 21、Platforms 120、Danmaku 95、Desktop 74（Release）。
 - 工程：新增 `src/LiveMonitor.Danmaku`、`tests/LiveMonitor.Danmaku.Tests`，解决方案现 **12 个工程**。
 - 文档：`code_artifact.md` v1.4（长期架构）、`limoclip_v0_2.md`（V0.2 设计与实施记录）、`STEP8_REPORT.md`（V0.1 性能基线，仍是当前唯一整机压测数据）。
 - 第三方二进制：`tools/` 下 `libmpv-2.dll`、`yt-dlp.exe`、`ffmpeg/`、`mpv/` 仍被 `.gitignore` 排除，按 `tools/README.md` 准备；`tools/cacert.crt` 已入库。
@@ -13,20 +13,20 @@
 
 ### Core（新增契约，不动既有 API）
 
-- Models：`DanmakuMessage`（Timestamp 约定为**客户端本地接收时间**）、`HighlightEvent`、`HighlightRuleOptions`（含 `Normalize()` 夹取与 6 个默认值）。
+- Models：`DanmakuMessage`（Timestamp 约定为**客户端本地接收时间**；表情字段 `IsSticker` / `Emotes`）、`DanmakuEmote`（表情名/图片地址/平台 ID）、`HighlightEvent`、`HighlightRuleOptions`（含 `Normalize()` 夹取与 6 个默认值）。
 - Interfaces：`IDanmakuClient`、`IDanmakuClientFactory`、`IDanmakuFilter`、`IHighlightDetector`、`IHighlightEventRepository`。
-- `AppSettingKeys` 追加 6 键：`HighlightShortWindowSeconds` / `HighlightBaselineWindowSeconds` / `HighlightDensityMultiplier` / `HighlightMinShortWindowCount` / `HighlightCooldownSeconds` / `HighlightBoostKeywords`。
+- `AppSettingKeys` 追加 6 个 Highlight 键 + `DanmakuStickerVisible`（纯表情包是否渲染，默认开）。
 
 ### Platforms（弹幕客户端）
 
-- `LiveMonitor.Platforms.Bilibili`：`BilibiliPacketParser`（纯函数，16B 大端头、zlib/brotli、递归解包、DANMU_MSG/SEND_GIFT/SUPER_CHAT_MESSAGE、op7 认证包、op2 心跳包）、`BilibiliWbiSigner`（WBI mixin 置换 + `w_rid` 签名；`getDanmuInfo` 自 2026-11 起必须签名，否则返回 `-352`，客户端缓存 `nav` 的 img/sub key 1 小时）、`IBilibiliWebSocketConnection` + `ClientWebSocketBilibiliConnection`、`BilibiliDanmakuClient`（nav 取密钥 → getDanmuInfo → wss /sub → 认证 → 30s 心跳；单次连接失败即抛，不重连）。
-- `LiveMonitor.Platforms.Twitch`：`TwitchIrcParser`、`ITwitchIrcConnection` + `ClientWebSocketTwitchConnection`、`TwitchDanmakuClient`（匿名只读 IRC：CAP/PASS/NICK/JOIN、PING/PONG、RECONNECT、多行帧、IRCv3 tags）。
+- `LiveMonitor.Platforms.Bilibili`：`BilibiliPacketParser`（纯函数，16B 大端头、zlib/brotli、递归解包、DANMU_MSG/SEND_GIFT/SUPER_CHAT_MESSAGE、op7 认证包、op2 心跳包；表情解析：`info[0][12] == 1` 大表情取 `info[0][13].url`、`info[0][15].extra` 二次 JSON 的 `emots` 取行内表情，只收文本中出现的表情）、`BilibiliWbiSigner`（WBI mixin 置换 + `w_rid` 签名；`getDanmuInfo` 自 2026-11 起必须签名，否则返回 `-352`，客户端缓存 `nav` 的 img/sub key 1 小时）、`IBilibiliWebSocketConnection` + `ClientWebSocketBilibiliConnection`、`BilibiliDanmakuClient`（nav 取密钥 → getDanmuInfo → wss /sub → 认证 → 30s 心跳；单次连接失败即抛，不重连）。
+- `LiveMonitor.Platforms.Twitch`：`TwitchIrcParser`（解析 `@emotes=id:start-end,...` 标签生成静态图 URL，不拉取 7TV/BTTV/FFZ 词典）、`ITwitchIrcConnection` + `ClientWebSocketTwitchConnection`、`TwitchDanmakuClient`（匿名只读 IRC：CAP/PASS/NICK/JOIN、PING/PONG、RECONNECT、多行帧、IRCv3 tags）。
 - `LiveMonitor.Platforms.DanmakuClientFactory : IDanmakuClientFactory`（Bilibili / Twitch，其他平台返回 null）。
 
 ### Danmaku（新工程）
 
 - `Filters/KeywordFilter`：包含匹配 + 正则（`Compiled | IgnoreCase | CultureInvariant`，100ms 超时）；非法正则跳过并记日志；可热更新。
-- `Filters/BilibiliUnicycleFilter`：≤6 字短情绪词与游客 uid=0 放行、10 分钟静默、30s 长文本 / 15s 完全一致 / 60s 机械复读、15 分钟无发言状态驱逐。
+- `Filters/BilibiliUnicycleFilter`：≤6 字短情绪词与游客 uid=0 放行、10 分钟静默、30s 长文本 / 15s 完全一致 / 60s 机械复读、15 分钟无发言状态驱逐；`FoldEmotes` 把每个 `[表情]` 折算 1 字符后再算长度/归一化，`IsSticker` 纯表情包直接放行（避免表情连发被误杀）。
 - `Analyzers/SlidingWindowDetector`：按房间 1 秒环形桶，加权短窗/基线、绝对条数下限、冷却、`666/草/神回/Pog` +0.5 权重。
 - `HighlightSettingsStore`：通过 `IAppSettingsRepository` 读写高能参数（InvariantCulture，非法值回落默认）。
 - `DanmakuManager`：按 `(Platform, RoomId)` 引用计数共享连接；Acquire 返回 `DanmakuSessionHandle`（批量 50ms `MessagesReceived`）；管线 = KeywordFilter → BilibiliUnicycleFilter → SlidingWindowDetector → 批量渲染；高能事件事件广播 + 异步落盘；退避 3s→10s→30s→60s（稳定 30s 重置），可注入 delay/clock；`ReloadSettingsAsync` / `UpdateHighlightRulesAsync` / `SetUnicycleEnabledAsync` 热更新；`DisposeAsync` 断连 + flush。
@@ -37,13 +37,14 @@
 
 ### Desktop（集成）
 
-- `Controls/DanmakuOverlay`：Avalonia 自绘，30fps 单 DispatcherTimer；车道渲染、同屏上限 30（紧凑 15）、pending 600、超限丢渲染不丢统计、阴影/礼物配色。
+- `Controls/DanmakuOverlay`：Avalonia 自绘，由共享的 `DanmakuRenderTicker`（60fps、多窗格共用一个 DispatcherTimer，Stopwatch 计算帧 delta）驱动，控件自身不再各起定时器；车道渲染、同屏上限 30（紧凑 15）、pending 600、超限丢渲染不丢统计、阴影/礼物配色；表情渲染默认开启静态图片（`DanmakuEmoteText` 拆分文本/表情段，`DanmakuEmoteImageCache` 内存 LRU 200 张 + 磁盘缓存，`%LOCALAPPDATA%` 不可写时退到 `%TEMP%/LiveMonitor/emote-cache`），只解码首帧、不做动画；缓存未命中时先显示 `[表情名]` 文本并后台下载。
+- 表情设置：`DanmakuStickerVisible`（纯表情包是否渲染，默认开）、`DanmakuEmoteImagesVisible`（行内/纯表情是否下载并显示静态图片，默认开；关闭后全部退化为 `[表情]` 文本）。
 - `MpvPlayerView`：Video 之上、状态层之下插入 `DanmakuLayer`；`DanmakuMasterEnabled`（全局总闸）与 `DataContext` 上的 `IsDanmakuVisible`（窗格开关）共同决定可见性；`PushDanmaku/ClearDanmaku`；紧凑模式切 15 条上限。
 - `MainWindowViewModel`：`_danmakuHandles` + `SyncDanmakuSubscriptions()` 在房间增删/换位/方案加载/重建/启动全部路径 reconcile；订阅只跟「房间在工作区」绑定；消息批量 UI 线程投递（tile 播放器 + 焦点浮层）；`InitializeDanmakuAsync` 启动回填高能事件；`ApplyDanmakuMasterSettingAsync` 应用全局总闸；`Dispose` 释放订阅并最多等 2s flush。
 - 焦点浮层：`ToggleFocusAsync` 里 `new MpvPlayerView { DataContext = tile }` 修复弹幕开关/标题绑定；同房间共享连接（不额外 Acquire）。
 - 高能事件面板：工作区右侧叠加 `Border`（不塞 Dock，避免污染 `DockLayoutJson`）；顶栏「高能事件」开关；内存 200 条 + 清空/收起 + 空态。
 - 状态栏：`UnicycleBlockedText` 接 manager 全局累计拦截数。
-- 设置页：屏蔽词条新增「正则」勾选；新增高能参数卡片（短窗/基线/倍数/绝对下限/冷却/加权关键词，保存/恢复默认）；`MainWindow.OnSettings` 关闭后调用 `Danmaku.ReloadSettingsAsync()` + 重新应用全局总闸。
+- 设置页：屏蔽词条新增「正则」勾选；新增高能参数卡片（短窗/基线/倍数/绝对下限/冷却/加权关键词，保存/恢复默认）；新增「渲染纯表情包弹幕」开关（写 `DanmakuStickerVisible`，关闭后纯表情包仅统计与高能检测）与「显示表情图片（静态，多屏时建议关闭）」开关（写 `DanmakuEmoteImagesVisible`）；`MainWindow.OnSettings` 关闭后调用 `Danmaku.ReloadSettingsAsync()` + 重新应用全局总闸。
 
 ## 与 `limoclip_v0_2.md` 的关键偏差（以本文件为准）
 
@@ -54,6 +55,7 @@
 5. **高能参数持久化 + 事件落盘**：参数写 `AppSettings`；`HighlightEvent` 写 `HighlightEvents` 表，启动回填面板最近 200 条。
 6. **面板落点**：右侧叠加层，不写 Dock 结构。
 7. **房间号**：弹幕客户端直接用 DB 中 `LiveRoom.RoomId`（B站为 `get_info` 返回的真实 room_id），不重走短号解析。
+8. **表情/表情包**：元数据保留（`IsSticker` / `Emotes`）+ 过滤防误杀（`FoldEmotes` 折算、`IsSticker` 豁免）+ 渲染可选降级；V0.2 后续按用户反馈补了「静态表情图片」渲染（默认开、可关，LRU 200 + 磁盘缓存，只解码首帧、不跑 GIF/WebP 动画）；高能统计照常计入表情弹幕；V0.4 导出 `.ass` 时行内表情保留 `[表情]` 文本。
 
 ## Step 6 真实网络验证（2026-11-22，自动化部分已完成）
 

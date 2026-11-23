@@ -53,7 +53,8 @@
 src/
 ├── LiveMonitor.Core/
 │   ├── Models/
-│   │   ├── DanmakuMessage.cs            # 统一弹幕消息模型（含 Platform）
+│   │   ├── DanmakuMessage.cs            # 统一弹幕消息模型（含 Platform 与表情元数据）
+│   │   ├── DanmakuEmote.cs              # 表情/表情包元数据（名称、图片地址、平台 ID）
 │   │   ├── HighlightEvent.cs            # 高能打点事件模型
 │   │   └── HighlightRuleOptions.cs      # 高能检测参数配置
 │   └── Interfaces/
@@ -89,8 +90,16 @@ public record DanmakuMessage(
     string SenderName,
     string Content,
     DateTimeOffset Timestamp,
-    bool IsGiftOrSuperChat = false
+    bool IsGiftOrSuperChat = false,
+    bool IsSticker = false,
+    IReadOnlyList<DanmakuEmote>? Emotes = null
 );
+
+/// <summary>
+/// 表情/表情包元数据。V0.2 只解析与保留，不在多屏场景渲染图片。
+/// Name 为去括号后的表情名（如 [doge] → doge），Url 为平台图片地址，Id 为平台表情 ID。
+/// </summary>
+public record DanmakuEmote(string Name, string? Url = null, string? Id = null);
 
 public record HighlightRuleOptions(
     int ShortWindowSeconds = 10,
@@ -135,6 +144,25 @@ public interface IHighlightDetector
 }
 ```
 
+### 3.3 表情/表情包元数据处理（2026-11-23 追加）
+
+核心原则：**解析留元数据、过滤防误杀、渲染按需降级**。默认不下载、不渲染表情图片，也不在弹幕叠加层跑 GIF/WebP 动画；但协议解析与独轮车过滤器必须提前处理好，否则会误杀正常观众。2026-11-23 按用户反馈补了「静态表情图片」可选渲染（默认开启，设置页可关；只解码静态首帧，见渲染层）。
+
+- **解析层（零额外网络请求）**
+  * B站 `DANMU_MSG`：大表情/房间表情包由 `info[0][12] == 1` 标识，此时 `info[1]` 只是占位文本，图片地址在 `info[0][13].url`、唯一 ID 在 `info[0][13].emoticon_unique`，解析为 `IsSticker = true` 的单元素 `Emotes`；行内小表情（`[doge]` 等）嵌在 `info[1]` 文本中，图片字典在 `info[0][15].extra` 二次 JSON 的 `emots` 字段，只收录实际出现在文本里的表情。
+  * Twitch `PRIVMSG`：官方表情在 `@emotes=id:start-end,...` 标签中，按 UTF-16 下标切出名字，Url 用 `https://static-cdn.jtvnw.net/emoticons/v2/{id}/static/dark/1.0`（静态帧）；7TV/BTTV/FFZ 第三方表情需要频道词典，V0.2 不处理，按纯文本显示。
+  * `extra` 等字段不可解析时降级为普通消息，不影响投递。
+- **过滤层（`BilibiliUnicycleFilter`）**
+  * `FoldEmotes` 把每个 `[...]` 表情整体折算为 1 个字符后再计算 `RawLength` 与 `NormalizeText`，避免 `[打call]×4` 原始 20 字被“长文本连发”规则误判。
+  * `IsSticker == true` 的纯表情包弹幕直接放行（视同 ≤6 字短情绪词豁免），不进入单用户跟踪与静默状态。
+  * 高能检测（`SlidingWindowDetector`）照常把表情弹幕计入密度：表情刷屏本身就是强信号，不得过滤。
+- **渲染层（`DanmakuOverlay`）**
+  * 默认渲染静态表情图片（`DanmakuEmoteImagesVisible`，默认开，设置页可关）：`DanmakuEmoteText.Split` 把文本切成文本段/表情段，命中 `DanmakuEmoteImageCache` 的图片按 22px 高与文本在 `DrawingContext` 中混排；缓存未命中时先显示 `[表情名]` 文本并后台下载，下一帧命中后替换为图片。
+  * 图片缓存：内存 LRU 最多 200 张已解码 `Bitmap` + 磁盘缓存（`%LOCALAPPDATA%\LiveMonitor\emote-cache`，不可写时退到 `%TEMP%\LiveMonitor\emote-cache`，软上限 2000 文件）；下载/解码在后台线程完成，只解码静态首帧，GIF/WebP 不播放动画。
+  * 设置页另有 `DanmakuStickerVisible` 开关（默认开）：关闭后纯表情包弹幕只参与统计与高能检测、不再渲染（“忽略纯表情包渲染，仅统计”）。
+  * 多屏场景建议关闭「显示表情图片」以降低下载与显存开销；关闭后行内表情保留为 `[doge]` 文本。
+- **V0.4 导出边界**：有弹幕版导出走 FFmpeg 烧录 `.ass` 字幕，`.ass` 不支持内嵌 PNG/WebP；行内表情保留为 `[表情]` 文本，纯大表情包按配置保留文本或跳过。
+
 ---
 
 ## 4. 核心模块设计规范
@@ -157,7 +185,7 @@ public interface IHighlightDetector
 
 ### 4.3 `DanmakuOverlay`（轻量级叠加层）
 * 叠放在 `MpvPlayerView` 的视频层上方、HUD 控制条下方，设置 `IsHitTestVisible="False"` 确保不阻断鼠标双击焦点和拖拽操作。
-* 采用轻量级 `Canvas` + `DispatcherTimer`（30fps 驱动位置更新，而非为每条弹幕创建独立 Avalonia 动画）或 `DrawingContext` 自绘，控制同屏上限（默认 30 条），超出上限直接丢弃新入队渲染项。
+* 采用轻量级 `Canvas` + `DispatcherTimer`（30fps 驱动位置更新，而非为每条弹幕创建独立 Avalonia 动画）或 `DrawingContext` 自绘，控制同屏上限（默认 30 条），超出上限直接丢弃新入队渲染项。**实施偏差（2026-11-23）**：按“滚动观感偏卡”的反馈改为 `DanmakuRenderTicker` 共享 60fps 帧循环（所有窗格复用一个 `DispatcherTimer`，单帧 delta 用 `Stopwatch` 计算），控件自绘仍沿用 `DrawingContext`。
 
 ### 4.4 `SlidingWindowDetector`（高能空跑与事件面板）
 * 为每个房间维护长度为 180 的环形秒级计数数组（对应 3 分钟历史）与当前秒游标。
@@ -663,16 +691,16 @@ public sealed class BilibiliUnicycleFilter : IDanmakuFilter
   * *实施偏差*：未按原计划取消 `IPlatformProvider.CreateDanmakuClient` 注释，而是新增 Core `IDanmakuClientFactory`，由 `LiveMonitor.Platforms.DanmakuClientFactory` 实现（`Danmaku` 层只依赖 Core）。
 - [x] **Step 2：落地 B站 协议解包器与 `BilibiliDanmakuClient`（1.5 天）**
   * 落地 `BilibiliPacketParser`（含 Zlib / Brotli 解压单测）；在 `Platforms.Bilibili` 实现 `getDanmuInfo`、`ClientWebSocket` 认证与 30 秒心跳；透传已绑定的 B站 Cookie 确保拿到真实 `uid`。
-  * *实施偏差*：WebView2 登录 Cookie 白名单没有 `buvid3`，缺失时用无名 `spi` 接口兜底；V0.2 只收不发，游客态可连接（uid=0 时独轮车按设计放行）。B站已对 `getDanmuInfo` 加 WBI 签名风控（未签名返回 `-352`），补 `BilibiliWbiSigner`（mixin 置换 + `w_rid`，密钥来自匿名 `nav` 接口并缓存 1 小时）。36 个测试。
+  * *实施偏差*：WebView2 登录 Cookie 白名单没有 `buvid3`，缺失时用无名 `spi` 接口兜底；V0.2 只收不发，游客态可连接（uid=0 时独轮车按设计放行）。B站已对 `getDanmuInfo` 加 WBI 签名风控（未签名返回 `-352`），补 `BilibiliWbiSigner`（mixin 置换 + `w_rid`，密钥来自匿名 `nav` 接口并缓存 1 小时）。36 个测试。表情元数据解析：`info[0][12] == 1` 大表情（`info[0][13].url`）与 `info[0][15].extra` 行内表情字典（2026-11-23 追加）。
 - [x] **Step 3：落地 `TwitchDanmakuClient`（0.5 天）**
   * 在 `Platforms.Twitch` 实现 IRC WebSocket 连接、匿名/OAuth 登录、`PING/PONG` 保活与 `PRIVMSG` 标签解析。
   * *实施偏差*：`auth-token` 是网站会话而非 IRC OAuth，V0.2 只做匿名只读；26 个测试。
 - [x] **Step 4：落地过滤管线、`SlidingWindowDetector` 与 `DanmakuManager`（1.5 天）**
   * 实现 `KeywordFilter`（联动 SQLite `DanmakuBlockKeywords` 热更新）、`BilibiliUnicycleFilter`（补齐三条规则与短词豁免单测）、`SlidingWindowDetector` 与按 `(Platform, RoomId)` 引用计数复用的 `DanmakuManager`。
-  * *实际实现*：另加 `HighlightSettingsStore`（参数持久化）与 `HighlightEventRepository`（高能事件落盘，`HighlightEvents` 表）；manager 退避 3/10/30/60s、批量 50ms、`ReloadSettingsAsync`/`UpdateHighlightRulesAsync`/`SetUnicycleEnabledAsync` 热更新。Danmaku 88 测试、Data 21 测试。
+  * *实际实现*：另加 `HighlightSettingsStore`（参数持久化）与 `HighlightEventRepository`（高能事件落盘，`HighlightEvents` 表）；manager 退避 3/10/30/60s、批量 50ms、`ReloadSettingsAsync`/`UpdateHighlightRulesAsync`/`SetUnicycleEnabledAsync` 热更新。Danmaku 88 测试、Data 21 测试。独轮车过滤器追加 `[表情]` 长度折算与 `IsSticker` 大表情豁免（2026-11-23 追加）。
 - [x] **Step 5：接入 `DanmakuOverlay` 与高能事件流面板（1.5 天）**
   * 激活分屏底部控制条的「弹幕开/关」按钮与设置页开关，实现带同屏上限的 `DanmakuOverlay`（确保主分屏与焦点浮层共享单路弹幕流）；在主界面增加可折叠的「高能打点日志」面板与状态栏独轮车拦截计数。
-  * *实际实现*：全局总闸只停渲染、不断连；面板放在工作区右侧叠加层（不写 Dock 结构）；设置页开放正则词条与高能参数卡片，关闭设置即热更新；启动回填最近 200 条高能事件。
+  * *实际实现*：全局总闸只停渲染、不断连；面板放在工作区右侧叠加层（不写 Dock 结构）；设置页开放正则词条与高能参数卡片，关闭设置即热更新；启动回填最近 200 条高能事件。表情渲染默认文本化（`[doge]` / `[表情名]`），并新增 `DanmakuStickerVisible` 开关，纯表情包可仅统计不渲染（2026-11-23 追加）。
 - [~] **Step 6：真实直播联调与性能对比验收（1 天）**
   * 对比 V0.1 基准数据，测试 6~9 路高热度直播间全开弹幕的 UI 帧率与内存占用；挂机验证 B站独轮车拦截准确率与高能检测阈值稳定性。
   * *当前状态*：自动化测试与本地构建全部通过；**真实网络验证已完成**——B站 `getDanmuInfo` 补 WBI 签名后游客态收弹幕 24 条（房间 21452505）、Twitch 匿名 IRC 收弹幕 3 条（ludwig）、GUI 启动冒烟正常。剩余人工挂机：弹幕海性能、独轮车误杀率、高能阈值稳定性、B站登录态 uid 非 0。
@@ -693,3 +721,23 @@ public sealed class BilibiliUnicycleFilter : IDanmakuFilter
   - Data：`Repositories/HighlightEventRepository.cs`（`LiveMonitorDatabase.Schema` 追加 `HighlightEvents` 表与索引）。
   - Desktop：`Controls/DanmakuOverlay.cs`、`ViewModels/HighlightEventItem.cs`；改动 `Player/MpvPlayerView.axaml(.cs)`、`ViewModels/MainWindowViewModel.cs`、`Views/MainWindow.axaml(.cs)`、`Views/SettingsWindow.axaml(.cs)`、`Services/AppServices.cs`、`LiveMonitor.Desktop.csproj`。
 - 与本文档其他章节的契约差异，以 `HANDOFF.md` 的「与 limoclip_v0_2.md 的关键偏差」为准。
+
+---
+
+## 8. 表情/表情包处理追加实施记录（2026-11-23）
+
+- 基线 `89230a1`；Release `dotnet build LiveMonitor.sln` 0 错误，全仓库测试 **310/310**（Data 21、Platforms 120、Danmaku 95、Desktop 74）；改动未提交。
+- 变更文件（主要）：
+  - Core：新增 `Models/DanmakuEmote.cs`；`Models/DanmakuMessage.cs` 追加 `IsSticker` / `Emotes` 位置参数与 `HasEmotes` / `PrimaryEmoteName`；`AppSettingKeys.cs` 追加 `DanmakuStickerVisible`。
+  - Platforms.Bilibili：`BilibiliPacketParser.cs` 解析 `info[0][12] == 1` 的大表情（URL 取 `info[0][13].url`、ID 取 `emoticon_unique`）与 `info[0][15].extra` 的行内表情字典（只收录文本中出现的表情，坏 JSON 降级为普通消息）。
+  - Platforms.Twitch：`TwitchIrcParser.cs` 解析 `@emotes=id:start-end,...` 标签，生成静态图 URL（`/static/dark/1.0`），不拉取 7TV/BTTV/FFZ 词典。
+  - Danmaku：`Filters/BilibiliUnicycleFilter.cs` 新增 `FoldEmotes`（每个 `[...]` 折算 1 字符）与 `IsSticker` 直接放行；`RawLength` 与 `NormalizeText` 均基于折算后文本，避免正常表情连发被“长文本/机械复读”误杀。
+  - Desktop：`Controls/DanmakuOverlay.cs` 新增 `ShowStickers` 与 `FormatText`（纯表情包渲染为 `[表情名]` 文本，不创建图片控件）；`Player/MpvPlayerView.axaml.cs` 透传 `DanmakuStickersEnabled`；`ViewModels/MainWindowViewModel.cs` 读取并下发全局开关；`Views/SettingsWindow.axaml(.cs)` 新增“渲染纯表情包弹幕（关闭后仅统计与高能检测）”开关，切换即时保存。
+  - 测试：`tests/LiveMonitor.Danmaku.Tests/BilibiliUnicycleFilterTests.cs` +3（`FoldEmotes` Theory 5 组、表情连发不误杀、大表情豁免）；`tests/LiveMonitor.Platforms.Tests/BilibiliPacketParserTests.cs` +4（大表情、行内表情、无 URL、坏 extra 降级）；`tests/LiveMonitor.Platforms.Tests/TwitchIrcParserTests.cs` +2（有/无 `@emotes` 标签）。
+- 行为口径：表情只做元数据保留与过滤/渲染降级；高能统计正常计入表情弹幕；V0.4 导出 .ass 时行内表情保留 `[表情]` 文本。默认不下载表情图片。
+- 后续追加（2026-11-23，用户反馈“表情还是只有 [文本]”）：
+  - 新增 `Desktop/Controls/DanmakuEmoteText.cs`（`Split` 文本/表情分段、`ResolveImageUrl` 按名称解析地址）与 `DanmakuEmoteImageCache.cs`（内存 LRU 200、磁盘缓存 `%LOCALAPPDATA%\LiveMonitor\emote-cache`（不可写时退到 `%TEMP%`）、后台下载解码、只解首帧）。
+  - `DanmakuOverlay` 改为 `Segment` 混排（文本段 + 22px 高图片段），新增 `ShowEmoteImages`；`AppSettingKeys.DanmakuEmoteImagesVisible`（默认开）与设置页「显示表情图片（静态，多屏时建议关闭）」开关；`MpvPlayerView` / `MainWindowViewModel` 透传。
+  - 同期渲染循环改为多窗格共享 `DanmakuRenderTicker`（60fps，替代每窗格 30fps DispatcherTimer）。
+  - 测试 +8（`DanmakuEmoteTextTests`）；Release 全仓库 **310/310**。真实直播间（1741667419）截图验证行内表情显示为静态小图，关闭开关后退回 `[表情]` 文本。
+

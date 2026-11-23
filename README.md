@@ -1,4 +1,4 @@
-# LiveMonitor
+﻿# LiveMonitor
 
 多屏直播监控室。实现依据：
 
@@ -10,10 +10,10 @@
 ## V0.2 进度（弹幕引擎与高能空跑，已实现，待真实直播验收）
 
 - [x] Step 1：Core 弹幕契约 + `LiveMonitor.Danmaku` / `LiveMonitor.Danmaku.Tests` 项目（sln 现 12 个工程）
-- [x] Step 2：B站弹幕客户端（`getDanmuInfo` → WS 认证 → 30s 心跳 → zlib/brotli 解包 → `DANMU_MSG` / `SEND_GIFT` / `SUPER_CHAT_MESSAGE`）+ 纯函数解包器；`BilibiliWbiSigner` 为 `getDanmuInfo` 做 WBI 签名（2026-11 起未签名返回 `-352`）；36 个测试
-- [x] Step 3：Twitch 匿名 IRC 客户端（CAP/PASS/NICK/JOIN、PING/PONG、IRCv3 tags 解析）+ 26 个测试
-- [x] Step 4：`KeywordFilter`（包含 + 正则）、`BilibiliUnicycleFilter`、`SlidingWindowDetector`、`HighlightSettingsStore`、`HighlightEventRepository`（高能事件落盘）与 `DanmakuManager`（按 `(Platform, RoomId)` 引用计数共享连接、退避重连 3/10/30/60s、50ms 批量、热更新）；Danmaku 88 测试、Data 21 测试
-- [x] Step 5：`DanmakuOverlay`（30fps 车道渲染、同屏上限 30 / 紧凑 15、超限丢渲染不丢统计）；分屏弹幕开关与全局总闸（关渲染保留连接与高能统计）；工作区右侧可折叠「高能事件」面板（内存 200 条，完整历史入库）；状态栏「独轮车已拦」实时计数；设置页开放正则词条与高能参数卡片，关闭设置即热更新
+- [x] Step 2：B站弹幕客户端（`getDanmuInfo` → WS 认证 → 30s 心跳 → zlib/brotli 解包 → `DANMU_MSG` / `SEND_GIFT` / `SUPER_CHAT_MESSAGE`）+ 纯函数解包器；`BilibiliWbiSigner` 为 `getDanmuInfo` 做 WBI 签名（2026-11 起未签名返回 `-352`）；表情元数据解析（大表情 `info[0][12]` / 行内表情 `info[0][15].extra`）；36 个测试
+- [x] Step 3：Twitch 匿名 IRC 客户端（CAP/PASS/NICK/JOIN、PING/PONG、IRCv3 tags 解析、`@emotes` 表情标签）+ 26 个测试
+- [x] Step 4：`KeywordFilter`（包含 + 正则）、`BilibiliUnicycleFilter`（含 `[表情]` 长度折算与大表情豁免）、`SlidingWindowDetector`、`HighlightSettingsStore`、`HighlightEventRepository`（高能事件落盘）与 `DanmakuManager`（按 `(Platform, RoomId)` 引用计数共享连接、退避重连 3/10/30/60s、50ms 批量、热更新）；Danmaku 95 测试、Data 21 测试、Platforms 120 测试
+- [x] Step 5：`DanmakuOverlay`（60fps 共享帧循环车道渲染、同屏上限 30 / 紧凑 15、超限丢渲染不丢统计；表情默认渲染：行内 `[doge]` 按需替换为静态小图，纯大表情包默认显示为 `[表情名]`/静态图，可在设置页关闭「显示表情图片」或改为仅统计）；分屏弹幕开关与全局总闸（关渲染保留连接与高能统计）；工作区右侧可折叠「高能事件」面板（内存 200 条，完整历史入库）；状态栏「独轮车已拦」实时计数；设置页开放正则词条与高能参数卡片，关闭设置即热更新
 - [~] Step 6（真实网络验证已完成，人工挂机验收待做）：B站 `getDanmuInfo` 补 WBI 签名后游客态真实收弹幕 24 条（房间 21452505）；Twitch 匿名 IRC 真实收弹幕 3 条（ludwig）；GUI 启动冒烟正常（窗口存活、DB 创建、无启动错误）。剩余人工挂机项：6~9 路弹幕海 UI 帧率/内存、独轮车误杀率、高能阈值稳定性、B站登录态（SESSDATA）下 uid 非 0
 
 > 说明：实际实现用 Core 的 `IDanmakuClientFactory`（平台工厂在 `Platforms` 聚合层）取代了原计划的 `IPlatformProvider.CreateDanmakuClient`，使 `LiveMonitor.Danmaku` 只依赖 Core；B站 V0.2 只收弹幕、不发弹幕，游客可连，登录后独轮车单用户识别才完整。
@@ -61,7 +61,7 @@
   - Dock 无边框：`ToolControl` + `ToolChromeControl` 自定义 `ControlTheme`，Pane 无标题栏/pin/close；空窗格占位与播放器铺满；分割线使用 5px `ProportionalStackPanelSplitter` 样式
   - 方案保存/另存为/载入：`DockLayoutJson` 保存窗口树与 `Proportion`，房间归属单独存 `LayoutSlots`；反序列化后按 `PaneId` 重建并 `BindTiles`，启动恢复双流
   - 账号与设置：B站/Twitch 登录窗（WebView2 独立 STA 线程 + CookieManager 轮询 + DPAPI）、屏蔽词库、独轮车开关
-  - 测试：`tests/LiveMonitor.Desktop.Tests` 58 个 xUnit 测试通过（全仓库 281 个），覆盖 Auto-Fit 网格/行分布（含 3 路 [1,2]）、30 路、Proportion 克隆/套用、末行追加、比例变化后标自定义比例、房间放入工作区、3 路自动排布、自定义模式满窗格追加、平台徽章配色与在线状态点
+  - 测试：`tests/LiveMonitor.Desktop.Tests` 74 个 xUnit 测试通过（全仓库 310 个），覆盖 Auto-Fit 网格/行分布（含 3 路 [1,2]）、30 路、Proportion 克隆/套用、末行追加、比例变化后标自定义比例、房间放入工作区、3 路自动排布、自定义模式满窗格追加、平台徽章配色与在线状态点、弹幕轨道分配（总是优先顶部空闲轨道）、表情文本分段与图片地址解析（`DanmakuEmoteText`：普通文本单段、行内表情三段、连续表情、未闭合括号、大小写匹配等 8 个用例）
   - 实测：B站 7734200 与 Twitch `eslcs` 同屏播放；拖拽分割线后自动切换为 `自定义比例`，再双击加入第 3 路会追加窗格；保存后重启保持 `1×3` 与两条分割线。设置窗添加屏蔽词与独轮车开关持久化成功；B站登录页可正常加载
   - 限制：WebView2 登录成功后的 Cookie 捕获/DPAPI 保存路径尚未用真实账号端到端验证；登录窗关闭/取消会显示未捕获提示。`mpv_render_context_render` 告警仍需在 Step 8 长稳压测中确认；Twitch `yt-dlp` 偶发外部 SSL 瞬断（`UNEXPECTED_EOF_WHILE_READING`），失败态会显示重连按钮
 - [x] Step 7：方案持久化与差量切换
