@@ -102,6 +102,39 @@
         <Border Background="#151923" BorderBrush="#262B36" BorderThickness="1"
                 CornerRadius="8" Padding="14">
           <StackPanel Spacing="10">
+            <TextBlock Text="组件与插件更新" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto,Auto"
+                  ColumnSpacing="10" RowSpacing="8">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="yt-dlp"
+                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
+              <TextBlock Grid.Row="0" Grid.Column="1" x:Name="YtDlpVersionText" Margin="12,0"
+                         FontSize="11" Foreground="#7C8596" VerticalAlignment="Center"
+                         Text="尚未检查" />
+              <Button Grid.Row="0" Grid.Column="2" x:Name="CheckYtDlpButton" Content="检查更新"
+                      FontSize="11" Padding="10,4" Click="OnCheckYtDlpUpdate" />
+              <Button Grid.Row="0" Grid.Column="3" x:Name="InstallYtDlpButton" Content="下载并更新"
+                      FontSize="11" Padding="10,4" IsEnabled="False" Click="OnInstallYtDlpUpdate" />
+
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="平台插件"
+                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
+              <TextBlock Grid.Row="1" Grid.Column="1" x:Name="PluginUpdateSummaryText" Margin="12,0"
+                         FontSize="11" Foreground="#7C8596" VerticalAlignment="Center"
+                         Text="尚未检查（内置 B 站 / Twitch / YouTube）" TextWrapping="Wrap" />
+              <Button Grid.Row="1" Grid.Column="2" x:Name="CheckPluginsButton" Content="检查插件更新"
+                      FontSize="11" Padding="10,4" Click="OnCheckPluginUpdates" />
+              <Button Grid.Row="1" Grid.Column="3" x:Name="InstallPluginsButton" Content="下载并安装"
+                      FontSize="11" Padding="10,4" IsEnabled="False" Click="OnInstallPluginUpdates" />
+            </Grid>
+            <TextBlock x:Name="UpdateStatusText" FontSize="10" Foreground="#7C8596"
+                       TextWrapping="Wrap" Text="更新组件会从 GitHub 下载，需要联网。" />
+            <TextBlock FontSize="10" Foreground="#6B7484" TextWrapping="Wrap"
+                       Text="平台插件包使用 Ed25519 签名校验，验签不通过会被拒绝加载；插件在无录制/弹幕任务时立即生效，否则下次启动生效。yt-dlp 更新会先下载到临时文件并校验，再原子替换 tools 目录内的 exe。" />
+          </StackPanel>
+        </Border>
+
+        <Border Background="#151923" BorderBrush="#262B36" BorderThickness="1"
+                CornerRadius="8" Padding="14">
+          <StackPanel Spacing="10">
             <TextBlock Text="弹幕屏蔽词库" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
             <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
               <TextBox Grid.Column="0" x:Name="KeywordBox"
