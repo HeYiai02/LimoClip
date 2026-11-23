@@ -1207,7 +1207,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            StatusText = $"打开输出目录失败：{ex.Message}";
+            StatusText = $"打开输出目录失败：{ex.Message}。请手动在资源管理器中打开：{_outputDirectory}";
         }
     }
 

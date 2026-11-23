@@ -531,6 +531,10 @@ public sealed class RecordingManager : IAsyncDisposable
 
             var target = await _targets.GetAsync(room.Id, ct).ConfigureAwait(false);
             var outputDirectory = await ResolveOutputDirectoryAsync(target, ct).ConfigureAwait(false);
+
+            // 开录前先验证目录可写：避免先落库会话、几秒后 ffmpeg 才因权限失败。
+            RecordingDirectoryGuard.EnsureWritable(outputDirectory);
+
             var startedAtUtc = _clock();
             var baseName = RecordingFileNaming.BuildBaseName(room, startedAtUtc);
             var videoPath = Path.Combine(outputDirectory, baseName + ".mkv");
@@ -1332,6 +1336,7 @@ public sealed class RecordingManager : IAsyncDisposable
         catch (Exception ex)
         {
             _log($"自动录制检查失败（{FormatRoom(room)}）：{ex.Message}");
+            NotifyStatus($"自动录制失败（{FormatRoomDisplayName(room)}）：{ex.Message}");
         }
         finally
         {
@@ -1491,17 +1496,10 @@ public sealed class RecordingManager : IAsyncDisposable
             .FirstOrDefault();
 
     private static string DescribeExit(ActiveRecording active)
-    {
-        var stderr = string.IsNullOrWhiteSpace(active.StderrTail)
-            ? "无 stderr 输出"
-            : active.StderrTail!.Trim();
-        if (stderr.Length > 300)
-        {
-            stderr = stderr[^300..];
-        }
-
-        return $"ffmpeg 异常退出（exitCode={active.ExitCode}）：{stderr}";
-    }
+        => RecordingDirectoryGuard.DescribeFfmpegFailure(
+            active.ExitCode,
+            active.StderrTail,
+            RecordingDirectoryGuard.TryGetDirectory(active.Session.VideoFilePath));
 
     private RecordingProgress BuildProgress(ActiveRecording active)
     {

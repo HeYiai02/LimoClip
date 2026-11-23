@@ -55,7 +55,8 @@
 
 - [x] Step 1：Core `AsrTranscriptSegment` / `AsrTranscriptResult` / `IAsrProvider` + 5 个 `Asr*` AppSettings；`LiveMonitor.Media/Asr/OpenAiCompatibleAsrProvider`（ffmpeg 抽 16kHz MP3 → OpenAI 兼容 `/v1/audio/transcriptions` → `segments`/`text` 双格式解析 → SHA256 本地缓存 → 取消 / Job Object）+ 7 个单测
 - [x] Step 2：设置页「语音识别（ASR）」分区（4 预设 + DPAPI 加密 Key + `GET /models` 连通性测试）；剪辑台右侧「🎙 语音识别」面板（识别当前选区 / 取消 / 全文 / 服务商 / 逐句点击 seek / 复制文本）；高能卡片「🎙 转写」按钮与摘要；全局互斥 + 版本号防陈旧回调 + 切换视频清空结果；Desktop +18 测试
-- 测试：Data 37 / Platforms 120 / Danmaku 98 / Media 147 / Desktop 94 = **496 全绿**；构建 0 错误
+- 测试：Data 37 / Platforms 120 / Danmaku 98 / Media 164 / Desktop 94 = **513 全绿**；构建 0 错误
+- 产品侧加固（普通用户机器更稳妥）：录制前目录可写性预检（`RecordingDirectoryGuard`，开录/选目录时即校验，失败给出中文原因与建议目录）；`ffmpeg exit -13 / Permission denied` 转为「目标目录没有写权限或被安全软件拦截」提示；「打开目录」失败提示与手动路径；启动器已入库 `scripts/refresh-and-run.ps1`（见「本机沙箱环境」）。新增 17 个 Media 单测
 - 实测（真实 siliconflow Key）：55s 录制片段「识别当前选区」约 11s 返回（`siliconflow_cn / FunAudioLLM/SenseVoiceSmall`），缓存写 `%LocalAppData%/LiveMonitor/cache/asr/{sha256}.asr.json`、临时 MP3 已清理；证据 `.cache/v05bug-3-asr-bottom.png`
 - 限制：`TestConnectionAsync` 走 `GET {base}/models`，不暴露该接口的服务会显示失败（不影响真实转写）；未接入离线 `Sherpa-ONNX`；V0.5-B（插件热更新 + YouTube）与 C（虎牙/斗鱼/抖音）**暂缓**（恢复入口见 `HANDOFF.md`）
 
@@ -178,7 +179,7 @@ $env:LOCALAPPDATA = "$root\.appdata"
 $env:TMP = "$root\.cache\temp"; $env:TEMP = $env:TMP
 ```
 
-另外本机对「位于工作区 `E:\code\liveSurveilance` 内的可执行文件」有强制写沙箱：工作区内 exe 只能写工作区内目录，连它拉起的子进程 `explorer.exe` 也会以 `0xC0000142` 启动失败。因此**不要直接运行 `src/LiveMonitor.Desktop/bin/.../LiveMonitor.Desktop.exe`**，一律使用启动器（桌面快捷方式「LiveMonitor（工作区外运行）」或 `C:\Users\Administrator\LimoClip\refresh-and-run.ps1`）：构建 → 复制到工作区外 `E:\LimoClip-v05-run` → 启动。详见 `HANDOFF.md`「本机运行限制：工作区内可执行文件被强制写沙箱」。
+另外本机对「位于工作区 `E:\code\liveSurveilance` 内的可执行文件」有强制写沙箱：工作区内 exe 只能写工作区内目录，连它拉起的子进程 `explorer.exe` 也会以 `0xC0000142` 启动失败。因此**不要直接运行 `src/LiveMonitor.Desktop/bin/.../LiveMonitor.Desktop.exe`**，一律使用仓库内启动器 `scripts/refresh-and-run.ps1`（本机桌面快捷方式「LiveMonitor（工作区外运行）」也指向它）：构建 → 复制到工作区外 `E:\LimoClip-v05-run` → 启动。`-RunDirectory` 可指定输出目录（缺省 `%LOCALAPPDATA%\LimoClip\run`），另有 `-SkipBuild` / `-NoLaunch`。普通机器无便携 SDK 时脚本会自动改用 PATH 里的 `dotnet`。详见 `HANDOFF.md`「本机运行限制：工作区内可执行文件被强制写沙箱」。
 
 `.dev/`、`.cache/`、`.nuget/`、`.dotnet/`、`.appdata/` 均为本机辅助目录，已写入 `.gitignore`。在正常机器上直接 `dotnet restore` / `dotnet run` 即可，不受上述限制。
 

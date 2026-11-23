@@ -229,6 +229,8 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         {
             var normalized = NormalizeDirectory(picked);
             Directory.CreateDirectory(normalized);
+            // 选择时立刻预检可写性，避免录制开始才发现写不进去（普通用户机器常见问题）。
+            RecordingDirectoryGuard.EnsureWritable(normalized);
             await _settings
                 .SetAsync(AppSettingKeys.RecordingDefaultDirectory, normalized)
                 .ConfigureAwait(true);
@@ -247,12 +249,18 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         try
         {
             Directory.CreateDirectory(GlobalDirectory);
-            OpenInExplorer(GlobalDirectory);
-            StatusText = $"已打开目录：{GlobalDirectory}";
+            if (TryOpenInExplorer(GlobalDirectory, out var error))
+            {
+                StatusText = $"已打开目录：{GlobalDirectory}";
+            }
+            else
+            {
+                StatusText = DescribeOpenDirectoryFailure(GlobalDirectory, error);
+            }
         }
         catch (Exception ex)
         {
-            StatusText = $"打开全局目录失败：{ex.Message}";
+            StatusText = $"打开全局目录失败：{ex.Message}。请手动在资源管理器中打开：{GlobalDirectory}";
         }
     }
 
@@ -284,6 +292,8 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         try
         {
             var normalized = NormalizeDirectory(picked);
+            // 独立目录同样先做可写性预检，避免自动录制时才发现目录不可写。
+            RecordingDirectoryGuard.EnsureWritable(normalized);
             await _recordings
                 .SetAutoRecordAsync(item.RoomId, item.AutoRecordEnabled, normalized)
                 .ConfigureAwait(true);
@@ -315,18 +325,24 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
 
     internal Task OpenTargetDirectoryAsync(RecordingTargetItemViewModel item)
     {
+        var directory = item.HasCustomDirectory
+            ? item.CustomSaveDirectory!
+            : GlobalDirectory;
         try
         {
-            var directory = item.HasCustomDirectory
-                ? item.CustomSaveDirectory!
-                : GlobalDirectory;
             Directory.CreateDirectory(directory);
-            OpenInExplorer(directory);
-            StatusText = $"已打开目录：{directory}";
+            if (TryOpenInExplorer(directory, out var error))
+            {
+                StatusText = $"已打开目录：{directory}";
+            }
+            else
+            {
+                StatusText = DescribeOpenDirectoryFailure(directory, error);
+            }
         }
         catch (Exception ex)
         {
-            StatusText = $"打开目录失败：{ex.Message}";
+            StatusText = $"打开目录失败：{ex.Message}。请手动在资源管理器中打开：{directory}";
         }
 
         return Task.CompletedTask;
@@ -340,16 +356,30 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
             var path = item.VideoFilePath;
             if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
             {
-                SelectInExplorer(path);
-                StatusText = $"已在资源管理器中定位：{item.VideoFileName}";
+                if (TrySelectInExplorer(path, out var selectError))
+                {
+                    StatusText = $"已在资源管理器中定位：{item.VideoFileName}";
+                }
+                else
+                {
+                    StatusText = $"定位录像文件失败：{selectError}。请手动在资源管理器中打开：{path}";
+                }
+
                 return Task.CompletedTask;
             }
 
             var directory = string.IsNullOrWhiteSpace(path) ? null : Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(directory) && Directory.Exists(directory))
             {
-                OpenInExplorer(directory);
-                StatusText = $"录像文件不存在，已打开所在目录：{directory}";
+                if (TryOpenInExplorer(directory, out var openError))
+                {
+                    StatusText = $"录像文件不存在，已打开所在目录：{directory}";
+                }
+                else
+                {
+                    StatusText = DescribeOpenDirectoryFailure(directory, openError);
+                }
+
                 return Task.CompletedTask;
             }
 
@@ -602,15 +632,45 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         }
     }
 
-    private static void OpenInExplorer(string path)
-        => Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"")
+    /// <summary>启动资源管理器打开目录；失败时返回可展示的失败原因。</summary>
+    private static bool TryOpenInExplorer(string path, out string? error)
+    {
+        try
         {
-            UseShellExecute = true
-        });
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"")
+            {
+                UseShellExecute = true
+            });
+            error = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
 
-    private static void SelectInExplorer(string filePath)
-        => Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{filePath}\"")
+    /// <summary>启动资源管理器定位文件；失败时返回可展示的失败原因。</summary>
+    private static bool TrySelectInExplorer(string filePath, out string? error)
+    {
+        try
         {
-            UseShellExecute = true
-        });
+            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{filePath}\"")
+            {
+                UseShellExecute = true
+            });
+            error = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    /// <summary>打开目录失败时给用户可执行的替代方案（手动打开路径），而不是只显示异常消息。</summary>
+    private static string DescribeOpenDirectoryFailure(string directory, string? error)
+        => $"打开目录失败：{error}。请手动在资源管理器中打开：{directory}";
 }

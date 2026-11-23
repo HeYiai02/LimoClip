@@ -4,7 +4,7 @@
 
 - 分支 `main`；**当前 HEAD 为文档收尾提交 `docs(v0.5-a): 更新架构/README/交接文档以反映 V0.5-A 收尾`（其前为 `c32367d` 波形修复）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避与波形修复各一次提交，提交清单见文末各节。
 - 构建：`dotnet build LiveMonitor.sln --no-restore` → **0 错误**，8~14 警告（MSB3277 / NU1803 / NU1900 等，均为本机环境既有告警，无新增代码告警）。
-- 测试：Data 37 / Platforms 120 / Danmaku 98 / Media 147 / Desktop 94 = **496 全绿**（V0.4 基线 471；V0.5-A 增量 +7 Media、+18 Desktop）。
+- 测试：Data 37 / Platforms 120 / Danmaku 98 / Media 164 / Desktop 94 = **513 全绿**（V0.4 基线 471；V0.5-A 增量 +7 Media、+18 Desktop；产品侧加固 +17 Media）。
 - 验收：V0.4 GUI 端到端通过（脚本 `.cache/v04-acceptance2.ps1`，证据 `.cache/v04b-*.png`）；V0.5-A 另完成真实 API 验证（55s 音频约 11s 返回，见「V0.5-A 增量」）；本机运行规避后完成真实 GUI 录制/打开目录/ASR 验证（见「本机运行限制」）。
 - 实现依据：`limoclip_v0_4.md`（V0.4）、`limoclip_v0_5_asr.md`（V0.5-A，已按实现修订 P0 偏差）；`code_artifact.md` 已更新为 v1.7。
 - **V0.5-B（插件热更新底座 + YouTube）与 V0.5-C（虎牙/斗鱼/抖音）未开始，按用户要求暂缓**；恢复时先读本文件「新 session 首条消息」与 V0.5-A 增量节。多轨 NLE 只评估、不实现。
@@ -88,7 +88,9 @@
 ## 已知限制 / 待办（V0.5）
 
 - ASR（V0.5-A 已实现并完成真实 API 验收，见下一节）、平台/插件热更新（YouTube/抖音/斗鱼/虎牙录制 + 三层热更新，V0.5-B/C 未开始，**按用户要求暂缓**）。
-- 产品侧加固待办（普通用户机器更稳妥，本版未改）：录制前目标目录可写性预检、`ffmpeg exit -13 / Permission denied` 明确中文提示与建议目录、「打开目录」失败提示；并把本机启动器 `refresh-and-run.ps1` 纳入仓库 `scripts/`（当前只存在于 `C:\Users\Administrator\LimoClip`）。
+- 产品侧加固（已完成，见文末「后续修复 · 产品侧加固」）：录制前目录可写性预检、`ffmpeg exit -13 / Permission denied` 中文提示与建议目录、「打开目录」失败提示，启动器 `scripts/refresh-and-run.ps1` 已入库。
+- V0.5-A 小尾巴：GUI 二次点击命中缓存未复测；`TestConnectionAsync` 走 `GET /models`，少数服务不暴露该接口时会显示失败（不影响真实转写）。
+- 本机「工作区内可执行文件写沙箱」根因未根治（AliPaladin/安全软件嫌疑未证实，`sc stop` 被拒），当前只能靠工作区外运行规避；普通用户机器不受影响。
 - 2h 以上长录像的波形内存/时间轴拖拽未压测（设计已按流式 + 2000 桶 + 缓存；文档验收项待补测）。
 - 硬编路径（nvenc/qsv/amf）本机不可用，仅验证回退 `libx264`；硬编机器需实测导出与探测日志。
 - 无弹幕版 `-c copy` 存在关键帧对齐偏移（1~3s，UI 已提示，属预期）；烧录版为精确重编码。
@@ -149,7 +151,7 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 
 ## 新 session 首条消息（可直接复制）
 
-> 阅读 `HANDOFF.md`、`limoclip_v0_5_asr.md`，先核对 `git log --oneline -8` 与全量测试（build + 五套测试，应为 496 全绿）。V0.5-A 已完成并真实 API 验收；**V0.5-B（插件热更新底座 + YouTube）与 V0.5-C（虎牙/斗鱼/抖音）按用户要求暂缓，默认不要继续**。恢复开发前先读「V0.5-A 增量」与「本机运行限制」；可选收尾项见「已知限制 / 待办（V0.5）」中的产品侧加固与启动器脚本入库。本机运行一律使用启动器（`C:\Users\Administrator\LimoClip\refresh-and-run.ps1` 或桌面快捷方式），不要直接运行工作区内 bin 下的 exe。
+> 阅读 `HANDOFF.md`、`limoclip_v0_5_asr.md`，先核对 `git log --oneline -8` 与全量测试（build + 五套测试，应为 513 全绿）。V0.5-A 与产品侧加固均已完成并验收；**V0.5-B（插件热更新底座 + YouTube）与 V0.5-C（虎牙/斗鱼/抖音）按用户要求暂缓，默认不要继续**。恢复开发前先读「V0.5-A 增量」与「本机运行限制」；本机运行一律使用仓库启动器 `scripts/refresh-and-run.ps1`（桌面快捷方式也指向它），不要直接运行工作区内 bin 下的 exe。
 
 ## V0.5-A 增量（2026-11-23）：剪辑台语音识别（ASR）
 
@@ -157,7 +159,7 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 
 - 实现依据：`limoclip_v0_5_asr.md` §3 + §7 Step 1/2（已按实现修订 P0 偏差：包名、缓存键、`TryAssign`、`CreateDanmakuClient` 可空、ASR 为分区而非 Tab、高能卡片按钮拆分）。
 - 构建：`dotnet build LiveMonitor.sln --no-restore` → **0 错误**；仅既有环境告警（MSB3277 / NU1803 / NU1900 / CS9057 / CS0108 / WFAC010 / AVLN3001 / xUnit2009 等）。
-- 测试：Data 37 / Platforms 120 / Danmaku 98 / Media 147 / Desktop 94 = **496 全绿**（V0.4 基线 471；本增量 +7 Media、+18 Desktop）。
+- 测试：Data 37 / Platforms 120 / Danmaku 98 / Media 164 / Desktop 94 = **513 全绿**（V0.4 基线 471；本增量 +7 Media、+18 Desktop，另产品侧加固 +17 Media）。
 - 验收：GUI 冒烟脚本 `.cache/v05a-smoke.ps1`（UIAutomation，UTF-8 BOM）通过：剪辑台右侧「🎙 语音识别」面板可见（`尚未识别` / `🎙 识别当前选区`），设置窗新增「语音识别（ASR）」分区（预设/地址/模型/语言/API Key/保存/测试连接）可见；证据 `.cache/v05a-2-clip-studio.png`、`.cache/v05a-3-settings-asr.png`。
 - 真实 API 验收（2026-11-23 19:30）：用户配置 siliconflow Key 后，剪辑台选中 55s 录制片段点「🎙 识别当前选区」，约 11s 返回（`siliconflow_cn / FunAudioLLM/SenseVoiceSmall`），缓存写入 `%LocalAppData%/LiveMonitor/cache/asr/{sha256}.asr.json`、临时 MP3 已清理；证据 `.cache/v05bug-3-asr-bottom.png`。
 - 未做：V0.5-B（BouncyCastle 验签、PluginLoadContext、providers-manifest、CliUpdater、YouTube 插件、WebView2 登录扩展）、V0.5-C（虎牙/斗鱼/抖音），均已按用户要求暂缓。
@@ -229,10 +231,10 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 
 ### 规避方案（本项目开发调试规定）
 
-- 一律使用启动器（桌面快捷方式「LiveMonitor（工作区外运行）」或 `C:\Users\Administrator\LimoClip\refresh-and-run.ps1`）：
-  1. `dotnet build LiveMonitor.sln --no-restore`；
-  2. `robocopy` 构建输出到 **`E:\LimoClip-v05-run`**（工作区外），顺带删除陈旧 `startup-fallback.log`；
-  3. 从该目录启动 `LiveMonitor.Desktop.exe`。脚本带「已运行则拒绝」守卫，支持 `-SkipBuild` / `-NoLaunch`。
+- 一律使用仓库启动器 `scripts/refresh-and-run.ps1`（本机桌面快捷方式「LiveMonitor（工作区外运行）」也指向它，并带 `-RunDirectory E:\LimoClip-v05-run`）：
+  1. `dotnet build`（若仓库带便携 SDK `.dotnet/`，脚本会自动把 `DOTNET_ROOT/DOTNET_CLI_HOME/NUGET_PACKAGES/APPDATA/LOCALAPPDATA/TEMP/TMP` 指到工作区内；普通机器无便携 SDK 时改用 PATH 里的 `dotnet`）；
+  2. `robocopy` 构建输出到 `-RunDirectory`（缺省 `%LOCALAPPDATA%\LimoClip\run`，本机为 **`E:\LimoClip-v05-run`**），顺带删除陈旧 `startup-fallback.log`；
+  3. 从该目录启动 `LiveMonitor.Desktop.exe`。脚本带「已运行则拒绝」守卫，支持 `-SkipBuild` / `-NoLaunch`，失败时会红字报错并暂停，日志写到 `.cache/launcher-run.log`。
 - 数据迁移：原工作区回退库（含用户房间 7 条、设置 8 项、ASR Key、17 条高能记录）已 `wal_checkpoint(TRUNCATE)` 后迁移到默认位置 `C:\Users\Administrator\AppData\Local\LiveMonitor\livemonitor.db`；原回退库保留未动。
 
 ### 规避后验证（2026-11-23 19:28–19:31，真实 GUI）
@@ -240,9 +242,18 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 - 录制：B 站房间 1882958350 真实录制 55.6s 成功，`D:\clipRecord\20261123_112855_#4_...mkv` 46,193,788B、同名 `.jsonl` 6,008B、弹幕 35 条，停止后 DB 状态 `Completed`、无错误。
 - 打开目录：正常弹出资源管理器，无 0xc0000142。
 - ASR：剪辑台选中该场次后「🎙 识别当前选区」，55s 音频约 11s 返回（siliconflow_cn / FunAudioLLM/SenseVoiceSmall），缓存写入 `%LocalAppData%/LiveMonitor/cache/asr/{sha256}.asr.json`，临时 MP3 已清理。截图 `.cache/v05bug-3-asr-bottom.png`。
-- 若在普通用户机器上运行，建议仍记录一条产品侧改进待办：录制前目标目录可写性预检 + `ffmpeg exit -13` 明确提示 + 「打开目录」失败提示（本环境未改代码）。
+- 产品侧加固已在本版完成（目录可写预检、ffmpeg 权限错误中文提示、打开目录失败提示、启动器入库），见下一节。
 
 ### 后续修复（2026-11-23 19:4x，提交 `c32367d`）
 
 - 启动器 v3：本机用户环境 `TEMP/TMP=E:\code\Env\Temp`（工作区外），而 `dotnet.exe` 位于工作区内、受同一写沙箱限制，构建时报 `MSB1025 Access to the path 'E:\code\Env\Temp\MSBuildTemp' is denied`，脚本失败后窗口一闪而过。现启动器在构建前把 `DOTNET_ROOT/DOTNET_CLI_HOME/NUGET_PACKAGES/APPDATA/LOCALAPPDATA/TEMP/TMP` 全部指到工作区内（`.cache\temp`、`.appdata`），构建结束在 `finally` 中恢复真实用户环境变量再启动应用；失败时红字报错 + `Read-Host` 暂停，并写 transcript 日志 `.cache/launcher-run.log`。
 - 剪辑台时间轴波形修复：`DrawWaveform` 原先用非闭合、`isFilled:false` 的 `StreamGeometry` 线段填充绘制，实际零面积不可见，用户只能看到波形中心线（一条平直蓝线）。改为按像素采样上下包络、拼成闭合多边形填充 + 描边，无可用音频时显示「（该视频没有可用的音频波形）」；`ClipStudioView.axaml` 给 `ClipTimelineControl` 增加 `ToolTip.Tip` 说明各行含义与操作（点击/拖动定位播放头、拖 IN/OUT、滚轮缩放、双击复位）。截图 `.cache/v05bug-8-waveform-crop.png`。
+
+### 产品侧加固（2026-11-23 20:0x）
+
+- 录制目录可写性预检：新增 `src/LiveMonitor.Media/Recording/RecordingDirectoryGuard.cs`（`EnsureWritable` / `TryEnsureWritable` / `IsWritePermissionFailure` / `DescribeFfmpegFailure` / `SuggestDirectories`；预检时创建 `.livemonitor-write-test-*.tmp` 后立即删除）。`RecordingManager.StartCoreAsync` 在创建会话前预检，失败抛中文 `InvalidOperationException`（含原因与建议目录），显示在录制中心状态栏；录制中心「修改目录」（全局与单房间）也立即预检，避免保存不可写目录。
+- ffmpeg 写盘失败提示：`RecordingManager.DescribeExit` 改用 `RecordingDirectoryGuard.DescribeFfmpegFailure`——exitCode=-13/13 或 stderr 含 `Permission denied`/`Access is denied`/`Error opening output`/`拒绝访问` 时转为「无法写入录制文件：目标目录…没有写权限，或被安全软件拦截…请点击「修改目录」…检查杀毒/安全软件…」+ 原始 stderr；其它错误保持原「ffmpeg 异常退出（exitCode=…）」格式。自动录制失败也会通过 `StatusMessage` 提示到界面。
+- 「打开目录」失败提示：录制中心 `OpenGlobalDirectory` / `OpenTargetDirectoryAsync` / `OpenHistoryFolderAsync` 与剪辑台 `OpenOutputDirectory` 捕获 explorer 启动异常，统一显示「打开目录失败：…。请手动在资源管理器中打开：<路径>」。
+- 启动器入库：新增 `scripts/refresh-and-run.ps1`（UTF-8 BOM，PS 5.1 兼容），参数 `-SkipBuild` / `-NoLaunch` / `-RunDirectory`；`$repo` 由 `$PSScriptRoot` 推导，自动检测便携 SDK（无便携 SDK 时用 PATH 的 `dotnet`），缺省输出 `%LOCALAPPDATA%\LimoClip\run`，可用 `LIVEMONITOR_RUN_DIR` 覆盖；失败红字报错 + 暂停 + transcript 日志。本机桌面快捷方式已改为指向该脚本并带 `-RunDirectory E:\LimoClip-v05-run`；`C:\Users\Administrator\LimoClip\refresh-and-run.ps1` 保留为转发器。
+- 测试：新增 `tests/LiveMonitor.Media.Tests/RecordingDirectoryGuardTests.cs` 17 个用例（缺省目录创建、空白/文件路径拒绝并带建议、权限错误分类、非权限错误保持原格式、stderr 截断、目录解析）；五套 **513 全绿**、构建 0 错误。
+- 验证：用仓库启动器从工作区完整执行「构建 → 复制 → 启动」exit 0，副本启动 PID 37260。
