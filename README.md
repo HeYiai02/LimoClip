@@ -43,15 +43,15 @@ LimoClip 是一款面向 Windows 桌面端的开源直播工具（基于 .NET + 
 
 | **虎牙（Huya）** | ✅ 移动端接口 FLV | ✅ wsapi Tars 弹幕协议 | ⏳ 暂未实现（匿名可用） | **已支持**（V0.5-C Step6） |
 | **斗鱼** | ✅ getH5Play 签名拉流（Jint 执行 `ub98484234`） | ✅ STT 弹幕（`danmuproxy:8601`） | ⏳ 暂未实现（匿名可用） | **已支持**（V0.5-C Step7） |
-| **抖音** | 🚧 进行中 | 🚧 进行中 | 🚧 进行中 | V0.5-C Step8（未开始） |
+| **抖音** | ✅ enter API 拉流（ttwid + Cookie） | ✅ Protobuf PushFrame 弹幕（`sign.js` 签名 + 自动 ack） | ⏳ 暂未实现（匿名可用，签名脚本运行时下载） | **已支持**（V0.5-C Step8） |
 
-> 注：虎牙 CDN 对海外 / 非大陆网络有拉流限制（实测窗口约 0.5~5 秒即被服务端断开），国内网络下可正常播放/录制；本机当前为海外出口，虎牙的监控画面与录制未能在本机完整验证。斗鱼不受此限制（本机已实测录制与剪辑导出），但其 CDN 的 HTTPS 需要随包 CA（应用已内置 `-ca_file`）。
+> 注：虎牙 CDN 对海外 / 非大陆网络有拉流限制（实测窗口约 0.5~5 秒即被服务端断开），国内网络下可正常播放/录制；本机当前为海外出口，虎牙的监控画面与录制未能在本机完整验证。斗鱼与抖音不受此限制（本机均已实测录制与剪辑导出）。斗鱼 CDN 的 HTTPS 需要随包 CA（应用已内置，仅对 https 输入生效）；抖音匿名拉流地址为 http，不需要 CA。抖音弹幕签名依赖第三方 `sign.js`（AGPL-3.0，不随仓库分发）：插件会在首次使用时自动下载并缓存到 `%LocalAppData%/LiveMonitor/cache/douyin/sign.js`，也可用环境变量 `LIMOCLIP_DOUYIN_SIGN_JS` 指定本地文件。
 
 ---
 
 ## 平台插件与热更新（V0.5-B）
 
-- **内置平台**：B站（原生直连 + 独轮车过滤）、Twitch（yt-dlp + IRC 弹幕）、YouTube（yt-dlp 状态解析 + InnerTube 实时弹幕）、虎牙（移动端拉流接口 + wsapi Tars 弹幕）均已内置可用。
+- **内置平台**：B站（原生直连 + 独轮车过滤）、Twitch（yt-dlp + IRC 弹幕）、YouTube（yt-dlp 状态解析 + InnerTube 实时弹幕）、虎牙（移动端拉流接口 + wsapi Tars 弹幕）、斗鱼（getH5Play 签名拉流 + STT 弹幕）、抖音（enter API 拉流 + Protobuf 弹幕）均已内置可用。
 - **平台插件**：`IPlatformPlugin` + `providers-manifest.json` + Ed25519 签名验签；插件 DLL 放入 `%LocalAppData%\LiveMonitor\plugins\{pluginId}\` 即可加载，签名校验失败或版本低于内置时自动回退内置实现。
 - **更新入口**：软件「账号与设置 → 组件与插件更新」可检查/更新 `yt-dlp`，以及检查/下载/安装平台插件（无活跃录制时立即生效，否则下次启动生效）。
 - **插件清单**：仓库 `plugins/providers-manifest.json`（当前为空数组，表示暂无已发布插件更新，检查结果显示「已是最新」）；签名与打包工具见 `scripts/PluginSigner`、`scripts/sign-plugin.ps1`、`scripts/build-plugins.ps1` 与 `plugins/README.md`。
@@ -68,7 +68,7 @@ LimoClip 是一款面向 Windows 桌面端的开源直播工具（基于 .NET + 
 
 ### 2. 三步上手工作流
 
-1. **添加直播间**：在左侧主库点击 `+ 添加`，粘贴 B站、Twitch、YouTube 或虎牙直播间链接；建议在右上角「账号与设置」中通过内置窗口登录 B站账号，解锁原画画质并启用完整的独轮车单用户识别。
+1. **添加直播间**：在左侧主库点击 `+ 添加`，粘贴 B站、Twitch、YouTube、虎牙、斗鱼或抖音直播间链接；建议在右上角「账号与设置」中通过内置窗口登录 B站账号，解锁原画画质并启用完整的独轮车单用户识别。
 2. **开启录制**：切到顶部 **「录制中心」**，设置保存目录（支持本地硬盘或已映射的 NAS 盘符），勾选需要自动录制的主播或手动开录。
 3. **快速出片**：录播完成后点击 **「去剪辑」** 进入剪辑台，沿着弹幕热力波峰与高能打点定位片段，点击「转写」看文字确认内容，一键导出无弹幕版（秒切无损）或有弹幕版 `.mp4`。
 
