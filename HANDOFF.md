@@ -4,7 +4,7 @@
 
 - 分支 `main`；**当前 HEAD 为 V0.5-C Step7 收尾提交（登录后可见 `git log` 顶部；斗鱼插件提交见文末「V0.5-C 增量（Step7 斗鱼）」，其后为本次文档提交）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避、波形修复、产品侧加固、V0.5-B 六次提交、V0.5-C Step6 两次提交、Step7 两次提交，提交清单见文末各节。
 - 构建：`dotnet build LiveMonitor.sln --no-restore` → **0 错误**，8~14 警告（MSB3277 / NU1803 / NU1900 等，均为本机环境既有告警，无新增代码告警）。
-- 测试：Data 37 / Platforms **437** / Danmaku 98 / Media **168** / Desktop 94 = **832 全绿**（V0.4 基线 471；V0.5-A +7 Media、+18 Desktop；产品侧加固 +17 Media；V0.5-B +125 Platforms、+2 Media；V0.5-C Step6 虎牙 +65 Platforms、Step7 斗鱼 +63 Platforms、Step8 抖音 +64 Platforms、http 流 ca_file 修复 +2 Media）。
+- 测试：Data 37 / Platforms **437** / Danmaku 98 / Media **168** / Desktop 94 = **834 全绿**（V0.4 基线 471；V0.5-A +7 Media、+18 Desktop；产品侧加固 +17 Media；V0.5-B +125 Platforms、+2 Media；V0.5-C Step6 虎牙 +65 Platforms、Step7 斗鱼 +63 Platforms、Step8 抖音 +64 Platforms、http 流 ca_file 修复 +2 Media）。
 - 验收：V0.4 GUI 端到端通过（脚本 `.cache/v04-acceptance2.ps1`，证据 `.cache/v04b-*.png`）；V0.5-A 完成真实 API 验证（55s 音频约 11s 返回，见「V0.5-A 增量」）；本机运行规避后完成真实 GUI 录制/打开目录/ASR 验证；**V0.5-B 阶段验收通过**（YouTube 添加/监控/录制 49.97s（含音频）/剪辑波形/双版导出（含音频）/ASR，见「V0.5-B 增量」）；V0.5-C Step6 虎牙：插件、协议单测与真实探针（拉流状态 + 20s 内 86 条弹幕）通过，但本机为海外出口、虎牙 CDN 对海外网络限流，GUI 播放/录制未能完整验证（见「V0.5-C 增量」）；V0.5-C Step7 斗鱼：插件、协议单测、真实探针与 **GUI 全链路验收通过**（真实录制 56.8s/11.4MB 含音频 + 72 条弹幕、剪辑台波形与混流、双版导出均含音频，见「V0.5-C 增量（Step7 斗鱼）」）。
 - 实现依据：`limoclip_v0_4.md`（V0.4）、`limoclip_v0_5_asr.md`（V0.5-A/B，已按实现修订 P0 偏差）；`code_artifact.md` 已更新为 v2.1。
 - **V0.5-B 已完成并通过阶段 B 验收；V0.5-C 已全部完成：Step6 虎牙、Step7 斗鱼、Step8 抖音（三个平台插件 + 单测 + 真实探针，斗鱼/抖音 GUI 全链路验收通过；虎牙 GUI 受本机海外网络限流未完整验证）、Step9 六平台联调与 v0.5.0 打包已完成**（`artifacts/LimoClip-v0.5.0-win-x64.zip` 190.58MB，SHA256 `0fda2c4e…1b43ed`，冒烟启动通过）。恢复开发先读本文件「新 session 首条消息」「V0.5-B 增量」「V0.5-C 增量」。多轨 NLE 只评估、不实现。
@@ -152,7 +152,7 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 
 ## 新 session 首条消息（可直接复制）
 
-> 阅读 `HANDOFF.md`、`limoclip_v0_5_asr.md`，先核对 `git log --oneline -8` 与全量测试（build + 五套测试，应为 **832 全绿**）。V0.5-A、V0.5-B、产品侧加固均已完成并验收，V0.5-C 已全部完成（Step6 虎牙、Step7 斗鱼、Step8 抖音、Step9 六平台联调 + v0.5.0 打包），**V0.5 里程碑收尾完成**。恢复开发前先读「V0.5-B 增量」「V0.5-A 增量」与「本机运行限制」；本机运行一律使用仓库启动器 `scripts/refresh-and-run.ps1`（桌面快捷方式也指向它），不要直接运行工作区内 bin 下的 exe。插件签名私钥不在仓库内，需向用户索取或使用环境变量 `LIVEMONITOR_PLUGIN_KEY`。
+> 阅读 `HANDOFF.md`、`limoclip_v0_5_asr.md`，先核对 `git log --oneline -8` 与全量测试（build + 五套测试，应为 **834 全绿**）。V0.5-A、V0.5-B、产品侧加固均已完成并验收，V0.5-C 已全部完成（Step6 虎牙、Step7 斗鱼、Step8 抖音、Step9 六平台联调 + v0.5.0 打包），**V0.5 里程碑收尾完成**。恢复开发前先读「V0.5-B 增量」「V0.5-A 增量」与「本机运行限制」；本机运行一律使用仓库启动器 `scripts/refresh-and-run.ps1`（桌面快捷方式也指向它），不要直接运行工作区内 bin 下的 exe。插件签名私钥不在仓库内，需向用户索取或使用环境变量 `LIVEMONITOR_PLUGIN_KEY`。
 
 ## V0.5-A 增量（2026-11-23）：剪辑台语音识别（ASR）
 
@@ -348,7 +348,7 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 ### 状态
 
 - 完成：抖音插件（`src/LiveMonitor.Plugins.Douyin/`）：`enter` 拉流接口（ttwid + Cookie）、Protobuf `PushFrame → Gzip → Response → Ack` 弹幕客户端、Jint 执行 `sign.js` 生成 WSS 签名、`DouyinProvider`/`DouyinPlugin`；Platforms 内置插件注册（B站/Twitch/YouTube/虎牙/斗鱼/抖音 共 6 个内置平台）。
-- 校验：解决方案 build 0 错误；五套测试 **832 全绿**（Platforms 437，新增抖音 64 个用例；Media 168，新增 http 流不加 `-ca_file` 的 2 个用例）。
+- 校验：解决方案 build 0 错误；五套测试 **834 全绿**（Platforms 437，新增抖音 64 个用例；Media 168，新增 http 流不加 `-ca_file` 的 2 个用例）。
 - 真实探针（`.cache/douyinpluginprobe`）：房间 web_rid `141601416352`（看海老师）LIVE、4 档画质（原画 1080P/高清 720P/标清 480P/流畅 360P）；签名 WSS 连接成功，15 秒收到 133 条弹幕；ffmpeg 录制 6s 5.7MB。
 - GUI 全链路（`E:\LimoClip-v05-run`，pid 24896）：添加 `https://live.douyin.com/141601416352` → 监控（原画 1080P · 60fps 硬解正常）→ 录制 45.43s（42,868,704B + 352 条弹幕，DB `Platform=2 / Status=3 / ErrorMessage=None`）→ 剪辑台波形正常 → 导出 00:00-00:10 双版 MP4（clean 9,653,695B / danmaku 14,598,856B），ffprobe 三条文件均含 AAC 音轨。
 - 验收截图：`.cache/v05c-douyin-monitor.png`、`.cache/v05c-douyin-clip.png`、`.cache/v05c-douyin-clip-export.png`。
@@ -362,7 +362,7 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 
 ### 新 session 首条消息（V0.5-C 阶段，更新）
 
-- V0.5-C Step6 虎牙、Step7 斗鱼、Step8 抖音均已完成并推送；**下一步 Step9：全平台联调 + v0.5.0 打包准备**（先跑 `dotnet build` 与五套测试确认 832 全绿；GUI 从 `E:\LimoClip-v05-run` 验收；打包脚本 `scripts/package-release.ps1 -Version v0.5.0`）。main 小步提交；本机网络：斗鱼/抖音可用、虎牙 CDN 限流。
+- V0.5-C Step6 虎牙、Step7 斗鱼、Step8 抖音均已完成并推送；**下一步 Step9：全平台联调 + v0.5.0 打包准备**（先跑 `dotnet build` 与五套测试确认 834 全绿；GUI 从 `E:\LimoClip-v05-run` 验收；打包脚本 `scripts/package-release.ps1 -Version v0.5.0`）。main 小步提交；本机网络：斗鱼/抖音可用、虎牙 CDN 限流。
 
 
 ## V0.5-C 增量（Step9）：六平台联调与 v0.5.0 打包（2026-11-23）
@@ -383,4 +383,4 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 
 ### 新 session 首条消息（V0.5 收尾后）
 
-- V0.5（A/B/C）已全部完成：编辑台云端 ASR、平台插件热更新底座 + YouTube、虎牙/斗鱼/抖音插件、六平台联调与 v0.5.0 打包。全量测试 **832 全绿**，HEAD 见 `git log` 顶部。下一步可选：发布 v0.5.0 Release、抖音签名脚本离线化、虎牙国内网络复验、多轨 NLE 评估等。
+- V0.5（A/B/C）已全部完成：编辑台云端 ASR、平台插件热更新底座 + YouTube、虎牙/斗鱼/抖音插件、六平台联调与 v0.5.0 打包。全量测试 **834 全绿**，HEAD 见 `git log` 顶部。下一步可选：发布 v0.5.0 Release、抖音签名脚本离线化、虎牙国内网络复验、多轨 NLE 评估等。
