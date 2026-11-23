@@ -1,4 +1,5 @@
 using LiveMonitor.Core.Enums;
+using LiveMonitor.Core.Models;
 using LiveMonitor.Danmaku.Filters;
 using Xunit;
 
@@ -232,6 +233,54 @@ public class BilibiliUnicycleFilterTests
 
         filter.IsEnabled = false;
         Assert.True(filter.ShouldAllow(TestDanmaku.Create(SimilarTexts[0])));
+    }
+
+    [Theory]
+    [InlineData("[doge][打call]", "ee")]
+    [InlineData("主播厉害[doge]", "主播厉害e")]
+    [InlineData("没有表情的普通弹幕", "没有表情的普通弹幕")]
+    [InlineData("", "")]
+    [InlineData(null, "")]
+    public void FoldEmotes_FoldsEachBracketTokenToOneCharacter(string? input, string expected)
+    {
+        Assert.Equal(expected, BilibiliUnicycleFilter.FoldEmotes(input));
+    }
+
+    [Fact]
+    public void InlineEmoteBurst_IsFoldedAndNotTreatedAsLongText()
+    {
+        var clock = new FakeClock();
+        var filter = new BilibiliUnicycleFilter(clock.Reader);
+        const string emoteOnly = "[打call][打call][打call][打call][打call][打call]";
+
+        // 原始长度 36 字，折叠后为 6 个字，不应触发 30 秒长文本连发规则。
+        for (var i = 0; i < 4; i++)
+        {
+            Assert.True(filter.ShouldAllow(TestDanmaku.Create(emoteOnly)));
+            clock.Advance(TimeSpan.FromSeconds(2));
+        }
+
+        Assert.Equal(0L, filter.BlockedCount);
+        Assert.Equal(6, BilibiliUnicycleFilter.FoldEmotes(emoteOnly).Length);
+    }
+
+    [Fact]
+    public void StickerMessages_AreExemptFromRepeatAndLongTextRules()
+    {
+        var clock = new FakeClock();
+        var filter = new BilibiliUnicycleFilter(clock.Reader);
+        const string stickerPlaceholder = "这是一个很长很长的大表情包纯表情弹幕";
+
+        var emotes = new[] { new DanmakuEmote("赞", "https://example.invalid/sticker.png") };
+        for (var i = 0; i < 5; i++)
+        {
+            Assert.True(filter.ShouldAllow(TestDanmaku.Create(stickerPlaceholder, isSticker: true, emotes: emotes)));
+            clock.Advance(TimeSpan.FromSeconds(1));
+        }
+
+        // 纯大表情包直接豁免，既不拦截也不进入单用户跟踪状态。
+        Assert.Equal(0L, filter.BlockedCount);
+        Assert.Equal(0, filter.TrackedUserCount);
     }
 
     [Theory]

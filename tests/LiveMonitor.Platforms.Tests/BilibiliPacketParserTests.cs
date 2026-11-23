@@ -373,6 +373,110 @@ public sealed class BilibiliPacketParserTests
     }
 
     [Fact]
+    public void ParseFrame_StickerDanmaku_ParsesStickerFlagAndEmoteUrl()
+    {
+        var info = new object[]
+        {
+            new object?[]
+            {
+                0, 1, 25, 16777215, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+                new { url = "https://example.invalid/sticker.png", emoticon_unique = "room_1" },
+                0, 0
+            },
+            "[赞]",
+            new object?[] { "42", "alice" }
+        };
+
+        var frame = BuildDanmakuFrame(info);
+        var message = Assert.Single(BilibiliPacketParser.ParseFrame(frame, RoomId).Messages);
+
+        Assert.True(message.IsSticker);
+        Assert.Equal("[赞]", message.Content);
+        var emote = Assert.Single(message.Emotes!);
+        Assert.Equal("赞", emote.Name);
+        Assert.Equal("https://example.invalid/sticker.png", emote.Url);
+        Assert.Equal("room_1", emote.Id);
+    }
+
+    [Fact]
+    public void ParseFrame_InlineEmote_ParsesEmoteMetadataFromExtraJson()
+    {
+        var extra = JsonSerializer.Serialize(new
+        {
+            emots = new Dictionary<string, object>
+            {
+                ["[doge]"] = new { url = "https://example.invalid/doge.png", emoticon_unique = "doge_1" },
+                ["[unused]"] = new { url = "https://example.invalid/unused.png", emoticon_unique = "unused_1" }
+            }
+        });
+
+        var info = new object[]
+        {
+            new object?[]
+            {
+                0, 1, 25, 16777215, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, 0,
+                new { extra }
+            },
+            "主播[doge][doge] 好操作",
+            new object?[] { "42", "alice" }
+        };
+
+        var frame = BuildDanmakuFrame(info);
+        var message = Assert.Single(BilibiliPacketParser.ParseFrame(frame, RoomId).Messages);
+
+        Assert.False(message.IsSticker);
+        var emote = Assert.Single(message.Emotes!);
+        Assert.Equal("doge", emote.Name);
+        Assert.Equal("https://example.invalid/doge.png", emote.Url);
+        Assert.Equal("doge_1", emote.Id);
+
+        // 文本里没出现的房间表情不应塞进这条弹幕。
+        Assert.DoesNotContain(message.Emotes!, candidate => candidate.Name == "unused");
+    }
+
+    [Fact]
+    public void ParseFrame_StickerWithoutUrl_KeepsStickerFlagAndNullUrl()
+    {
+        var info = new object[]
+        {
+            new object?[]
+            {
+                0, 1, 25, 16777215, 0, 0, 0, 0, 0, 0, 0, 0, 1, null, 0, 0
+            },
+            "赞",
+            new object?[] { "42", "alice" }
+        };
+
+        var frame = BuildDanmakuFrame(info);
+        var message = Assert.Single(BilibiliPacketParser.ParseFrame(frame, RoomId).Messages);
+
+        Assert.True(message.IsSticker);
+        Assert.Null(Assert.Single(message.Emotes!).Url);
+    }
+
+    [Fact]
+    public void ParseFrame_MalformedEmoteExtra_FallsBackToPlainMessage()
+    {
+        var info = new object[]
+        {
+            new object?[]
+            {
+                0, 1, 25, 16777215, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, 0,
+                new { extra = "{not-json" }
+            },
+            "普通弹幕[doge]",
+            new object?[] { "42", "alice" }
+        };
+
+        var frame = BuildDanmakuFrame(info);
+        var message = Assert.Single(BilibiliPacketParser.ParseFrame(frame, RoomId).Messages);
+
+        Assert.False(message.IsSticker);
+        Assert.Null(message.Emotes);
+        Assert.Equal("普通弹幕[doge]", message.Content);
+    }
+
+    [Fact]
     public void BuildAuthPacket_HasAuthHeaderAndProtocolJson()
     {
         var packet = BilibiliPacketParser.BuildAuthPacket(1234, 42, "token-abc", "buvid-xyz");
@@ -417,6 +521,12 @@ public sealed class BilibiliPacketParserTests
 
     private static string DanmakuJson(string content, string uid, string uname)
         => $"{{\"cmd\":\"DANMU_MSG\",\"info\":[[0,1,25,16777215],{JsonSerializer.Serialize(content)},[{uid},{JsonSerializer.Serialize(uname)},0,0]]}}";
+
+    private static byte[] BuildDanmakuFrame(object[] info)
+    {
+        var json = JsonSerializer.Serialize(new { cmd = "DANMU_MSG", info });
+        return BilibiliPacketParser.BuildPacket(BilibiliPacketParser.OpNotification, json, BilibiliPacketParser.ProtoJson);
+    }
 
     private static byte[] BuildRawPacket(int operation, short protoVersion, byte[] body, short headerLength)
     {

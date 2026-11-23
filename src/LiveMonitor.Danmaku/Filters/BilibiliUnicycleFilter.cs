@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using LiveMonitor.Core.Enums;
 using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Core.Models;
@@ -17,6 +18,11 @@ namespace LiveMonitor.Danmaku.Filters;
 /// 用户状态按“每 2000 条消息或每 5 分钟”惰性驱逐 15 分钟无发言的 key，并设置 5 万字典上限防止挂机泄漏。
 /// 所有时间判定使用注入时钟，内部加锁，可被多条接收线程并发调用。
 /// </para>
+/// <para>
+/// 表情处理：纯大表情包（<see cref="DanmakuMessage.IsSticker"/>）视同短情绪词直接豁免；
+/// 行内表情文本（<c>[doge]</c>、<c>[打call]</c> 等）在计算长度与相似度前折算为 1 个字符，
+/// 避免连续表情把原始长度抬到长文本阈值而误杀正常观众。
+/// </para>
 /// </summary>
 public sealed class BilibiliUnicycleFilter : IDanmakuFilter
 {
@@ -25,6 +31,11 @@ public sealed class BilibiliUnicycleFilter : IDanmakuFilter
 
     /// <summary>单用户状态字典的硬上限，超过后按最近发言时间清理最旧记录。</summary>
     public const int MaxTrackedUsers = 50_000;
+
+    /// <summary>行内表情标记，如 <c>[doge]</c>；长度上限 32 防止把整段文本当表情。</summary>
+    private static readonly Regex EmoteTokenPattern = new(
+        @"\[[^\[\]\r\n]{1,32}\]",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>每处理这么多条 B 站有效弹幕做一次惰性驱逐。</summary>
     private const int EvictionMessageInterval = 2_000;
@@ -137,6 +148,13 @@ public sealed class BilibiliUnicycleFilter : IDanmakuFilter
             return true;
         }
 
+        // 纯大表情包（B 站 info[0][12] == 1）视同 ≤6 字短情绪词，
+        // 直接豁免复读与长文本规则，也避免把整套表情包当“文案切片”误杀。
+        if (message.IsSticker)
+        {
+            return true;
+        }
+
         lock (_gate)
         {
             var now = _clock();
@@ -160,7 +178,9 @@ public sealed class BilibiliUnicycleFilter : IDanmakuFilter
                 return false;
             }
 
-            var normalized = NormalizeText(message.Content);
+            // 表情标记先折算成单个字符，再按普通文本清洗：连续 [doge] 不会虚增长度。
+            var folded = FoldEmotes(message.Content);
+            var normalized = NormalizeText(folded);
             if (normalized.Length == 0)
             {
                 // 纯标点/表情等清洗后无内容的弹幕视为短情绪词，放行。
@@ -176,7 +196,7 @@ public sealed class BilibiliUnicycleFilter : IDanmakuFilter
 
             state.RecentMessages.Enqueue(new UserMsgRecord(
                 normalized,
-                message.Content.Trim().Length,
+                folded.Trim().Length,
                 now));
 
             while (state.RecentMessages.Count > MaxHistoryPerUser)
@@ -214,6 +234,20 @@ public sealed class BilibiliUnicycleFilter : IDanmakuFilter
 
             return true;
         }
+    }
+
+    /// <summary>
+    /// 把行内表情标记（<c>[doge]</c>、<c>[打call]</c> 等）整体折算为 1 个字符，
+    /// 防止表情文本虚增长度、把正常欢呼误判为长文本刷屏。
+    /// </summary>
+    public static string FoldEmotes(string? input)
+    {
+        if (string.IsNullOrEmpty(input))
+        {
+            return string.Empty;
+        }
+
+        return EmoteTokenPattern.Replace(input, "e");
     }
 
     /// <summary>

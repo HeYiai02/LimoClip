@@ -41,7 +41,9 @@ public static class TestDanmaku
         string roomId = DefaultRoomId,
         PlatformType platform = PlatformType.Bilibili,
         bool isGiftOrSuperChat = false,
-        string senderName = "tester")
+        string senderName = "tester",
+        bool isSticker = false,
+        IReadOnlyList<DanmakuEmote>? emotes = null)
     {
         return new DanmakuMessage(
             platform,
@@ -50,7 +52,9 @@ public static class TestDanmaku
             senderName,
             content,
             DateTimeOffset.UnixEpoch,
-            isGiftOrSuperChat);
+            isGiftOrSuperChat,
+            isSticker,
+            emotes);
     }
 }
 

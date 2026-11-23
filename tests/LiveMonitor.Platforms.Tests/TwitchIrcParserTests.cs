@@ -59,6 +59,42 @@ public sealed class TwitchIrcParserTests
     }
 
     [Fact]
+    public void ToDanmakuMessage_WithEmotesTag_ParsesEmoteMetadata()
+    {
+        var message = TwitchIrcParser.ParseLine(
+            "@display-name=Alice;login=alice;user-id=42;emotes=25:6-10,305954156:12-16 :alice!alice@alice.tmi.twitch.tv PRIVMSG #chan :Hello Kappa Keepo");
+
+        Assert.NotNull(message);
+
+        var danmaku = TwitchIrcParser.ToDanmakuMessage(message, () => FixedTime);
+
+        Assert.NotNull(danmaku);
+        Assert.False(danmaku.IsSticker);
+        Assert.Equal(2, danmaku.Emotes!.Count);
+        Assert.Equal("Kappa", danmaku.Emotes[0].Name);
+        Assert.Equal("25", danmaku.Emotes[0].Id);
+        Assert.Equal("https://static-cdn.jtvnw.net/emoticons/v2/25/static/dark/1.0", danmaku.Emotes[0].Url);
+        Assert.Equal("Keepo", danmaku.Emotes[1].Name);
+        Assert.Equal("305954156", danmaku.Emotes[1].Id);
+    }
+
+    [Fact]
+    public void ToDanmakuMessage_WithoutEmotesTag_HasNoEmoteMetadata()
+    {
+        var message = TwitchIrcParser.ParseLine(
+            "@display-name=Alice;login=alice :alice!alice@alice.tmi.twitch.tv PRIVMSG #chan :plain text");
+
+        Assert.NotNull(message);
+
+        var danmaku = TwitchIrcParser.ToDanmakuMessage(message, () => FixedTime);
+
+        Assert.NotNull(danmaku);
+        Assert.False(danmaku.IsSticker);
+        Assert.Null(danmaku.Emotes);
+        Assert.Equal("plain text", danmaku.Content);
+    }
+
+    [Fact]
     public void ParseLine_NoTagsPrivmsg_FallsBackToPrefixNickAndAnonymousUid()
     {
         var message = TwitchIrcParser.ParseLine(":bob!bob@bob.tmi.twitch.tv PRIVMSG #chan :hi");

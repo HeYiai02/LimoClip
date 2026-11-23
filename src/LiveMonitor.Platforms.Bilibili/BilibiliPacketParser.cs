@@ -382,6 +382,30 @@ public static class BilibiliPacketParser
                 senderName = ReadText(user[1]) ?? string.Empty;
             }
 
+            // 表情元数据：info[0][12] 为 1 时是大表情/房间表情包（info[1] 只是占位文本，
+            // 图片地址在 info[0][13].url）；行内小表情（[doge] 等）的图片字典藏在
+            // info[0][15].extra 的 emots 字段里。V0.2 只解析元数据，不下载图片。
+            var isSticker = false;
+            List<DanmakuEmote>? emotes = null;
+            if (info[0].ValueKind == JsonValueKind.Array)
+            {
+                var metadata = info[0];
+                isSticker = ReadInt(metadata, 12) == 1;
+                if (isSticker)
+                {
+                    emotes = new List<DanmakuEmote>(1);
+                    var url = ReadObjectString(metadata, 13, "url");
+                    emotes.Add(new DanmakuEmote(
+                        StripBrackets(content),
+                        string.IsNullOrWhiteSpace(url) ? null : url,
+                        ReadObjectString(metadata, 13, "emoticon_unique")));
+                }
+                else
+                {
+                    emotes = ReadInlineEmotes(content, metadata);
+                }
+            }
+
             _messages.Add(new DanmakuMessage(
                 PlatformType.Bilibili,
                 RoomId,
@@ -389,7 +413,116 @@ public static class BilibiliPacketParser
                 senderName,
                 content,
                 Clock(),
-                IsGiftOrSuperChat: false));
+                IsGiftOrSuperChat: false,
+                IsSticker: isSticker,
+                Emotes: emotes));
+        }
+
+        /// <summary>
+        /// 读取 B 站行内小表情：info[0][15].extra 是一次二次 JSON（形如
+        /// <c>{"emots":{"[doge]":{"url":"...","emoticon_unique":"..."}}}</c>），
+        /// 对文本中实际出现的表情名逐个产出元数据。解析失败一律降级为无表情。
+        /// </summary>
+        private static List<DanmakuEmote>? ReadInlineEmotes(string content, JsonElement metadata)
+        {
+            if (!TryGetArrayElement(metadata, 15, out var holder) || holder.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var extra = JsonRead.String(holder, "extra");
+            if (string.IsNullOrWhiteSpace(extra))
+            {
+                return null;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(extra, JsonOptions);
+                var root = document.RootElement;
+                if (root.ValueKind != JsonValueKind.Object
+                    || !root.TryGetProperty("emots", out var emots)
+                    || emots.ValueKind != JsonValueKind.Object)
+                {
+                    return null;
+                }
+
+                List<DanmakuEmote>? result = null;
+                foreach (var property in emots.EnumerateObject())
+                {
+                    // 只保留文本里真实出现的表情，避免把房间整套表情都塞进每条弹幕。
+                    if (property.Name.Length == 0 || !content.Contains(property.Name, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    var url = property.Value.ValueKind == JsonValueKind.Object
+                        ? JsonRead.String(property.Value, "url")
+                        : null;
+                    var unique = property.Value.ValueKind == JsonValueKind.Object
+                        ? JsonRead.String(property.Value, "emoticon_unique")
+                        : null;
+                    (result ??= new List<DanmakuEmote>(2)).Add(new DanmakuEmote(
+                        StripBrackets(property.Name),
+                        string.IsNullOrWhiteSpace(url) ? null : url,
+                        string.IsNullOrWhiteSpace(unique) ? null : unique));
+                }
+
+                return result;
+            }
+            catch (JsonException)
+            {
+                // 二次 JSON 结构异常时降级为无表情，不影响这条弹幕本身的解析。
+                return null;
+            }
+        }
+
+        private static bool TryGetArrayElement(JsonElement array, int index, out JsonElement element)
+        {
+            element = default;
+            if (array.ValueKind != JsonValueKind.Array || index < 0 || index >= array.GetArrayLength())
+            {
+                return false;
+            }
+
+            element = array[index];
+            return true;
+        }
+
+        private static int ReadInt(JsonElement array, int index)
+        {
+            if (!TryGetArrayElement(array, index, out var element))
+            {
+                return 0;
+            }
+
+            return element.ValueKind switch
+            {
+                JsonValueKind.Number when element.TryGetInt32(out var value) => value,
+                JsonValueKind.String when int.TryParse(element.GetString(), out var parsed) => parsed,
+                _ => 0
+            };
+        }
+
+        private static string? ReadObjectString(JsonElement array, int index, string propertyName)
+        {
+            if (!TryGetArrayElement(array, index, out var element) || element.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            return JsonRead.String(element, propertyName);
+        }
+
+        private static string StripBrackets(string? text)
+        {
+            var trimmed = text?.Trim() ?? string.Empty;
+            if (trimmed.Length >= 2 && trimmed[0] == '[' && trimmed[^1] == ']')
+            {
+                trimmed = trimmed[1..^1];
+            }
+
+            return trimmed;
         }
 
         private void AppendGift(JsonElement root)

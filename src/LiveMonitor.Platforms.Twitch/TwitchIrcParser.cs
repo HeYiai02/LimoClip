@@ -178,14 +178,79 @@ public static class TwitchIrcParser
             return null;
         }
 
+        var content = message.Text ?? string.Empty;
+        var emotes = ParseEmotesTag(message.Tags, content);
+
         return new DanmakuMessage(
             PlatformType.Twitch,
             channel,
             message.UserId ?? string.Empty,
             message.DisplayName ?? string.Empty,
-            message.Text ?? string.Empty,
+            content,
             (clock ?? (static () => DateTimeOffset.UtcNow))(),
-            IsGiftOrSuperChat: message.Tags.ContainsKey("bits"));
+            IsGiftOrSuperChat: message.Tags.ContainsKey("bits"),
+            IsSticker: false,
+            Emotes: emotes);
+    }
+
+    /// <summary>
+    /// 解析 IRCv3 <c>@emotes=id:start-end,id:start-end</c> 标签，生成官方表情元数据
+    /// （图片基址 <c>https://static-cdn.jtvnw.net/emoticons/v2/{id}/static/dark/1.0</c>，静态图避免动图开销）。
+    /// 第三方表情（7TV/BTTV/FFZ）不在协议内，V0.2 直接忽略、按纯文本显示。
+    /// </summary>
+    private static IReadOnlyList<DanmakuEmote>? ParseEmotesTag(
+        IReadOnlyDictionary<string, string> tags,
+        string content)
+    {
+        if (!tags.TryGetValue("emotes", out var tag) || string.IsNullOrWhiteSpace(tag) || content.Length == 0)
+        {
+            return null;
+        }
+
+        List<DanmakuEmote>? result = null;
+        var segmentStart = 0;
+        for (var index = 0; index <= tag.Length; index++)
+        {
+            if (index < tag.Length && tag[index] != ',')
+            {
+                continue;
+            }
+
+            var segment = tag.AsSpan(segmentStart, index - segmentStart);
+            segmentStart = index + 1;
+            if (segment.IsEmpty)
+            {
+                continue;
+            }
+
+            var colon = segment.IndexOf(':');
+            var dash = segment.IndexOf('-');
+            if (colon <= 0 || dash <= colon + 1 || dash >= segment.Length - 1)
+            {
+                continue;
+            }
+
+            var id = segment[..colon].ToString();
+            if (!int.TryParse(segment[(colon + 1)..dash], out var start)
+                || !int.TryParse(segment[(dash + 1)..], out var end))
+            {
+                continue;
+            }
+
+            // 索引是 UTF-16 code unit 下标，与 .NET string 索引一致；越界时跳过该表情。
+            if (start < 0 || end < start || end >= content.Length)
+            {
+                continue;
+            }
+
+            var name = content.Substring(start, end - start + 1);
+            (result ??= new List<DanmakuEmote>(4)).Add(new DanmakuEmote(
+                name,
+                $"https://static-cdn.jtvnw.net/emoticons/v2/{id}/static/dark/1.0",
+                id));
+        }
+
+        return result;
     }
 
     private static void SkipSpaces(ReadOnlySpan<char> text, ref int position)
