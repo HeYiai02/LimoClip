@@ -216,8 +216,11 @@ public interface IPlatformProvider
     string ExtractRoomId(string roomUrl);
     Task<RoomStatus> GetRoomStatusAsync(string roomId, string? cookie = null, CancellationToken ct = default);
 
-    // V0.2 计划：弹幕客户端按 LiveRoomId 单例复用，由 DanmakuManager 统一分发。
-    // IDanmakuClient CreateDanmakuClient(string roomId, string? authCookie = null);
+    // V0.2 已实现：弹幕客户端由 Core 的 IDanmakuClientFactory 创建（Platforms.DanmakuClientFactory 落地），
+    // 按 (Platform, RoomId) 由 DanmakuManager 统一分配会话并引用计数复用。
+    // B站 getDanmuInfo 自 2026-11 起需要 WBI 签名（BilibiliWbiSigner：nav 密钥 + mixin/w_rid），
+    // 未签名会返回 code=-352；签名与密钥缓存封装在 BilibiliDanmakuClient 内。
+    // 未在 IPlatformProvider 上增加 CreateDanmakuClient。
 }
 ```
 
