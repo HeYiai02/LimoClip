@@ -57,7 +57,7 @@ public static class FfmpegArgumentBuilder
             arguments.Add(headerBlock);
         }
 
-        AppendCaBundle(arguments, caBundlePath);
+        AppendCaBundle(arguments, caBundlePath, sourceQuality.StreamUrl);
 
         arguments.Add("-i");
         arguments.Add(sourceQuality.StreamUrl.Trim());
@@ -84,7 +84,7 @@ public static class FfmpegArgumentBuilder
                 arguments.Add(audioHeaderBlock);
             }
 
-            AppendCaBundle(arguments, caBundlePath);
+            AppendCaBundle(arguments, caBundlePath, sourceQuality.AudioStreamUrl);
             arguments.Add("-i");
             arguments.Add(sourceQuality.AudioStreamUrl!.Trim());
 
@@ -109,13 +109,23 @@ public static class FfmpegArgumentBuilder
         return arguments;
     }
 
-    private static void AppendCaBundle(List<string> arguments, string? caBundlePath)
+    // -ca_file 只对 TLS 输入有效：给 http:// 输入传该参数时 ffmpeg 会直接报
+    // “Option ca_file not found / Error opening input files: Option not found”，
+    // 因此仅当地址是 https:// 时才追加。
+    private static void AppendCaBundle(List<string> arguments, string? caBundlePath, string? streamUrl)
     {
-        if (!string.IsNullOrWhiteSpace(caBundlePath))
+        if (string.IsNullOrWhiteSpace(caBundlePath))
         {
-            arguments.Add("-ca_file");
-            arguments.Add(caBundlePath.Trim());
+            return;
         }
+
+        if (streamUrl is null || !streamUrl.TrimStart().StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        arguments.Add("-ca_file");
+        arguments.Add(caBundlePath.Trim());
     }
 
     /// <summary>

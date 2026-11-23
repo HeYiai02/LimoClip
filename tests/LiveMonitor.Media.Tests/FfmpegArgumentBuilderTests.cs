@@ -137,6 +137,33 @@ public sealed class FfmpegArgumentBuilderTests
     }
 
     [Fact]
+    public void Build_HttpInput_DoesNotAddCaFile()
+    {
+        // http:// 输入传 -ca_file 会被 ffmpeg 直接拒绝（Option ca_file not found），
+        // 抖音等平台匿名拉流地址就是 http，必须不追加该参数。
+        var arguments = FfmpegArgumentBuilder.Build(
+            Quality(url: "http://pull-flv.example/live.flv"),
+            "out.mkv",
+            @"E:\tools\cacert.crt");
+
+        Assert.DoesNotContain("-ca_file", arguments);
+    }
+
+    [Fact]
+    public void Build_HttpsInput_AddsCaFileBeforeInput()
+    {
+        var arguments = FfmpegArgumentBuilder.Build(
+            Quality(url: "https://pull-flv.example/live.flv"),
+            "out.mkv",
+            @"E:\tools\cacert.crt").ToList();
+
+        var caIndex = arguments.IndexOf("-ca_file");
+        var inputIndex = arguments.IndexOf("-i");
+        Assert.InRange(caIndex, 0, inputIndex - 1);
+        Assert.Equal(@"E:\tools\cacert.crt", arguments[caIndex + 1]);
+    }
+
+    [Fact]
     public void Build_WithSeparateAudio_AddsSecondInputAndMapsAudio()
     {
         var quality = new StreamQuality(

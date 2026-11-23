@@ -22,6 +22,7 @@
     <ProjectReference Include="..\LiveMonitor.Platforms.TestPlugin\LiveMonitor.Platforms.TestPlugin.csproj" />
     <ProjectReference Include="..\..\src\LiveMonitor.Plugins.Huya\LiveMonitor.Plugins.Huya.csproj" />
     <ProjectReference Include="..\..\src\LiveMonitor.Plugins.Douyu\LiveMonitor.Plugins.Douyu.csproj" />
+    <ProjectReference Include="..\..\src\LiveMonitor.Plugins.Douyin\LiveMonitor.Plugins.Douyin.csproj" />
   </ItemGroup>
 
   <ItemGroup>

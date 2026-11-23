@@ -14,5 +14,6 @@
     <ProjectReference Include="..\LiveMonitor.Plugins.YouTube\LiveMonitor.Plugins.YouTube.csproj" />
     <ProjectReference Include="..\LiveMonitor.Plugins.Huya\LiveMonitor.Plugins.Huya.csproj" />
     <ProjectReference Include="..\LiveMonitor.Plugins.Douyu\LiveMonitor.Plugins.Douyu.csproj" />
+    <ProjectReference Include="..\LiveMonitor.Plugins.Douyin\LiveMonitor.Plugins.Douyin.csproj" />
   </ItemGroup>
 </Project>
