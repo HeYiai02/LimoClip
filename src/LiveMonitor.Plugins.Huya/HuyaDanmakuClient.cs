@@ -17,6 +17,7 @@ namespace LiveMonitor.Plugins.Huya;
 public sealed class HuyaDanmakuClient : IDanmakuClient
 {
     private readonly string _roomId;
+    private readonly string? _cookie;
     private readonly HuyaApiClient _api;
     private readonly HttpClient? _ownedHttpClient;
     private readonly Func<WebSocket>? _socketFactory;
@@ -45,6 +46,7 @@ public sealed class HuyaDanmakuClient : IDanmakuClient
         }
 
         _roomId = roomId.Trim();
+        _cookie = HuyaApiClient.NormalizeCookie(authCookie);
         if (httpClient is null)
         {
             _ownedHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
@@ -76,7 +78,7 @@ public sealed class HuyaDanmakuClient : IDanmakuClient
         _disconnectRequested = false;
         try
         {
-            var snapshot = await _api.GetRoomAsync(_roomId, ct).ConfigureAwait(false);
+            var snapshot = await _api.GetRoomAsync(_roomId, _cookie, ct).ConfigureAwait(false);
             if (snapshot.PresenterUid <= 0)
             {
                 throw new InvalidOperationException("未能解析出虎牙主播 uid，无法连接弹幕。");
@@ -95,6 +97,12 @@ public sealed class HuyaDanmakuClient : IDanmakuClient
             else
             {
                 var client = new ClientWebSocket();
+                // 登录态 Cookie 一并带上：匿名也能收弹幕，带登录态可减少被风控降级的概率。
+                if (_cookie is not null)
+                {
+                    client.Options.SetRequestHeader("Cookie", _cookie);
+                }
+
                 var uri = new Uri(HuyaPacketParser.BuildSocketUrl(HuyaPacketParser.CreateGuid()));
                 await client.ConnectAsync(uri, ct).ConfigureAwait(false);
                 socket = client;

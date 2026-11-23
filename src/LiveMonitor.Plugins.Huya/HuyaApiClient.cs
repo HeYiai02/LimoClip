@@ -21,7 +21,8 @@ internal sealed record HuyaRoomSnapshot(
     string RoomName,
     bool IsLive,
     IReadOnlyList<HuyaStreamLine> FlvLines,
-    IReadOnlyList<HuyaBitRateInfo> BitRates);
+    IReadOnlyList<HuyaBitRateInfo> BitRates,
+    int MaxBitRate);
 
 /// <summary>
 /// 虎牙移动端房间接口访问器。
@@ -60,7 +61,14 @@ internal sealed partial class HuyaApiClient : IDisposable
     private static partial Regex ProfileRoomPattern();
 
     /// <summary>查询房间状态；<paramref name="roomIdOrHost"/> 可以是数字房间号或个性域名。</summary>
-    public async Task<HuyaRoomSnapshot> GetRoomAsync(string roomIdOrHost, CancellationToken ct)
+    public Task<HuyaRoomSnapshot> GetRoomAsync(string roomIdOrHost, CancellationToken ct)
+        => GetRoomAsync(roomIdOrHost, cookie: null, ct);
+
+    /// <summary>
+    /// 查询房间状态；<paramref name="cookie"/> 为该平台登录 Cookie。
+    /// 带登录态时虎牙可能下发更多线路/档位（高码率档位通常要求登录），匿名态下照常可用。
+    /// </summary>
+    public async Task<HuyaRoomSnapshot> GetRoomAsync(string roomIdOrHost, string? cookie, CancellationToken ct)
     {
         var token = (roomIdOrHost ?? string.Empty).Trim();
         if (token.Length == 0)
@@ -76,6 +84,11 @@ internal sealed partial class HuyaApiClient : IDisposable
         request.Headers.TryAddWithoutValidation("User-Agent", PlatformDefaults.UserAgent);
         request.Headers.TryAddWithoutValidation("Referer", $"https://www.huya.com/{roomNumber}");
         request.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
+        var safeCookie = NormalizeCookie(cookie);
+        if (safeCookie is not null)
+        {
+            request.Headers.TryAddWithoutValidation("Cookie", safeCookie);
+        }
 
         using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
@@ -138,6 +151,7 @@ internal sealed partial class HuyaApiClient : IDisposable
 
         var flvLines = ParseFlvLines(data);
         var bitRates = ParseBitRates(liveData);
+        var maxBitRate = (int)ReadInt64(liveData, "bitRate");
 
         return new HuyaRoomSnapshot(
             canonicalRoomId > 0 ? canonicalRoomId.ToString() : roomNumber,
@@ -146,7 +160,27 @@ internal sealed partial class HuyaApiClient : IDisposable
             roomName,
             isLive,
             flvLines,
-            bitRates);
+            bitRates,
+            maxBitRate);
+    }
+
+    /// <summary>清洗 Cookie：去掉换行，空值返回 null（防止请求头注入）。</summary>
+    internal static string? NormalizeCookie(string? cookie)
+    {
+        if (string.IsNullOrWhiteSpace(cookie))
+        {
+            return null;
+        }
+
+        var trimmed = cookie.Trim();
+        var builder = new StringBuilder(trimmed.Length);
+        foreach (var ch in trimmed)
+        {
+            builder.Append(ch is '\r' or '\n' ? ' ' : ch);
+        }
+
+        var result = builder.ToString().Trim();
+        return result.Length == 0 ? null : result;
     }
 
     private static IReadOnlyList<HuyaStreamLine> ParseFlvLines(JsonElement data)

@@ -29,7 +29,7 @@ public sealed class HuyaProviderTests
     }
 
     [Fact]
-    public async Task GetRoomStatusAsync_Live_ReturnsSingleQualityWithHeaders()
+    public async Task GetRoomStatusAsync_Live_ReturnsQualityLadderOnStableLine()
     {
         using var api = new HuyaApiClient(HuyaTestData.CreateHttpClient(_ => HuyaTestData.Json(HuyaTestData.LiveJson)));
         var provider = new HuyaProvider(api);
@@ -41,12 +41,48 @@ public sealed class HuyaProviderTests
         Assert.Equal(PlatformType.Huya, status.Platform);
         Assert.Equal("S16 赛事直播", status.Title);
         Assert.Equal("虎牙赛事", status.AnchorName);
-        var quality = Assert.Single(status.AvailableQualities);
-        Assert.Equal("蓝光10M", quality.DisplayName);
-        Assert.StartsWith("https://al.flv.huya.com/", quality.StreamUrl);
+        Assert.Equal(2, status.AvailableQualities.Count);
+
+        // 最高档在前：蓝光20M（iBitRate=0 → 房间 bitRate=20000），线路优先 HS。
+        var quality = status.AvailableQualities[0];
+        Assert.Equal("蓝光20M", quality.DisplayName);
+        Assert.Equal("huya-flv-20000", quality.Id);
+        Assert.Equal(1080, quality.Height);
+        Assert.StartsWith("https://hs.flv.huya.com/", quality.StreamUrl);
+        Assert.Contains("&ratio=20000", quality.StreamUrl);
         Assert.Equal("https://www.huya.com/660000", quality.RequiredHeaders["Referer"]);
         Assert.False(string.IsNullOrWhiteSpace(quality.RequiredHeaders["User-Agent"]));
+        Assert.False(quality.RequiredHeaders.ContainsKey("Cookie"));
         Assert.False(quality.HasSeparateAudio);
+
+        var hd = status.AvailableQualities[1];
+        Assert.Equal("蓝光4M", hd.DisplayName);
+        Assert.Equal("huya-flv-4000", hd.Id);
+        Assert.Contains("&ratio=4000", hd.StreamUrl);
+    }
+
+    [Fact]
+    public async Task GetRoomStatusAsync_WithCookie_PassesCookieToApiAndHeaders()
+    {
+        var requests = new List<HttpRequestMessage>();
+        using var api = new HuyaApiClient(HuyaTestData.CreateHttpClient(request =>
+        {
+            requests.Add(request);
+            return HuyaTestData.Json(HuyaTestData.LiveJson);
+        }));
+        var provider = new HuyaProvider(api);
+
+        var status = await provider.GetRoomStatusAsync(
+            "660000",
+            "yyuid=123; udb_passport=abc",
+            CancellationToken.None);
+
+        Assert.Single(requests);
+        Assert.True(requests[0].Headers.TryGetValues("Cookie", out var values));
+        Assert.Contains(values, value => value.Contains("yyuid=123", StringComparison.Ordinal));
+
+        var quality = status.AvailableQualities[0];
+        Assert.Equal("yyuid=123; udb_passport=abc", quality.RequiredHeaders["Cookie"]);
     }
 
     [Fact]
@@ -58,7 +94,7 @@ public sealed class HuyaProviderTests
         var status = await provider.GetRoomStatusAsync("660000", ct: CancellationToken.None);
 
         Assert.True(status.IsLive);
-        Assert.Single(status.AvailableQualities);
+        Assert.Equal(2, status.AvailableQualities.Count);
     }
 
     [Fact]

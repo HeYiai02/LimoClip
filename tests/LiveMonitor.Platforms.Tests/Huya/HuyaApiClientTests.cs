@@ -22,13 +22,46 @@ public sealed class HuyaApiClientTests
         Assert.Equal(1346609715L, snapshot.PresenterUid);
         Assert.Equal("虎牙赛事", snapshot.Nick);
         Assert.Equal("S16 赛事直播", snapshot.RoomName);
-        Assert.Equal(2, snapshot.FlvLines.Count);
+        Assert.Equal(3, snapshot.FlvLines.Count);
         Assert.Equal("https://al.flv.huya.com/src/660000-1.flv?wsSecret=abc&wsTime=1", snapshot.FlvLines[0].Url);
         Assert.Equal("AL", snapshot.FlvLines[0].CdnType);
         Assert.Equal(2, snapshot.BitRates.Count);
-        Assert.Equal("蓝光10M", snapshot.BitRates[0].DisplayName);
+        Assert.Equal("蓝光20M", snapshot.BitRates[0].DisplayName);
         Assert.Equal(0, snapshot.BitRates[0].BitRate);
+        Assert.Equal(20000, snapshot.MaxBitRate);
         Assert.Contains("roomid=660000", requests[0].RequestUri!.Query);
+    }
+
+    [Fact]
+    public async Task GetRoomAsync_WithCookie_SendsCookieHeader()
+    {
+        var requests = new List<HttpRequestMessage>();
+        using var api = new HuyaApiClient(HuyaTestData.CreateHttpClient(request =>
+        {
+            requests.Add(request);
+            return HuyaTestData.Json(HuyaTestData.LiveJson);
+        }));
+
+        await api.GetRoomAsync("660000", "yyuid=123; udb_passport=abc", CancellationToken.None);
+
+        Assert.Single(requests);
+        Assert.True(requests[0].Headers.TryGetValues("Cookie", out var values));
+        Assert.Contains(values, value => value.Contains("yyuid=123", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetRoomAsync_Anonymously_SendsNoCookieHeader()
+    {
+        var requests = new List<HttpRequestMessage>();
+        using var api = new HuyaApiClient(HuyaTestData.CreateHttpClient(request =>
+        {
+            requests.Add(request);
+            return HuyaTestData.Json(HuyaTestData.LiveJson);
+        }));
+
+        await api.GetRoomAsync("660000", CancellationToken.None);
+
+        Assert.False(requests[0].Headers.Contains("Cookie"));
     }
 
     [Fact]

@@ -25,7 +25,8 @@ internal static class HuyaTestData
           "nick": "虎牙赛事",
           "roomName": "S16 赛事直播",
           "profileRoom": 660000,
-          "bitRateInfo": "[{\"sDisplayName\":\"蓝光10M\",\"iBitRate\":0},{\"sDisplayName\":\"蓝光4M\",\"iBitRate\":4000}]"
+          "bitRate": 20000,
+          "bitRateInfo": "[{\"sDisplayName\":\"蓝光20M\",\"iBitRate\":0},{\"sDisplayName\":\"蓝光4M\",\"iBitRate\":4000}]"
         },
         "stream": {
           "flv": {
@@ -41,6 +42,12 @@ internal static class HuyaTestData
                 "cdnType": "TX",
                 "webPriorityRate": 50,
                 "lineIndex": 1
+              },
+              {
+                "url": "https://hs.flv.huya.com/src/660000-1.flv?wsSecret=ghi&wsTime=1",
+                "cdnType": "HS",
+                "webPriorityRate": 45,
+                "lineIndex": 2
               }
             ]
           }
