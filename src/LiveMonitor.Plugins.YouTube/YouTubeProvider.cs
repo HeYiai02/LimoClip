@@ -115,6 +115,7 @@ public sealed class YouTubeProvider : IPlatformProvider
     private static IReadOnlyList<StreamQuality> ParseFormats(JsonElement root, string roomId)
     {
         var candidates = new Dictionary<(int Height, int Fps), FormatCandidate>();
+        var audio = ParseAudioFormat(root, roomId);
 
         if (!root.TryGetProperty("formats", out var formats) || formats.ValueKind != JsonValueKind.Array)
         {
@@ -148,7 +149,17 @@ public sealed class YouTubeProvider : IPlatformProvider
                 continue;
             }
 
-            candidates[key] = new FormatCandidate(tbr, BuildQuality(format, roomId, height, fps, url));
+            var quality = BuildQuality(format, roomId, height, fps, url);
+            if (audio is { } audioTrack)
+            {
+                quality = quality with
+                {
+                    AudioStreamUrl = audioTrack.Url,
+                    AudioHeaders = audioTrack.Headers,
+                };
+            }
+
+            candidates[key] = new FormatCandidate(tbr, quality);
         }
 
         return candidates.Values
@@ -156,6 +167,86 @@ public sealed class YouTubeProvider : IPlatformProvider
             .ThenByDescending(candidate => candidate.Quality.Fps)
             .Select(candidate => candidate.Quality)
             .ToArray();
+    }
+
+    /// <summary>
+    /// YouTube 直播 HLS 多数是视频/音频分离的 renditions；这里挑码率最高的纯音频轨，
+    /// 供录音（ffmpeg 第二路输入）与播放（mpv audio-file）补齐声音。
+    /// </summary>
+    private static AudioTrackCandidate? ParseAudioFormat(JsonElement root, string roomId)
+    {
+        if (!root.TryGetProperty("formats", out var formats) || formats.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        AudioTrackCandidate? best = null;
+        var bestBitrate = -1d;
+
+        foreach (var format in formats.EnumerateArray())
+        {
+            var url = JsonRead.String(format, "url");
+            if (string.IsNullOrWhiteSpace(url)
+                || !url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var videoCodec = JsonRead.String(format, "vcodec");
+            var audioCodec = JsonRead.String(format, "acodec");
+            var height = JsonRead.Int(format, "height");
+
+            var noVideo = string.IsNullOrWhiteSpace(videoCodec)
+                || videoCodec.Equals("none", StringComparison.OrdinalIgnoreCase);
+            if (!noVideo || height > 0)
+            {
+                continue;
+            }
+
+            // 有明确音频编码的轨道优先；HLS 纯音频 rendition 有时不带 acodec，也接受。
+            var hasAudioCodec = !string.IsNullOrWhiteSpace(audioCodec)
+                && !audioCodec.Equals("none", StringComparison.OrdinalIgnoreCase);
+            var bitrate = JsonRead.Double(format, "abr", JsonRead.Double(format, "tbr"));
+            var rank = bitrate + (hasAudioCodec ? 0.5 : 0);
+            if (rank <= bestBitrate)
+            {
+                continue;
+            }
+
+            bestBitrate = rank;
+            best = new AudioTrackCandidate(url, BuildHeaders(format, roomId));
+        }
+
+        return best;
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildHeaders(JsonElement format, string roomId)
+    {
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (format.TryGetProperty("http_headers", out var httpHeaders)
+            && httpHeaders.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in httpHeaders.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(property.Value.GetString()))
+                {
+                    headers[property.Name] = property.Value.GetString()!;
+                }
+            }
+        }
+
+        if (!headers.ContainsKey("User-Agent"))
+        {
+            headers["User-Agent"] = PlatformDefaults.UserAgent;
+        }
+
+        if (!headers.ContainsKey("Referer"))
+        {
+            headers["Referer"] = YouTubeUrlParser.BuildLiveUrl(roomId);
+        }
+
+        return headers;
     }
 
     private static StreamQuality BuildQuality(
@@ -216,4 +307,9 @@ public sealed class YouTubeProvider : IPlatformProvider
     }
 
     private sealed record FormatCandidate(double Tbr, StreamQuality Quality);
+
+    /// <summary>纯音频 rendition：URL 与拉流所需的请求头。</summary>
+    private sealed record AudioTrackCandidate(
+        string Url,
+        IReadOnlyDictionary<string, string> Headers);
 }

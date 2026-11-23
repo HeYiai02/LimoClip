@@ -906,6 +906,19 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
         {
             context.SetOptionString("http-header-fields", "Cookie: " + SanitizeHeaderValue(cookie));
         }
+
+        // YouTube 等平台的直播 HLS 音视频分离：视频轨走 loadfile，音频轨通过 audio-file 附加。
+        // 必须显式设置（无音频时清空），否则上一路播放的音轨会残留到下一次。
+        try
+        {
+            context.SetOptionString(
+                "audio-file",
+                quality.HasSeparateAudio ? quality.AudioStreamUrl!.Trim() : string.Empty);
+        }
+        catch
+        {
+            // 个别 mpv 版本不支持该选项时退化为纯视频播放，不影响主流程。
+        }
     }
 
     private void ApplyVideoFilter()

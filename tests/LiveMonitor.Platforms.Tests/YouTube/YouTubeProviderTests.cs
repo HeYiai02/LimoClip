@@ -55,6 +55,15 @@ public sealed class YouTubeProviderTests
         var headers = status.AvailableQualities[0].RequiredHeaders;
         Assert.Equal("yt-dlp-agent", headers["User-Agent"]);
         Assert.Contains("youtube.com/watch", headers["Referer"], StringComparison.OrdinalIgnoreCase);
+
+        // YouTube 直播 HLS 的音视频分离：纯音频 rendition 应被附加到每一路画质。
+        Assert.True(status.AvailableQualities[0].HasSeparateAudio);
+        Assert.All(
+            status.AvailableQualities,
+            quality => Assert.Equal("https://manifest.example/audio.m4a", quality.AudioStreamUrl));
+        var audioHeaders = status.AvailableQualities[0].AudioHeaders;
+        Assert.NotNull(audioHeaders);
+        Assert.Contains("youtube.com/watch", audioHeaders!["Referer"], StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

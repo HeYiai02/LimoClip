@@ -43,28 +43,56 @@ public static class FfmpegArgumentBuilder
             ReadWriteTimeoutMicroseconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
 
-        var userAgent = GetUserAgent(sourceQuality);
+        var userAgent = GetUserAgent(sourceQuality.RequiredHeaders);
         if (!string.IsNullOrWhiteSpace(userAgent))
         {
             arguments.Add("-user_agent");
             arguments.Add(SanitizeHeaderValue(userAgent));
         }
 
-        var headerBlock = BuildHeaderBlock(sourceQuality);
+        var headerBlock = BuildHeaderBlock(sourceQuality.RequiredHeaders);
         if (headerBlock.Length > 0)
         {
             arguments.Add("-headers");
             arguments.Add(headerBlock);
         }
 
-        if (!string.IsNullOrWhiteSpace(caBundlePath))
-        {
-            arguments.Add("-ca_file");
-            arguments.Add(caBundlePath.Trim());
-        }
+        AppendCaBundle(arguments, caBundlePath);
 
         arguments.Add("-i");
         arguments.Add(sourceQuality.StreamUrl.Trim());
+
+        // YouTube 等平台的直播 HLS 音视频分离：视频轨与音频轨要分别拉取，
+        // 第二路输入前同样需要 rw_timeout / UA / headers / ca_file。
+        if (sourceQuality.HasSeparateAudio)
+        {
+            arguments.Add("-rw_timeout");
+            arguments.Add(ReadWriteTimeoutMicroseconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+            var audioHeaders = sourceQuality.AudioHeaders ?? sourceQuality.RequiredHeaders;
+            var audioUserAgent = GetUserAgent(audioHeaders);
+            if (!string.IsNullOrWhiteSpace(audioUserAgent))
+            {
+                arguments.Add("-user_agent");
+                arguments.Add(SanitizeHeaderValue(audioUserAgent));
+            }
+
+            var audioHeaderBlock = BuildHeaderBlock(audioHeaders);
+            if (audioHeaderBlock.Length > 0)
+            {
+                arguments.Add("-headers");
+                arguments.Add(audioHeaderBlock);
+            }
+
+            AppendCaBundle(arguments, caBundlePath);
+            arguments.Add("-i");
+            arguments.Add(sourceQuality.AudioStreamUrl!.Trim());
+
+            arguments.Add("-map");
+            arguments.Add("0:v:0");
+            arguments.Add("-map");
+            arguments.Add("1:a:0");
+        }
 
         arguments.AddRange(new[]
         {
@@ -81,16 +109,35 @@ public static class FfmpegArgumentBuilder
         return arguments;
     }
 
+    private static void AppendCaBundle(List<string> arguments, string? caBundlePath)
+    {
+        if (!string.IsNullOrWhiteSpace(caBundlePath))
+        {
+            arguments.Add("-ca_file");
+            arguments.Add(caBundlePath.Trim());
+        }
+    }
+
     /// <summary>
-    /// 把 <see cref="StreamQuality.RequiredHeaders"/> 拼成 ffmpeg 要求的 <c>"Key: Value\r\n"</c> 文本块。
+    /// 把请求头拼成 ffmpeg 要求的 <c>"Key: Value\r\n"</c> 文本块。
     /// User-Agent 由 <c>-user_agent</c> 单独传递，这里会跳过；空名/空值/非法换行会被剔除或清洗。
     /// </summary>
     public static string BuildHeaderBlock(StreamQuality sourceQuality)
     {
         ArgumentNullException.ThrowIfNull(sourceQuality);
+        return BuildHeaderBlock(sourceQuality.RequiredHeaders);
+    }
+
+    /// <inheritdoc cref="BuildHeaderBlock(StreamQuality)"/>
+    public static string BuildHeaderBlock(IReadOnlyDictionary<string, string>? headers)
+    {
+        if (headers is null || headers.Count == 0)
+        {
+            return string.Empty;
+        }
 
         var builder = new StringBuilder();
-        foreach (var (name, value) in sourceQuality.RequiredHeaders)
+        foreach (var (name, value) in headers)
         {
             if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(value))
             {
@@ -122,8 +169,18 @@ public static class FfmpegArgumentBuilder
     public static string? GetUserAgent(StreamQuality sourceQuality)
     {
         ArgumentNullException.ThrowIfNull(sourceQuality);
+        return GetUserAgent(sourceQuality.RequiredHeaders);
+    }
 
-        foreach (var (name, value) in sourceQuality.RequiredHeaders)
+    /// <inheritdoc cref="GetUserAgent(StreamQuality)"/>
+    public static string? GetUserAgent(IReadOnlyDictionary<string, string>? headers)
+    {
+        if (headers is null)
+        {
+            return null;
+        }
+
+        foreach (var (name, value) in headers)
         {
             if (string.Equals(name?.Trim(), UserAgentHeaderName, StringComparison.OrdinalIgnoreCase))
             {

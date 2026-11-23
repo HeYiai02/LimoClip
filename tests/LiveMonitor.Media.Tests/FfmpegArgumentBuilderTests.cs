@@ -137,6 +137,65 @@ public sealed class FfmpegArgumentBuilderTests
     }
 
     [Fact]
+    public void Build_WithSeparateAudio_AddsSecondInputAndMapsAudio()
+    {
+        var quality = new StreamQuality(
+            Id: "youtube-1080p30",
+            DisplayName: "1080P30",
+            Height: 1080,
+            Fps: 30,
+            StreamUrl: "https://manifest.example/video.m3u8",
+            RequiredHeaders: new Dictionary<string, string> { ["User-Agent"] = "video-ua" },
+            AudioStreamUrl: "https://manifest.example/audio.m3u8",
+            AudioHeaders: new Dictionary<string, string>
+            {
+                ["User-Agent"] = "audio-ua",
+                ["Referer"] = "https://www.youtube.com/watch?v=x",
+            });
+
+        var arguments = FfmpegArgumentBuilder.Build(quality, "out.mkv", @"E:\tools\cacert.crt");
+        var list = arguments.ToList();
+        var inputIndexes = list
+            .Select((value, index) => (Value: value, Index: index))
+            .Where(item => item.Value == "-i")
+            .Select(item => item.Index)
+            .ToArray();
+
+        Assert.Equal(2, inputIndexes.Length);
+        Assert.True(quality.HasSeparateAudio);
+        Assert.Equal("https://manifest.example/video.m3u8", list[inputIndexes[0] + 1]);
+        Assert.Equal("https://manifest.example/audio.m3u8", list[inputIndexes[1] + 1]);
+        Assert.Equal(
+            new[] { "-map", "0:v:0", "-map", "1:a:0" },
+            list.Skip(inputIndexes[1] + 2).Take(4));
+
+        // 第二路输入的 UA/请求头必须在它自己的 -i 之前。
+        var audioUserAgentIndex = list.FindLastIndex(value => value == "-user_agent");
+        var audioHeadersIndex = list.FindLastIndex(value => value == "-headers");
+        Assert.InRange(audioUserAgentIndex, 0, inputIndexes[1] - 1);
+        Assert.InRange(audioHeadersIndex, 0, inputIndexes[1] - 1);
+        Assert.Equal("audio-ua", list[audioUserAgentIndex + 1]);
+        Assert.Contains("Referer: https://www.youtube.com/watch?v=x", list[audioHeadersIndex + 1]);
+
+        // 第二路输入同样要带 socket 超时与 ca_file。
+        var secondTimeoutIndex = list.FindLastIndex(value => value == "-rw_timeout");
+        Assert.InRange(secondTimeoutIndex, inputIndexes[0] + 1, inputIndexes[1] - 1);
+        Assert.Equal(2, list.FindAll(value => value == "-ca_file").Count);
+    }
+
+    [Fact]
+    public void Build_WithSeparateAudio_AudioWithoutUrl_KeepsSingleInput()
+    {
+        var quality = Quality() with { AudioStreamUrl = "   " };
+
+        var arguments = FfmpegArgumentBuilder.Build(quality, "out.mkv");
+
+        Assert.False(quality.HasSeparateAudio);
+        Assert.Single(arguments, "-i");
+        Assert.DoesNotContain("-map", arguments);
+    }
+
+    [Fact]
     public void Build_MissingStreamUrl_Throws()
     {
         Assert.Throws<ArgumentException>(() =>
