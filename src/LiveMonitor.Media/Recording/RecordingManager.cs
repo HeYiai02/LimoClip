@@ -49,6 +49,12 @@ public sealed class RecordingManager : IAsyncDisposable
     private static readonly TimeSpan RetryLoopInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan InitialPollDelay = TimeSpan.FromSeconds(3);
 
+    /// <summary>分段续录：ffmpeg 因 CDN 断流退出后，重启下一段前的等待时间。</summary>
+    private static readonly TimeSpan PartRestartDelay = TimeSpan.FromSeconds(2);
+
+    /// <summary>连续多少段都失败（启动即退出）后放弃自动续段，交给断流续录/开播轮询。</summary>
+    public const int MaxConsecutivePartRestarts = 6;
+
     /// <summary>缺省保存目录：%UserProfile%\Videos\LimoClip。</summary>
     public static string DefaultDirectory { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -62,6 +68,7 @@ public sealed class RecordingManager : IAsyncDisposable
     private readonly Func<PlatformType, IPlatformProvider?> _providerResolver;
     private readonly DanmakuManager? _danmaku;
     private readonly Func<IFullStreamRecorder> _recorderFactory;
+    private readonly ISegmentMerger? _segmentMerger;
     private readonly string? _globalDirectoryOverride;
     private readonly Func<DateTimeOffset> _clock;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
@@ -98,7 +105,8 @@ public sealed class RecordingManager : IAsyncDisposable
         Func<TimeSpan, CancellationToken, Task>? delay = null,
         Action<string>? log = null,
         TimeSpan? monitorInterval = null,
-        TimeSpan? pollIntervalOverride = null)
+        TimeSpan? pollIntervalOverride = null,
+        ISegmentMerger? segmentMerger = null)
     {
         _rooms = rooms ?? throw new ArgumentNullException(nameof(rooms));
         _targets = targets ?? throw new ArgumentNullException(nameof(targets));
@@ -120,6 +128,7 @@ public sealed class RecordingManager : IAsyncDisposable
 
         _jobGuard = new ProcessJobGuard();
         _recorderFactory = recorderFactory ?? CreateDefaultRecorder;
+        _segmentMerger = segmentMerger;
     }
 
     /// <summary>
@@ -246,13 +255,17 @@ public sealed class RecordingManager : IAsyncDisposable
         await SuppressAutoRestartAsync(active.Room).ConfigureAwait(false);
         _log($"正在停止录制：{FormatRoom(active.Room)}");
 
-        try
+        var recorder = active.Recorder;
+        if (recorder is not null)
         {
-            await active.Recorder.StopGracefullyAsync(GracefulStopTimeout).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _log($"停止录制时 ffmpeg 收尾异常（{FormatRoom(active.Room)}）：{ex.Message}");
+            try
+            {
+                await recorder.StopGracefullyAsync(GracefulStopTimeout).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _log($"停止录制时 ffmpeg 收尾异常（{FormatRoom(active.Room)}）：{ex.Message}");
+            }
         }
 
         await FinalizeOnceAsync(active, requestedStop: true).ConfigureAwait(false);
@@ -475,7 +488,11 @@ public sealed class RecordingManager : IAsyncDisposable
             try
             {
                 active.StopRequested = true;
-                await active.Recorder.StopGracefullyAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+                var recorder = active.Recorder;
+                if (recorder is not null)
+                {
+                    await recorder.StopGracefullyAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+                }
             }
             catch (Exception ex)
             {
@@ -561,7 +578,13 @@ public sealed class RecordingManager : IAsyncDisposable
             ActiveRecording? active = null;
             try
             {
-                active = new ActiveRecording(room, session, _recorderFactory(), startedAtUtc);
+                var recorder = _recorderFactory();
+                active = new ActiveRecording(room, session, recorder, startedAtUtc)
+                {
+                    Provider = provider,
+                    Cookie = cookie,
+                    Quality = quality,
+                };
 
                 try
                 {
@@ -579,14 +602,18 @@ public sealed class RecordingManager : IAsyncDisposable
 
                 AttachDanmaku(active);
                 HighlightTracker.Register(room.Platform, session.RoomId, session.Id);
-                SubscribeRecorder(active);
+                SubscribeRecorder(active, recorder);
 
                 lock (_gate)
                 {
                     _active[room.Id] = active;
                 }
 
-                await active.Recorder.StartAsync(quality, videoPath, ct).ConfigureAwait(false);
+                var firstPartPath = BuildPartPath(videoPath, 1);
+                active.CurrentPartPath = firstPartPath;
+                active.PartIndex = 1;
+                active.CurrentPartStartedAt = _clock();
+                await recorder.StartAsync(quality, firstPartPath, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -646,7 +673,11 @@ public sealed class RecordingManager : IAsyncDisposable
 
         try
         {
-            await active.Recorder.DisposeAsync().ConfigureAwait(false);
+            var recorder = active.Recorder;
+            if (recorder is not null)
+            {
+                await recorder.DisposeAsync().ConfigureAwait(false);
+            }
         }
         catch (Exception ex)
         {
@@ -664,6 +695,13 @@ public sealed class RecordingManager : IAsyncDisposable
         active.Cts.Dispose();
 
         // 启动失败的分段没有保留价值：清掉可能的半成品文件，并把会话标记为 Failed 供历史列表展示。
+        foreach (var part in active.Parts)
+        {
+            TryDeleteQuietly(part.Path);
+        }
+
+        TryDeleteQuietly(active.CurrentPartPath);
+
         TryDeleteQuietly(active.Session.VideoFilePath);
         TryDeleteQuietly(active.Session.DanmakuFilePath);
         active.Session.Status = RecordingStatus.Failed;
@@ -692,11 +730,11 @@ public sealed class RecordingManager : IAsyncDisposable
         }
     }
 
-    private void SubscribeRecorder(ActiveRecording active)
+    private void SubscribeRecorder(ActiveRecording active, IFullStreamRecorder recorder)
     {
-        active.Recorder.OnFirstFrameAnchored += anchor => OnAnchor(active, anchor);
-        active.Recorder.OnProgressUpdated += (duration, size, bitrate) => OnProgress(active, duration, size, bitrate);
-        active.Recorder.OnExited += (exitCode, stderrTail) => OnRecorderExited(active, exitCode, stderrTail);
+        recorder.OnFirstFrameAnchored += anchor => OnAnchor(active, anchor);
+        recorder.OnProgressUpdated += (duration, size, bitrate) => OnProgress(active, duration, size, bitrate);
+        recorder.OnExited += (exitCode, stderrTail) => OnRecorderExited(active, exitCode, stderrTail);
     }
 
     // ---- 采集 ----
@@ -789,12 +827,15 @@ public sealed class RecordingManager : IAsyncDisposable
     {
         lock (active.Sync)
         {
-            active.LastDuration = duration;
-            active.LastSize = fileSizeBytes;
+            active.CurrentPartDuration = duration;
+            active.CurrentPartSize = fileSizeBytes;
             active.LastBitrate = bitrateKbps;
             active.LastProgressUtc = _clock();
-            active.Session.DurationSeconds = Math.Max(active.Session.DurationSeconds, duration.TotalSeconds);
-            active.Session.FileSizeBytes = Math.Max(active.Session.FileSizeBytes, fileSizeBytes);
+            active.PartFailures = 0;
+            var totalDuration = active.CompletedDuration + duration;
+            var totalSize = active.CompletedSize + fileSizeBytes;
+            active.Session.DurationSeconds = Math.Max(active.Session.DurationSeconds, totalDuration.TotalSeconds);
+            active.Session.FileSizeBytes = Math.Max(active.Session.FileSizeBytes, totalSize);
         }
 
         RaiseProgress(active.Room.Id, BuildProgress(active));
@@ -831,15 +872,33 @@ public sealed class RecordingManager : IAsyncDisposable
             while (!token.IsCancellationRequested)
             {
                 await _delay(_monitorInterval, token).ConfigureAwait(false);
-                if (active.RecorderExited || active.StopRequested)
+
+                bool stopRequested;
+                bool recorderExited;
+                DateTimeOffset lastProgress;
+                lock (active.Sync)
+                {
+                    stopRequested = active.StopRequested;
+                    recorderExited = active.RecorderExited;
+                    lastProgress = active.LastProgressUtc;
+                }
+
+                if (stopRequested)
                 {
                     break;
                 }
 
-                DateTimeOffset lastProgress;
-                lock (active.Sync)
+                if (recorderExited)
                 {
-                    lastProgress = active.LastProgressUtc;
+                    // 虎牙等 CDN 会周期性断开连接：当前分片正常结束后自动开下一段，
+                    // 全部段落停止录制时再合并，避免单次 ffmpeg 重连写坏 matroska。
+                    if (!await TryStartNextPartAsync(active, token).ConfigureAwait(false))
+                    {
+                        break;
+                    }
+
+                    nextPersist = _clock() + PersistInterval;
+                    continue;
                 }
 
                 var now = _clock();
@@ -861,13 +920,17 @@ public sealed class RecordingManager : IAsyncDisposable
                         active.Jsonl = null;
                     }
 
-                    try
+                    var stalledRecorder = active.Recorder;
+                    if (stalledRecorder is not null)
                     {
-                        await active.Recorder.StopGracefullyAsync(GracefulStopTimeout).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _log($"卡死终止录制器异常：{ex.Message}");
+                        try
+                        {
+                            await stalledRecorder.StopGracefullyAsync(GracefulStopTimeout).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _log($"卡死终止录制器异常：{ex.Message}");
+                        }
                     }
 
                     break;
@@ -916,13 +979,209 @@ public sealed class RecordingManager : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// 当前分片结束（CDN 主动断流）后尝试开下一段：重新解析房间状态拿新的签名地址，
+    /// 仍开播则新建录制器与分片文件继续录；主播下播或连续启动失败时返回 false。
+    /// </summary>
+    private async Task<bool> TryStartNextPartAsync(ActiveRecording active, CancellationToken token)
+    {
+        var previous = active.Recorder;
+        active.Recorder = null;
+        if (previous is not null)
+        {
+            try
+            {
+                await previous.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _log($"重置录制器异常（{FormatRoom(active.Room)}）：{ex.Message}");
+            }
+        }
+
+        CaptureCurrentPart(active, previous);
+
+        lock (active.Sync)
+        {
+            active.RecorderExited = false;
+            active.ExitCode = 0;
+            active.StderrTail = null;
+        }
+
+        if (active.StopRequested)
+        {
+            return false;
+        }
+
+        var room = active.Room;
+        RoomStatus? status = null;
+        try
+        {
+            status = await active.Provider.GetRoomStatusAsync(room.RoomId, active.Cookie, token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _log($"断流后重新查询开播状态失败（{FormatRoom(room)}）：{ex.Message}");
+        }
+
+        if (status is null || !status.IsLive)
+        {
+            return false;
+        }
+
+        var quality = ChooseQuality(status) ?? active.Quality;
+        if (quality is null)
+        {
+            return false;
+        }
+
+        for (var attempt = 0; attempt < MaxConsecutivePartRestarts; attempt++)
+        {
+            if (active.StopRequested)
+            {
+                return false;
+            }
+
+            int partNumber;
+            lock (active.Sync)
+            {
+                partNumber = active.PartIndex + 1;
+            }
+
+            var partPath = BuildPartPath(active.Session.VideoFilePath, partNumber);
+            IFullStreamRecorder? recorder = null;
+            try
+            {
+                recorder = _recorderFactory();
+                SubscribeRecorder(active, recorder);
+                await recorder.StartAsync(quality, partPath, token).ConfigureAwait(false);
+                lock (active.Sync)
+                {
+                    active.Recorder = recorder;
+                    active.PartIndex = partNumber;
+                    active.PartFailures = 0;
+                    active.LastProgressUtc = _clock();
+                    active.CurrentPartPath = partPath;
+                    active.CurrentPartStartedAt = _clock();
+                }
+
+                NotifyStatus($"直播流中断，已开始第 {partNumber} 段续录：{active.Session.RoomDisplayName}");
+                _log($"分段续录：第 {partNumber} 段 → {partPath}");
+                return true;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _log($"启动第 {partNumber} 段录制失败（{FormatRoom(room)}）：{ex.Message}");
+                if (recorder is not null)
+                {
+                    try
+                    {
+                        await recorder.DisposeAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception disposeEx)
+                    {
+                        _log($"清理失败分段的录制器异常：{disposeEx.Message}");
+                    }
+                }
+
+                bool exhausted;
+                lock (active.Sync)
+                {
+                    active.PartFailures++;
+                    exhausted = active.PartFailures >= MaxConsecutivePartRestarts;
+                    active.PartFailureMessage = ex.Message;
+                }
+
+                if (exhausted)
+                {
+                    _log($"连续 {MaxConsecutivePartRestarts} 段启动失败，停止自动续段：{active.Session.RoomDisplayName}");
+                    return false;
+                }
+
+                await _delay(PartRestartDelay, token).ConfigureAwait(false);
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>把当前分片登记到已完成列表：记录路径、时长与输入时间轴起点，供合并时裁掉 CDN 重发的重叠内容。</summary>
+    private static void CaptureCurrentPart(ActiveRecording active, IFullStreamRecorder? recorder)
+    {
+        lock (active.Sync)
+        {
+            if (active.CurrentPartPath is not { } path)
+            {
+                return;
+            }
+
+            var offset = active.CurrentPartStartedAt - active.RecordingStartUtc;
+            if (offset < TimeSpan.Zero)
+            {
+                offset = TimeSpan.Zero;
+            }
+
+            active.Parts.Add(new RecordedSegment(
+                path,
+                active.CurrentPartDuration,
+                recorder?.SourceTimelineStartSeconds,
+                offset));
+            active.CompletedDuration += active.CurrentPartDuration;
+            active.CompletedSize += active.CurrentPartSize;
+            active.CurrentPartDuration = TimeSpan.Zero;
+            active.CurrentPartSize = 0;
+            active.CurrentPartPath = null;
+        }
+    }
+
+    private static string BuildPartPath(string videoPath, int partNumber)
+    {
+        var directory = Path.GetDirectoryName(videoPath) ?? string.Empty;
+        var name = Path.GetFileNameWithoutExtension(videoPath);
+        return Path.Combine(directory, $"{name}.part{partNumber:000}{Path.GetExtension(videoPath)}");
+    }
+
+    /// <summary>把本场录制的所有分片合并成 final 文件；没有分片或合并失败时保留分片。</summary>
+    private async Task<SegmentMergeResult> MergePartsAsync(ActiveRecording active, CancellationToken ct)
+    {
+        var parts = active.Parts.ToList();
+        if (parts.Count == 0)
+        {
+            return new SegmentMergeResult(false, 0, "没有录制分片。", TimeSpan.Zero);
+        }
+
+        var merger = _segmentMerger;
+        if (merger is null)
+        {
+            try
+            {
+                merger = new FfmpegSegmentMerger(FfmpegLocator.Locate(), _log);
+            }
+            catch (Exception ex)
+            {
+                return new SegmentMergeResult(
+                    false,
+                    parts.Sum(part => TryGetFileLength(part.Path)),
+                    $"未找到可用于合并分片的 ffmpeg：{ex.Message}",
+                    TimeSpan.Zero);
+            }
+        }
+
+        return await merger.MergeAsync(active.Session.VideoFilePath, parts, ct).ConfigureAwait(false);
+    }
+
     private async Task PersistActiveAsync(ActiveRecording active)
     {
         RecordingSession session = active.Session;
         lock (active.Sync)
         {
-            session.DurationSeconds = Math.Max(session.DurationSeconds, active.LastDuration.TotalSeconds);
-            session.FileSizeBytes = Math.Max(session.FileSizeBytes, active.LastSize);
+            var recorded = active.CompletedDuration + active.CurrentPartDuration;
+            session.DurationSeconds = Math.Max(session.DurationSeconds, recorded.TotalSeconds);
+            session.FileSizeBytes = Math.Max(session.FileSizeBytes, active.CompletedSize + active.CurrentPartSize);
             session.DanmakuCount = Math.Max(session.DanmakuCount, Volatile.Read(ref active.DanmakuCount));
             session.HighlightCount = Math.Max(
                 session.HighlightCount,
@@ -968,18 +1227,31 @@ public sealed class RecordingManager : IAsyncDisposable
                 }
             }
 
-            try
+            var recorder = active.Recorder;
+            active.Recorder = null;
+            if (recorder is not null)
             {
-                await active.Recorder.DisposeAsync().ConfigureAwait(false);
+                try
+                {
+                    await recorder.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _log($"收尾录制器异常（{session.RoomDisplayName}）：{ex.Message}");
+                }
             }
-            catch (Exception ex)
-            {
-                _log($"收尾录制器异常（{session.RoomDisplayName}）：{ex.Message}");
-            }
+
+            CaptureCurrentPart(active, recorder);
+
+            // 分段录制：停录后把所有分片合并成一个文件；合并失败时分片保留并在会话里注明。
+            var mergeResult = await MergePartsAsync(active, CancellationToken.None).ConfigureAwait(false);
+            var mergeNote = mergeResult.Merged
+                ? null
+                : $"录制分片合并失败：{mergeResult.ErrorMessage}（{active.Parts.Count} 个分片已保留在录制目录）";
 
             var endedAt = _clock();
             var highlightCount = HighlightTracker.Remove(active.Room.Platform, session.RoomId);
-            var fileSize = TryGetFileLength(session.VideoFilePath);
+            var fileSize = mergeResult.FileSizeBytes;
             var written = jsonl?.WrittenCount ?? 0;
 
             // 开播状态查询是异步 IO，必须在 lock 外完成。
@@ -1000,36 +1272,69 @@ public sealed class RecordingManager : IAsyncDisposable
             lock (active.Sync)
             {
                 var durationAnchor = active.AnchorUtc ?? active.RecordingStartUtc;
+                var recordedDuration = active.CompletedDuration + active.CurrentPartDuration;
+                var mergedContentDuration = mergeResult.Merged && mergeResult.Duration > TimeSpan.Zero
+                    ? mergeResult.Duration
+                    : (TimeSpan?)null;
+
                 session.EndedAt = endedAt.UtcDateTime;
-                session.DurationSeconds = Math.Max(session.DurationSeconds, active.LastDuration.TotalSeconds);
-                session.DurationSeconds = Math.Max(
-                    session.DurationSeconds,
-                    Math.Max(0, (endedAt - durationAnchor).TotalSeconds));
-                session.FileSizeBytes = Math.Max(session.FileSizeBytes, Math.Max(active.LastSize, fileSize));
+                if (mergedContentDuration is { } mergedDuration)
+                {
+                    // 合并时裁掉了 CDN 重发的重叠内容：以合并结果为准，纠正录制期间按分片累加导致的虚高时长。
+                    session.DurationSeconds = mergedDuration.TotalSeconds;
+                }
+                else
+                {
+                    session.DurationSeconds = Math.Max(session.DurationSeconds, recordedDuration.TotalSeconds);
+                    session.DurationSeconds = Math.Max(
+                        session.DurationSeconds,
+                        Math.Max(0, (endedAt - durationAnchor).TotalSeconds));
+                }
+                if (mergeResult.Merged && mergeResult.FileSizeBytes > 0)
+                {
+                    // 合并时裁掉了重叠内容：以合并结果的字节数为准，避免录制期间按分片累加的虚高大小。
+                    session.FileSizeBytes = mergeResult.FileSizeBytes;
+                }
+                else
+                {
+                    session.FileSizeBytes = Math.Max(
+                        session.FileSizeBytes,
+                        Math.Max(active.CompletedSize + active.CurrentPartSize, fileSize));
+                }
                 session.DanmakuCount = Math.Max(session.DanmakuCount, Math.Max(written, Volatile.Read(ref active.DanmakuCount)));
                 session.HighlightCount = Math.Max(session.HighlightCount, highlightCount);
 
                 if (userStop)
                 {
                     session.Status = RecordingStatus.Completed;
-                    session.ErrorMessage = null;
+                    session.ErrorMessage = mergeNote;
                 }
                 else if (active.StallDetected)
                 {
                     session.Status = RecordingStatus.Failed;
                     session.ErrorMessage = $"录制流卡死超过 {StallTimeout.TotalSeconds:0} 秒，已强制结束当前分段。";
+                    if (mergeNote is not null)
+                    {
+                        session.ErrorMessage += " " + mergeNote;
+                    }
                 }
                 else
                 {
                     if (offline)
                     {
                         session.Status = RecordingStatus.Completed;
-                        session.ErrorMessage = null;
+                        session.ErrorMessage = mergeNote;
                     }
                     else
                     {
                         session.Status = RecordingStatus.Failed;
-                        session.ErrorMessage = DescribeExit(active);
+                        session.ErrorMessage = active.PartFailureMessage is { Length: > 0 } partError
+                            ? $"直播流中断后连续 {MaxConsecutivePartRestarts} 段录制启动失败：{partError}"
+                            : DescribeExit(active);
+                        if (mergeNote is not null)
+                        {
+                            session.ErrorMessage += " " + mergeNote;
+                        }
                     }
                 }
 
@@ -1505,12 +1810,14 @@ public sealed class RecordingManager : IAsyncDisposable
     {
         lock (active.Sync)
         {
+            var recorded = active.CompletedDuration + active.CurrentPartDuration;
+            var size = active.CompletedSize + active.CurrentPartSize;
             return new RecordingProgress(
                 active.Session.Id,
-                active.LastDuration > TimeSpan.Zero
-                    ? active.LastDuration
+                recorded > TimeSpan.Zero
+                    ? recorded
                     : TimeSpan.FromSeconds(Math.Max(0, (_clock() - (active.AnchorUtc ?? active.RecordingStartUtc)).TotalSeconds)),
-                Math.Max(active.LastSize, active.Session.FileSizeBytes),
+                Math.Max(size, active.Session.FileSizeBytes),
                 active.LastBitrate,
                 Math.Max(active.Session.DanmakuCount, Volatile.Read(ref active.DanmakuCount)),
                 Math.Max(active.Session.HighlightCount, HighlightTracker.GetHighlightCount(active.Session.Id)));
@@ -1647,6 +1954,7 @@ public sealed class RecordingManager : IAsyncDisposable
             Session = session;
             Recorder = recorder;
             RecordingStartUtc = recordingStartUtc;
+            CurrentPartStartedAt = recordingStartUtc;
             LastProgressUtc = recordingStartUtc;
         }
 
@@ -1654,9 +1962,49 @@ public sealed class RecordingManager : IAsyncDisposable
 
         public RecordingSession Session { get; }
 
-        public IFullStreamRecorder Recorder { get; }
+        /// <summary>当前分段的录制器；分段切换/收尾期间可能为 null。</summary>
+        public IFullStreamRecorder? Recorder { get; set; }
+
+        /// <summary>启动时解析到的 Provider，用于断流后重新查询房间状态。</summary>
+        public IPlatformProvider Provider { get; set; } = null!;
+
+        /// <summary>启动时读到的平台 Cookie，分段重启时复用。</summary>
+        public string? Cookie { get; set; }
+
+        /// <summary>最近一次解析到的画质（分段重启时用于兜底）。</summary>
+        public StreamQuality? Quality { get; set; }
 
         public DateTimeOffset RecordingStartUtc { get; }
+
+        /// <summary>当前分片开始录制的墙钟时间，用于估算分片在服务器时间轴上的位置。</summary>
+        public DateTimeOffset CurrentPartStartedAt { get; set; }
+
+        /// <summary>本场录制已累计完成的分片时长（当前分段之前）。</summary>
+        public TimeSpan CompletedDuration { get; set; }
+
+        /// <summary>本场录制已累计完成的分片字节数（当前分段之前）。</summary>
+        public long CompletedSize { get; set; }
+
+        /// <summary>当前分段已录制时长（由进度回调更新）。</summary>
+        public TimeSpan CurrentPartDuration { get; set; }
+
+        /// <summary>当前分段的文件字节数（由进度回调更新）。</summary>
+        public long CurrentPartSize { get; set; }
+
+        /// <summary>已完成的分片（含时长与输入时间轴起点），按录制顺序排列。</summary>
+        public List<RecordedSegment> Parts { get; } = new();
+
+        /// <summary>正在录制的分片路径；分段切换/收尾后置空。</summary>
+        public string? CurrentPartPath { get; set; }
+
+        /// <summary>当前分片序号（第 1 段为 1）。</summary>
+        public int PartIndex { get; set; }
+
+        /// <summary>连续启动失败的分段数；进度回调成功后会清零。</summary>
+        public int PartFailures { get; set; }
+
+        /// <summary>最近一次分段启动失败的原因，用于收尾时给出可读错误。</summary>
+        public string? PartFailureMessage { get; set; }
 
         public DanmakuJsonlRecorder? Jsonl { get; set; }
 
@@ -1679,10 +2027,6 @@ public sealed class RecordingManager : IAsyncDisposable
         public DateTimeOffset? AnchorUtc { get; set; }
 
         public DateTimeOffset LastProgressUtc { get; set; }
-
-        public TimeSpan LastDuration { get; set; }
-
-        public long LastSize { get; set; }
 
         public double LastBitrate { get; set; }
 

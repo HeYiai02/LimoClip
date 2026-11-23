@@ -17,6 +17,13 @@ public interface IFullStreamRecorder : IAsyncDisposable
     /// <summary>ffmpeg 进程退出：exitCode 与 stderr 摘要（成功时为 null）。</summary>
     event Action<int, string?>? OnExited;
 
+    /// <summary>
+    /// 输入流自身时间轴的起点（秒）。ffmpeg 打开直播流时从 FLV/TS 头读到的绝对起始时间，
+    /// 用于把「分段录制」的多个分片按服务器时间轴对齐、裁掉 CDN 重复下发的重叠内容；
+    /// 解析不到时为 null。
+    /// </summary>
+    double? SourceTimelineStartSeconds { get; }
+
     Task StartAsync(StreamQuality sourceQuality, string outputMkvPath, CancellationToken ct = default);
 
     /// <summary>写 stdin "q" 让 ffmpeg 收尾；超时后强杀进程树。</summary>

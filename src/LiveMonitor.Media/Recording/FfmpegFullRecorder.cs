@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Core.Models;
 
@@ -18,6 +19,12 @@ namespace LiveMonitor.Media.Recording;
 public sealed class FfmpegFullRecorder : IFullStreamRecorder
 {
     private const int StderrTailLimit = 4000;
+
+    /// <summary>ffmpeg 输入信息里的 <c>Duration: ..., start: X</c>，X 为输入流自身时间轴起点（秒）。</summary>
+    private static readonly Regex InputStartRegex = new(
+        @"Duration: [^,]+, start: (?<start>[0-9.]+)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private readonly string _ffmpegPath;
     private readonly ProcessJobGuard? _jobGuard;
     private readonly Func<DateTimeOffset> _clock;
@@ -25,6 +32,7 @@ public sealed class FfmpegFullRecorder : IFullStreamRecorder
     private readonly string? _caBundlePath;
     private readonly object _gate = new();
     private readonly StringBuilder _stderrTail = new();
+    private double _sourceTimelineStartSeconds = double.NaN;
     private readonly TaskCompletionSource<DateTimeOffset> _anchorCompletion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -71,6 +79,18 @@ public sealed class FfmpegFullRecorder : IFullStreamRecorder
         {
             var ticks = Interlocked.Read(ref _anchorUtcTicks);
             return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+        }
+    }
+
+    /// <summary>输入流自身时间轴起点（秒）；解析不到时为 null。</summary>
+    public double? SourceTimelineStartSeconds
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return double.IsNaN(_sourceTimelineStartSeconds) ? null : _sourceTimelineStartSeconds;
+            }
         }
     }
 
@@ -525,6 +545,16 @@ public sealed class FfmpegFullRecorder : IFullStreamRecorder
     {
         lock (_gate)
         {
+            if (double.IsNaN(_sourceTimelineStartSeconds))
+            {
+                var match = InputStartRegex.Match(line);
+                if (match.Success &&
+                    double.TryParse(match.Groups["start"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var startSeconds))
+                {
+                    _sourceTimelineStartSeconds = startSeconds;
+                }
+            }
+
             _stderrTail.AppendLine(line);
             if (_stderrTail.Length > StderrTailLimit)
             {

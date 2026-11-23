@@ -1,4 +1,4 @@
-using LiveMonitor.Core.Entities;
+﻿using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Enums;
 using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Core.Models;
@@ -303,6 +303,9 @@ internal sealed class FakeFullStreamRecorder : IFullStreamRecorder
 
     public bool IsRunning { get; private set; }
 
+    /// <summary>模拟从 ffmpeg stderr 解析到的输入时间轴起点（秒）。</summary>
+    public double? SourceTimelineStartSeconds { get; set; }
+
     /// <summary>启动时是否落一个空文件，用于验证删除记录会连带删除录制文件。</summary>
     public bool CreateOutputFile { get; set; }
 
@@ -362,6 +365,49 @@ internal sealed class FakeFullStreamRecorder : IFullStreamRecorder
     }
 }
 
+/// <summary>可控的分片合并器：默认把分片总大小当作合并结果大小，并写出一个输出文件。</summary>
+internal sealed class FakeSegmentMerger : ISegmentMerger
+{
+    public List<string> OutputPaths { get; } = new();
+
+    public List<IReadOnlyList<RecordedSegment>> Batches { get; } = new();
+
+    public SegmentMergeResult Result { get; set; } = new(true, 0, null, TimeSpan.Zero);
+
+    public Exception? Exception { get; set; }
+
+    public Task<SegmentMergeResult> MergeAsync(
+        string outputPath,
+        IReadOnlyList<RecordedSegment> segments,
+        CancellationToken ct = default)
+    {
+        OutputPaths.Add(outputPath);
+        Batches.Add(segments.ToArray());
+        if (Exception is not null)
+        {
+            throw Exception;
+        }
+
+        var totalSize = segments.Sum(segment => File.Exists(segment.Path) ? new FileInfo(segment.Path).Length : 0);
+        var size = Result.FileSizeBytes > 0 ? Result.FileSizeBytes : totalSize;
+        var duration = Result.Duration > TimeSpan.Zero
+            ? Result.Duration
+            : SegmentOverlapPlanner.ComputeContentDuration(segments);
+        if (Result.Merged)
+        {
+            var directory = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.WriteAllBytes(outputPath, Array.Empty<byte>());
+        }
+
+        return Task.FromResult(Result with { FileSizeBytes = size, Duration = duration });
+    }
+}
+
 /// <summary>
 /// 组装一个真实的 RecordingManager，但把仓储、平台、录制器与时间全部替换成可控 fake：
 /// 监控间隔 20ms 便于快速收尾；轮询间隔默认 60 分钟，避免后台轮询干扰手动测试。
@@ -379,7 +425,8 @@ internal sealed class RecordingManagerHarness : IAsyncDisposable
     public RecordingManagerHarness(
         TimeSpan? pollIntervalOverride = null,
         bool readPollIntervalFromSettings = false,
-        bool useGlobalDirectoryOverride = true)
+        bool useGlobalDirectoryOverride = true,
+        Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         RootDirectory = Path.Combine(
             Path.GetTempPath(),
@@ -409,7 +456,9 @@ internal sealed class RecordingManagerHarness : IAsyncDisposable
             monitorInterval: TimeSpan.FromMilliseconds(20),
             pollIntervalOverride: readPollIntervalFromSettings
                 ? null
-                : pollIntervalOverride ?? TimeSpan.FromMinutes(60));
+                : pollIntervalOverride ?? TimeSpan.FromMinutes(60),
+            delay: delay,
+            segmentMerger: SegmentMerger);
 
         Manager.ProgressUpdated += (roomId, progress) =>
         {
@@ -458,6 +507,8 @@ internal sealed class RecordingManagerHarness : IAsyncDisposable
     public FakeCredentialStore Credentials { get; } = new();
 
     public FakePlatformProvider Provider { get; } = new();
+
+    public FakeSegmentMerger SegmentMerger { get; } = new();
 
     public RecordingManager Manager { get; }
 

@@ -8,7 +8,9 @@ namespace LiveMonitor.Media.Recording;
 /// ① 自定义请求头必须通过 <c>-headers</c> 放在 <c>-i</c> 之前，格式固定为 <c>"Key: Value\r\n"</c>；
 /// ② User-Agent 单独走 <c>-user_agent</c>，不要混进 -headers，否则部分 CDN 会拒绝；
 /// ③ 输入侧套接字超时 <c>-rw_timeout 15000000</c>（15 秒），网络抖动时及时失败交给上层重试；
-/// ④ 输出统一零重编码 <c>-c copy -f matroska</c>，配合 <c>-progress pipe:1</c> 输出实时进度。
+/// ④ 输出统一零重编码 <c>-c copy -f matroska</c>，配合 <c>-progress pipe:1</c> 输出实时进度；
+/// ⑤ 用 <c>-loglevel info</c> 而不是 warning：录制器需要从 stderr 的输入信息里解析
+///    <c>start: X</c>（输入流自身时间轴起点），分段录制时据此裁掉 CDN 重复下发的重叠内容。
 /// </summary>
 public static class FfmpegArgumentBuilder
 {
@@ -38,7 +40,7 @@ public static class FfmpegArgumentBuilder
             "-hide_banner",
             "-nostats",
             "-loglevel",
-            "warning",
+            "info",
             "-rw_timeout",
             ReadWriteTimeoutMicroseconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
         };
@@ -58,7 +60,6 @@ public static class FfmpegArgumentBuilder
         }
 
         AppendCaBundle(arguments, caBundlePath, sourceQuality.StreamUrl);
-        AppendReconnectOptions(arguments, sourceQuality.StreamUrl);
 
         arguments.Add("-i");
         arguments.Add(sourceQuality.StreamUrl.Trim());
@@ -86,7 +87,6 @@ public static class FfmpegArgumentBuilder
             }
 
             AppendCaBundle(arguments, caBundlePath, sourceQuality.AudioStreamUrl);
-            AppendReconnectOptions(arguments, sourceQuality.AudioStreamUrl);
             arguments.Add("-i");
             arguments.Add(sourceQuality.AudioStreamUrl!.Trim());
 
@@ -130,33 +130,9 @@ public static class FfmpegArgumentBuilder
         arguments.Add(caBundlePath.Trim());
     }
 
-    /// <summary>
-    /// HTTP(S) 直播流的自动重连参数。虎牙等 CDN 会周期性主动断开连接，
-    /// 不加 reconnect 时 ffmpeg 直接以 I/O error 退出，录制只能撑几秒；
-    /// 加上后可在连接被断开时自动重连（本地文件输入不会走到这里）。
-    /// </summary>
-    private static void AppendReconnectOptions(List<string> arguments, string? streamUrl)
-    {
-        if (streamUrl is null)
-        {
-            return;
-        }
-
-        var trimmed = streamUrl.TrimStart();
-        var isHttp = trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-                     || trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
-        if (!isHttp)
-        {
-            return;
-        }
-
-        arguments.Add("-reconnect");
-        arguments.Add("1");
-        arguments.Add("-reconnect_streamed");
-        arguments.Add("1");
-        arguments.Add("-reconnect_delay_max");
-        arguments.Add("2");
-    }
+    // 注意：这里刻意不加 -reconnect 系列参数。虎牙等 CDN 重连后 FLV 时间戳会从 0 重新计数，
+    // 让 ffmpeg 在同一次调用里续写同一个 matroska 文件会产生 Non-monotonic DTS 并写坏文件；
+    // 断流续录由 RecordingManager 的分段录制负责（每段一次 ffmpeg 调用，停止时再 concat 合并）。
 
     /// <summary>
     /// 把请求头拼成 ffmpeg 要求的 <c>"Key: Value\r\n"</c> 文本块。

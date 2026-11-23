@@ -1,4 +1,4 @@
-using LiveMonitor.Core;
+﻿using LiveMonitor.Core;
 using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Enums;
 using LiveMonitor.Media.Recording;
@@ -87,7 +87,10 @@ public sealed class RecordingManagerTests
         Assert.EndsWith(".mkv", session.VideoFilePath, StringComparison.OrdinalIgnoreCase);
         Assert.EndsWith(".jsonl", session.DanmakuFilePath, StringComparison.OrdinalIgnoreCase);
         Assert.StartsWith(harness.OutputDirectory, session.VideoFilePath, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(session.VideoFilePath, harness.Recorder.OutputPath);
+        Assert.NotNull(harness.Recorder.OutputPath);
+        Assert.StartsWith(harness.OutputDirectory, harness.Recorder.OutputPath, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(".part001.mkv", harness.Recorder.OutputPath, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(Path.GetDirectoryName(session.VideoFilePath), Path.GetDirectoryName(harness.Recorder.OutputPath));
         Assert.Equal(1, harness.Recorder.StartCount);
         Assert.Single(harness.Started);
         Assert.Single(harness.ProgressItems);
@@ -228,7 +231,115 @@ public sealed class RecordingManagerTests
     }
 
     [Fact]
-    public async Task RecorderExit_WhileRoomLive_MarksSessionFailed()
+    public async Task RecorderExit_WhileRoomLive_StartsNextPart_ThenMergesOnStop()
+    {
+        await using var harness = new RecordingManagerHarness(delay: (_, _) => Task.CompletedTask);
+        await harness.InitializeAsync();
+        var room = harness.AddRoom();
+        harness.SetLive();
+        await harness.Manager.StartAsync(room);
+        var sessionId = harness.Manager.GetActiveSessionId(room.Id)!.Value;
+        var firstPart = harness.Recorder;
+        var firstPartPath = firstPart.OutputPath;
+        Assert.NotNull(firstPartPath);
+        Assert.EndsWith(".part001.mkv", firstPartPath, StringComparison.OrdinalIgnoreCase);
+        firstPart.RaiseAnchor(harness.Clock.Now);
+        harness.Clock.Advance(TimeSpan.FromSeconds(2));
+        firstPart.RaiseProgress(TimeSpan.FromSeconds(2), 2048, 800);
+
+        // 虎牙等 CDN 单连接会突然结束：录制器退出后应自动开下一段，而不是直接失败。
+        firstPart.RaiseExit(1, "stream ends prematurely");
+
+        await RecordingManagerHarness.WaitUntilAsync(
+            () => harness.Recorders.Count >= 2,
+            timeoutMilliseconds: 8000,
+            message: "等待自动续段超时。");
+        var secondPart = harness.Recorder;
+        Assert.NotSame(firstPart, secondPart);
+        Assert.True(harness.Manager.IsRecording(room.Id));
+        Assert.Contains(harness.StatusMessages, message => message.Contains("第 2 段"));
+        Assert.EndsWith(".part002.mkv", secondPart.OutputPath!, StringComparison.OrdinalIgnoreCase);
+
+        harness.Clock.Advance(TimeSpan.FromSeconds(3));
+        secondPart.RaiseProgress(TimeSpan.FromSeconds(3), 4096, 800);
+        await harness.Manager.StopAsync(room.Id);
+
+        Assert.Single(harness.SegmentMerger.Batches);
+        Assert.Equal(2, harness.SegmentMerger.Batches[0].Count);
+        Assert.Contains(firstPartPath, harness.SegmentMerger.Batches[0].Select(segment => segment.Path));
+        var stored = await harness.Sessions.GetByIdAsync(sessionId);
+        Assert.NotNull(stored);
+        Assert.Equal(RecordingStatus.Completed, stored.Status);
+        Assert.Null(stored.ErrorMessage);
+        Assert.True(stored.DurationSeconds >= 4.5);
+        Assert.True(File.Exists(stored.VideoFilePath));
+        Assert.False(File.Exists(firstPartPath));
+    }
+
+    [Fact]
+    public async Task RecorderExit_WhileRoomLive_WithOverlappingTimeline_PassesTimelineToMerger()
+    {
+        await using var harness = new RecordingManagerHarness(delay: (_, _) => Task.CompletedTask);
+        await harness.InitializeAsync();
+        var room = harness.AddRoom();
+        harness.SetLive();
+        await harness.Manager.StartAsync(room);
+        var firstPart = harness.Recorder;
+        // 模拟虎牙 CDN：每段从缓存关键帧重新下发，起点比上一段末尾早约 1.1 秒。
+        firstPart.SourceTimelineStartSeconds = 29066.649;
+        firstPart.RaiseAnchor(harness.Clock.Now);
+        harness.Clock.Advance(TimeSpan.FromSeconds(2));
+        firstPart.RaiseProgress(TimeSpan.FromSeconds(2), 2048, 800);
+        firstPart.RaiseExit(1, "stream ends prematurely");
+
+        await RecordingManagerHarness.WaitUntilAsync(
+            () => harness.Recorders.Count >= 2,
+            timeoutMilliseconds: 8000,
+            message: "等待自动续段超时。");
+        var secondPart = harness.Recorder;
+        secondPart.SourceTimelineStartSeconds = 29067.549;
+        harness.Clock.Advance(TimeSpan.FromSeconds(3));
+        secondPart.RaiseProgress(TimeSpan.FromSeconds(3), 4096, 800);
+        await harness.Manager.StopAsync(room.Id);
+
+        // 合并器应拿到每段的内容时长与输入时间轴起点，用于裁掉 CDN 重发的重叠内容。
+        Assert.Single(harness.SegmentMerger.Batches);
+        var merged = harness.SegmentMerger.Batches[0];
+        Assert.Equal(2, merged.Count);
+        Assert.Equal(29066.649, merged[0].SourceTimelineStartSeconds);
+        Assert.Equal(2.0, merged[0].Duration.TotalSeconds, 3);
+        Assert.Equal(29067.549, merged[1].SourceTimelineStartSeconds);
+        Assert.Equal(3.0, merged[1].Duration.TotalSeconds, 3);
+    }
+
+    [Fact]
+    public async Task RecorderExit_WhileRoomLive_WithRestartFailures_MarksSessionFailed()
+    {
+        await using var harness = new RecordingManagerHarness(delay: (_, _) => Task.CompletedTask);
+        await harness.InitializeAsync();
+        var room = harness.AddRoom();
+        harness.SetLive();
+        await harness.Manager.StartAsync(room);
+        var sessionId = harness.Manager.GetActiveSessionId(room.Id)!.Value;
+        harness.RecorderFactoryException = new InvalidOperationException("part factory boom");
+
+        harness.Recorder.RaiseExit(1, "stream ends prematurely");
+
+        await RecordingManagerHarness.WaitUntilAsync(
+            () => !harness.Manager.IsRecording(room.Id),
+            timeoutMilliseconds: 8000,
+            message: "等待续段失败收尾超时。");
+        var stored = await harness.Sessions.GetByIdAsync(sessionId);
+        Assert.NotNull(stored);
+        Assert.Equal(RecordingStatus.Failed, stored.Status);
+        Assert.Contains("录制启动失败", stored.ErrorMessage);
+        Assert.Contains("part factory boom", stored.ErrorMessage);
+        Assert.Single(harness.Recorders);
+        Assert.Contains(harness.Logs, log => log.Contains("停止自动续段"));
+    }
+
+    [Fact]
+    public async Task StopAsync_WithSinglePart_MergesThroughMerger()
     {
         await using var harness = new RecordingManagerHarness();
         await harness.InitializeAsync();
@@ -236,21 +347,49 @@ public sealed class RecordingManagerTests
         harness.SetLive();
         await harness.Manager.StartAsync(room);
         var sessionId = harness.Manager.GetActiveSessionId(room.Id)!.Value;
+        var recorder = harness.Recorder;
+        recorder.CreateOutputFile = true;
+        recorder.RaiseAnchor(harness.Clock.Now);
+        harness.Clock.Advance(TimeSpan.FromSeconds(4));
+        recorder.RaiseProgress(TimeSpan.FromSeconds(4), 4096, 1600);
 
-        harness.Recorder.RaiseExit(1, "boom");
+        await harness.Manager.StopAsync(room.Id);
 
-        await RecordingManagerHarness.WaitUntilAsync(() => !harness.Manager.IsRecording(room.Id));
+        Assert.Single(harness.SegmentMerger.Batches);
+        Assert.Single(harness.SegmentMerger.Batches[0]);
         var stored = await harness.Sessions.GetByIdAsync(sessionId);
         Assert.NotNull(stored);
-        Assert.Equal(RecordingStatus.Failed, stored.Status);
-        Assert.Contains("ffmpeg 异常退出（exitCode=1）", stored.ErrorMessage);
-        Assert.Contains("boom", stored.ErrorMessage);
+        Assert.Equal(RecordingStatus.Completed, stored.Status);
+        Assert.True(File.Exists(stored.VideoFilePath));
+    }
+
+    [Fact]
+    public async Task StopAsync_WhenMergeFails_KeepsCompletedButRecordsMessage()
+    {
+        await using var harness = new RecordingManagerHarness();
+        harness.SegmentMerger.Result = new SegmentMergeResult(false, 8192, "concat boom", TimeSpan.Zero);
+        await harness.InitializeAsync();
+        var room = harness.AddRoom();
+        harness.SetLive();
+        await harness.Manager.StartAsync(room);
+        var sessionId = harness.Manager.GetActiveSessionId(room.Id)!.Value;
+        harness.Recorder.RaiseAnchor(harness.Clock.Now);
+        harness.Clock.Advance(TimeSpan.FromSeconds(3));
+        harness.Recorder.RaiseProgress(TimeSpan.FromSeconds(3), 2048, 800);
+
+        await harness.Manager.StopAsync(room.Id);
+
+        var stored = await harness.Sessions.GetByIdAsync(sessionId);
+        Assert.NotNull(stored);
+        Assert.Equal(RecordingStatus.Completed, stored.Status);
+        Assert.Contains("录制分片合并失败", stored.ErrorMessage);
+        Assert.Contains("concat boom", stored.ErrorMessage);
     }
 
     [Fact]
     public async Task RecorderExit_AfterRoomGoesOffline_MarksSessionCompleted()
     {
-        await using var harness = new RecordingManagerHarness();
+        await using var harness = new RecordingManagerHarness(delay: (_, _) => Task.CompletedTask);
         await harness.InitializeAsync();
         var room = harness.AddRoom();
         harness.SetLive();
@@ -265,6 +404,7 @@ public sealed class RecordingManagerTests
         Assert.NotNull(stored);
         Assert.Equal(RecordingStatus.Completed, stored.Status);
         Assert.Null(stored.ErrorMessage);
+        Assert.Single(harness.SegmentMerger.Batches);
     }
 
     [Fact]
