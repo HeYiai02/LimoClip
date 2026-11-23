@@ -2,6 +2,7 @@ using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Danmaku;
 using LiveMonitor.Data;
 using LiveMonitor.Data.Repositories;
+using LiveMonitor.Media.Asr;
 using LiveMonitor.Media.Editing;
 using LiveMonitor.Media.Recording;
 using LiveMonitor.Platforms;
@@ -31,6 +32,8 @@ public sealed class AppServices
         IWaveformService waveforms,
         IHardwareEncoderDetector encoders,
         IClipExporter clips,
+        IAsrProvider asr,
+        AsrSettingsStore asrSettings,
         ProcessJobGuard clipJobGuard)
     {
         Database = database;
@@ -50,6 +53,8 @@ public sealed class AppServices
         Waveforms = waveforms;
         Encoders = encoders;
         Clips = clips;
+        Asr = asr;
+        AsrSettings = asrSettings;
         _clipJobGuard = clipJobGuard;
     }
 
@@ -97,10 +102,16 @@ public sealed class AppServices
     /// <summary>V0.4 双版切片导出器（无损 copy + ASS 弹幕烧录）。</summary>
     public IClipExporter Clips { get; }
 
+    /// <summary>V0.5-A 云端语音识别（剪辑台「🎙 转写」的数据来源）。</summary>
+    public IAsrProvider Asr { get; }
+
+    /// <summary>V0.5-A ASR 设置读写（预设、DPAPI 加密 Key、连通性测试）。</summary>
+    public AsrSettingsStore AsrSettings { get; }
+
     private readonly ProcessJobGuard _clipJobGuard;
     private bool _clipResourcesDisposed;
 
-    /// <summary>窗口关闭时释放导出用的 Job Object（级联结束残留 ffmpeg）。</summary>
+    /// <summary>窗口关闭时释放导出/ASR 用的 Job Object 与网络客户端（级联结束残留 ffmpeg）。</summary>
     public void DisposeClipExportResources()
     {
         if (_clipResourcesDisposed)
@@ -116,6 +127,15 @@ public sealed class AppServices
         catch
         {
             // 退出阶段释放失败不阻塞关闭。
+        }
+
+        try
+        {
+            (Asr as IDisposable)?.Dispose();
+        }
+        catch
+        {
+            // 同上。
         }
     }
 
@@ -218,6 +238,21 @@ public sealed class AppServices
             encoders,
             new DanmakuAssConverter());
 
+        // V0.5-A 云端 ASR：专用 HttpClient（长片段上传，超时 10 分钟）与独立 Job Object，
+        // 生命周期由 Provider 自己接管，窗口关闭时随 DisposeClipExportResources 一并释放。
+        var asrSettings = new AsrSettingsStore(settings);
+        var asrCacheDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "LiveMonitor",
+            "cache",
+            "asr");
+        var asr = new OpenAiCompatibleAsrProvider(
+            new HttpClient { Timeout = TimeSpan.FromMinutes(10) },
+            ffmpegPath,
+            new ProcessJobGuard(),
+            () => asrSettings.GetConfigAsync(),
+            asrCacheDirectory);
+
         return new AppServices(
             database,
             roomRepository,
@@ -236,6 +271,8 @@ public sealed class AppServices
             waveforms,
             encoders,
             clips,
+            asr,
+            asrSettings,
             clipJobGuard);
     }
 }

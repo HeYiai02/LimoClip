@@ -135,7 +135,212 @@ public sealed class ClipStudioViewModelTests
         }
     }
 
-    private static ClipStudioViewModel CreateViewModel(string ffmpegPath, FakeHighlightEventRepository? highlights = null)
+    [Fact]
+    public async Task TranscribeSelection_WithoutVideo_SetsFriendlyStatus_AndSkipsProvider()
+    {
+        var asr = new FakeAsrProvider();
+        var viewModel = CreateViewModel("ffmpeg", asr: asr);
+        try
+        {
+            await viewModel.TranscribeSelectionCommand.ExecuteAsync(null);
+
+            Assert.Equal(0, asr.CallCount);
+            Assert.False(viewModel.HasVideo);
+            Assert.False(viewModel.IsAsrRunning);
+            Assert.Contains("请先打开本地视频", viewModel.AsrStatusText);
+            Assert.NotNull(viewModel.AsrErrorText);
+            Assert.Contains("请先打开本地视频", viewModel.AsrErrorText);
+        }
+        finally
+        {
+            viewModel.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task TranscribeSelection_WithVideo_PopulatesPanel_AndSeekToLineUsesAbsoluteTime()
+    {
+        if (!FfmpegLocator.TryLocate(out var ffmpegPath))
+        {
+            return; // 与 Media 测试一致：缺 ffmpeg 时跳过。
+        }
+
+        var tempDirectory = CreateTempDirectory();
+        try
+        {
+            var videoPath = Path.Combine(tempDirectory, "asr-selection.mp4");
+            GenerateVideo(ffmpegPath, videoPath);
+
+            var asr = new FakeAsrProvider
+            {
+                Handler = (_, start, end) => Task.FromResult(new AsrTranscriptResult(
+                    start,
+                    end,
+                    "你好 世界",
+                    new[]
+                    {
+                        new AsrTranscriptSegment(TimeSpan.Zero, TimeSpan.FromSeconds(1), "你好"),
+                        new AsrTranscriptSegment(TimeSpan.FromSeconds(1), end - start, "世界")
+                    },
+                    "fake (whisper-large-v3-turbo)",
+                    DateTimeOffset.UtcNow))
+            };
+
+            var viewModel = CreateViewModel(ffmpegPath, asr: asr);
+            try
+            {
+                viewModel.PickVideoFileAsync = () => Task.FromResult<string?>(videoPath);
+                await viewModel.OpenLocalFileCommand.ExecuteAsync(null);
+
+                var selectionStart = TimeSpan.FromMilliseconds(400);
+                var selectionEnd = TimeSpan.FromMilliseconds(1400);
+                viewModel.UpdateSelection(selectionStart, selectionEnd);
+
+                await viewModel.TranscribeSelectionCommand.ExecuteAsync(null);
+
+                Assert.Equal(1, asr.CallCount);
+                Assert.Equal(videoPath, asr.Calls[0].VideoPath);
+                Assert.Equal(selectionStart, asr.Calls[0].Start);
+                Assert.Equal(selectionEnd, asr.Calls[0].End);
+                Assert.Equal(2, viewModel.AsrLines.Count);
+                Assert.Equal("你好 世界", viewModel.AsrFullText);
+                Assert.Equal("fake (whisper-large-v3-turbo)", viewModel.AsrProviderLabel);
+                Assert.False(viewModel.IsAsrRunning);
+                Assert.Null(viewModel.AsrErrorText);
+                Assert.Contains("识别完成", viewModel.AsrStatusText);
+
+                TimeSpan? sought = null;
+                viewModel.SeekRequested += position => sought = position;
+                viewModel.SeekToAsrLine(viewModel.AsrLines[1]);
+
+                Assert.Equal(selectionStart + TimeSpan.FromSeconds(1), sought);
+                Assert.Equal(selectionStart + TimeSpan.FromSeconds(1), viewModel.Position);
+            }
+            finally
+            {
+                viewModel.Dispose();
+            }
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task TranscribeSelection_WhenProviderThrows_ShowsFriendlyError_AndStopsRunning()
+    {
+        if (!FfmpegLocator.TryLocate(out var ffmpegPath))
+        {
+            return;
+        }
+
+        var tempDirectory = CreateTempDirectory();
+        try
+        {
+            var videoPath = Path.Combine(tempDirectory, "asr-error.mp4");
+            GenerateVideo(ffmpegPath, videoPath);
+
+            const string message = "尚未配置语音识别 API，请前往「账号与设置 → 语音识别」填写 API Key。";
+            var asr = new FakeAsrProvider
+            {
+                Handler = (_, _, _) => Task.FromException<AsrTranscriptResult>(new InvalidOperationException(message))
+            };
+
+            var viewModel = CreateViewModel(ffmpegPath, asr: asr);
+            try
+            {
+                viewModel.PickVideoFileAsync = () => Task.FromResult<string?>(videoPath);
+                await viewModel.OpenLocalFileCommand.ExecuteAsync(null);
+                viewModel.UpdateSelection(TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(1200));
+
+                await viewModel.TranscribeSelectionCommand.ExecuteAsync(null);
+
+                Assert.Equal(1, asr.CallCount);
+                Assert.False(viewModel.IsAsrRunning);
+                Assert.Empty(viewModel.AsrLines);
+                Assert.Contains("识别失败", viewModel.AsrStatusText);
+                Assert.NotNull(viewModel.AsrErrorText);
+                Assert.Contains("尚未配置语音识别 API", viewModel.AsrErrorText);
+            }
+            finally
+            {
+                viewModel.Dispose();
+            }
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task TranscribeHighlight_UsesLeadTailRange_AndFillsCardResult()
+    {
+        if (!FfmpegLocator.TryLocate(out var ffmpegPath))
+        {
+            return;
+        }
+
+        var tempDirectory = CreateTempDirectory();
+        try
+        {
+            var videoPath = Path.Combine(tempDirectory, "asr-highlight.mp4");
+            GenerateVideo(ffmpegPath, videoPath);
+
+            var asr = new FakeAsrProvider
+            {
+                Handler = (_, start, end) => Task.FromResult(new AsrTranscriptResult(
+                    start,
+                    end,
+                    "高能片段回放",
+                    new[] { new AsrTranscriptSegment(TimeSpan.Zero, end - start, "高能片段回放") },
+                    "fake (whisper-large-v3-turbo)",
+                    DateTimeOffset.UtcNow))
+            };
+
+            var viewModel = CreateViewModel(ffmpegPath, asr: asr);
+            try
+            {
+                viewModel.PickVideoFileAsync = () => Task.FromResult<string?>(videoPath);
+                await viewModel.OpenLocalFileCommand.ExecuteAsync(null);
+
+                var item = new ClipHighlightItemViewModel(
+                    new HighlightEvent(PlatformType.Bilibili, "room-1", DateTimeOffset.UtcNow, 18.75, 3.5, "弹幕速率突增"),
+                    TimeSpan.FromMilliseconds(800));
+                viewModel.Highlights.Add(item);
+
+                await viewModel.TranscribeHighlightCommand.ExecuteAsync(item);
+
+                Assert.Equal(1, asr.CallCount);
+                Assert.Equal(TimeSpan.Zero, asr.Calls[0].Start);
+                Assert.Equal(viewModel.Duration, asr.Calls[0].End);
+                Assert.NotNull(item.AsrResult);
+                Assert.True(item.HasAsrResult);
+                Assert.False(item.IsTranscribing);
+                Assert.Equal("高能片段回放", item.AsrSummary);
+                Assert.Single(viewModel.AsrLines);
+                Assert.Contains("识别完成", viewModel.AsrStatusText);
+
+                // 已有结果时再次点击卡片按钮只展示结果，不重复调用 Provider（Provider 缓存之外再省一次抽音）。
+                await viewModel.TranscribeHighlightCommand.ExecuteAsync(item);
+                Assert.Equal(1, asr.CallCount);
+            }
+            finally
+            {
+                viewModel.Dispose();
+            }
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDirectory);
+        }
+    }
+
+    private static ClipStudioViewModel CreateViewModel(
+        string ffmpegPath,
+        FakeHighlightEventRepository? highlights = null,
+        FakeAsrProvider? asr = null)
     {
         return new ClipStudioViewModel(
             new FakeRecordingSessionRepository(),
@@ -144,7 +349,8 @@ public sealed class ClipStudioViewModelTests
             new VideoProbeService(ffmpegPath),
             new FakeWaveformService(),
             new FakeHardwareEncoderDetector(),
-            new FakeClipExporter());
+            new FakeClipExporter(),
+            asr ?? new FakeAsrProvider());
     }
 
     private static string CreateTempDirectory()
@@ -303,5 +509,38 @@ public sealed class ClipStudioViewModelTests
             IProgress<ClipExportProgress>? progress = null,
             CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+    }
+
+    private sealed record AsrCall(string VideoPath, TimeSpan Start, TimeSpan End);
+
+    /// <summary>可配置返回值/异常并记录调用参数的 ASR Fake：测试不发起任何真实网络请求。</summary>
+    private sealed class FakeAsrProvider : IAsrProvider
+    {
+        public List<AsrCall> Calls { get; } = new();
+
+        public int CallCount => Calls.Count;
+
+        public Func<string, TimeSpan, TimeSpan, Task<AsrTranscriptResult>>? Handler { get; set; }
+
+        public Task<AsrTranscriptResult> TranscribeSegmentAsync(
+            string videoPath,
+            TimeSpan startTime,
+            TimeSpan endTime,
+            CancellationToken ct = default)
+        {
+            Calls.Add(new AsrCall(videoPath, startTime, endTime));
+            if (Handler is not null)
+            {
+                return Handler(videoPath, startTime, endTime);
+            }
+
+            return Task.FromResult(new AsrTranscriptResult(
+                startTime,
+                endTime,
+                string.Empty,
+                Array.Empty<AsrTranscriptSegment>(),
+                "fake",
+                DateTimeOffset.UtcNow));
+        }
     }
 }

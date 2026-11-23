@@ -127,17 +127,36 @@
                     <ItemsControl ItemsSource="{Binding Highlights}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Button Classes="clip-highlight" Click="OnHighlightClick">
-                                    <Grid ColumnDefinitions="Auto,*,Auto">
-                                        <TextBlock Text="🔥" FontSize="11" VerticalAlignment="Center" />
-                                        <StackPanel Grid.Column="1" Margin="6,0,0,0">
-                                            <TextBlock Text="{Binding TimeText}" FontSize="11" Foreground="#E5E7EB" />
-                                            <TextBlock Text="{Binding RateText}" FontSize="9" Foreground="#F87171" />
-                                        </StackPanel>
-                                        <TextBlock Grid.Column="2" Text="推荐区间" FontSize="9"
-                                                   Foreground="#64748B" VerticalAlignment="Center" />
+                                <!-- 卡片根节点改为 StackPanel：上层「跳转」与下层「🎙 转写」是两个并列 Button，避免嵌套 Button 冒泡冲突。 -->
+                                <StackPanel Margin="0,0,0,4">
+                                    <Button Classes="clip-highlight" Click="OnHighlightClick">
+                                        <Grid ColumnDefinitions="Auto,*,Auto">
+                                            <TextBlock Text="🔥" FontSize="11" VerticalAlignment="Center" />
+                                            <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                                                <TextBlock Text="{Binding TimeText}" FontSize="11" Foreground="#E5E7EB" />
+                                                <TextBlock Text="{Binding RateText}" FontSize="9" Foreground="#F87171" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="2" Text="推荐区间" FontSize="9"
+                                                       Foreground="#64748B" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </Button>
+                                    <Grid ColumnDefinitions="Auto,*" Margin="6,2,4,0">
+                                        <Button Classes="clip-xs" Content="{Binding TranscribeButtonText}"
+                                                IsEnabled="{Binding CanTranscribe}"
+                                                Click="OnTranscribeHighlightClick"
+                                                ToolTip.Tip="识别该高能片段（前后约 10/20 秒）的语音" />
+                                        <Button Grid.Column="1" Classes="clip-highlight" Margin="6,0,0,0"
+                                                Padding="4,2" IsVisible="{Binding HasAsrResult}"
+                                                Click="OnHighlightAsrSummaryClick"
+                                                ToolTip.Tip="{Binding AsrSummaryToolTip}">
+                                            <TextBlock Text="{Binding AsrSummary}" FontSize="9"
+                                                       Foreground="#A5B4FC" TextTrimming="CharacterEllipsis" />
+                                        </Button>
                                     </Grid>
-                                </Button>
+                                    <TextBlock Text="{Binding AsrError}" FontSize="9" Foreground="#F87171"
+                                               TextWrapping="Wrap" IsVisible="{Binding HasAsrError}"
+                                               Margin="6,2,4,0" />
+                                </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -264,6 +283,60 @@
                     </ItemsControl>
                     <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="#94A3B8"
                                TextWrapping="Wrap" Margin="0,6,0,4" />
+
+                    <!-- V0.5-A 语音识别：识别当前时间轴选区，展示分段结果并可点击单句跳转。 -->
+                    <Border Background="#0B0E13" BorderBrush="#262B36" BorderThickness="1"
+                            CornerRadius="6" Padding="8" Margin="0,6,0,0"
+                            IsVisible="{Binding IsAsrPanelVisible}">
+                        <StackPanel Spacing="5">
+                            <TextBlock Classes="clip-title" Text="🎙 语音识别" />
+                            <Button Classes="clip-primary" HorizontalAlignment="Stretch"
+                                    Content="🎙 识别当前选区"
+                                    Command="{Binding TranscribeSelectionCommand}" />
+                            <Button Classes="clip-xs" HorizontalAlignment="Stretch"
+                                    Content="取消识别"
+                                    Command="{Binding CancelAsrCommand}"
+                                    IsVisible="{Binding IsAsrRunning}" />
+                            <ProgressBar IsIndeterminate="True" Height="3"
+                                         IsVisible="{Binding IsAsrRunning}" />
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBlock Text="{Binding AsrStatusText}" FontSize="11"
+                                           Foreground="#A5B4FC" TextWrapping="Wrap"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="{Binding AsrRangeText}" FontSize="9"
+                                           Foreground="#64748B" VerticalAlignment="Center" />
+                            </Grid>
+                            <TextBlock Text="{Binding AsrErrorText}" FontSize="10" Foreground="#F87171"
+                                       TextWrapping="Wrap" IsVisible="{Binding HasAsrError}" />
+                            <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding HasAsrResult}">
+                                <TextBlock Text="{Binding AsrProviderLabel}" FontSize="9"
+                                           Foreground="#64748B" TextTrimming="CharacterEllipsis"
+                                           VerticalAlignment="Center" />
+                                <Button Grid.Column="1" Classes="clip-xs" Content="复制文本"
+                                        Click="OnCopyAsrTextClick" />
+                            </Grid>
+                            <TextBlock Text="{Binding AsrFullText}" FontSize="10" Foreground="#94A3B8"
+                                       TextWrapping="Wrap" MaxHeight="120"
+                                       IsVisible="{Binding HasAsrResult}" />
+                            <ItemsControl ItemsSource="{Binding AsrLines}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Classes="clip-xs" HorizontalAlignment="Stretch"
+                                                HorizontalContentAlignment="Left" Margin="0,1,0,0"
+                                                Padding="6,4" Click="OnAsrLineClick"
+                                                ToolTip.Tip="点击跳转到该句对应的画面">
+                                            <Grid ColumnDefinitions="Auto,*">
+                                                <TextBlock Text="{Binding TimeText}" FontSize="9"
+                                                           Foreground="#64748B" Margin="0,1,6,0" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Text}" FontSize="10"
+                                                           Foreground="#E5E7EB" TextWrapping="Wrap" />
+                                            </Grid>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </ScrollViewer>
         </Border>

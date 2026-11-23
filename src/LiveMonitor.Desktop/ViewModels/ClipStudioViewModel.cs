@@ -34,14 +34,18 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable
     private readonly IWaveformService _waveforms;
     private readonly IHardwareEncoderDetector _encoders;
     private readonly IClipExporter _exporter;
+    private readonly IAsrProvider _asr;
 
     private bool _initialized;
     private bool _disposed;
     private int _loadVersion;
+    private int _asrVersion;
     private bool _suppressSessionOpen;
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _waveformCts;
     private CancellationTokenSource? _exportCts;
+    private CancellationTokenSource? _asrCts;
+    private AsrTranscriptResult? _displayedAsrResult;
 
     private ClipSessionOption? _selectedSession;
     private RecordingSession? _currentSession;
@@ -80,7 +84,8 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable
         VideoProbeService videoProbe,
         IWaveformService waveforms,
         IHardwareEncoderDetector encoders,
-        IClipExporter exporter)
+        IClipExporter exporter,
+        IAsrProvider asr)
     {
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
         _highlights = highlights ?? throw new ArgumentNullException(nameof(highlights));
@@ -89,6 +94,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable
         _waveforms = waveforms ?? throw new ArgumentNullException(nameof(waveforms));
         _encoders = encoders ?? throw new ArgumentNullException(nameof(encoders));
         _exporter = exporter ?? throw new ArgumentNullException(nameof(exporter));
+        _asr = asr ?? throw new ArgumentNullException(nameof(asr));
 
         SpeedOptions = new ReadOnlyCollection<ClipSpeedOption>(new[]
         {
@@ -201,6 +207,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(PositionText));
             OnPropertyChanged(nameof(HasVideo));
             RaiseExportAvailability();
+            RaiseAsrAvailability();
         }
     }
 
@@ -416,6 +423,167 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _isBusy, value);
     }
 
+    // ---- 语音识别（V0.5-A） ----
+
+    /// <summary>右侧「语音识别」面板是否显示；当前常显，便于没有结果时也能直接发起选区识别。</summary>
+    [ObservableProperty]
+    private bool _isAsrPanelVisible = true;
+
+    /// <summary>面板状态文案：「尚未识别」/「正在识别当前选区…」/「识别完成：N 句」/「已取消」等。</summary>
+    [ObservableProperty]
+    private string _asrStatusText = "尚未识别";
+
+    /// <summary>识别失败的中文消息；成功、取消或清空后为 null。</summary>
+    [ObservableProperty]
+    private string? _asrErrorText;
+
+    /// <summary>当前是否有转写任务在跑（全局互斥：同一时刻只允许一个）。</summary>
+    [ObservableProperty]
+    private bool _isAsrRunning;
+
+    /// <summary>结果来源标签，如「groq (whisper-large-v3-turbo)」。</summary>
+    [ObservableProperty]
+    private string _asrProviderLabel = string.Empty;
+
+    /// <summary>最近一次识别结果的整段文本，供「复制文本」使用。</summary>
+    [ObservableProperty]
+    private string _asrFullText = string.Empty;
+
+    /// <summary>最近一次展示的识别片段范围，如「00:10 - 00:40」。</summary>
+    [ObservableProperty]
+    private string _asrRangeText = string.Empty;
+
+    /// <summary>分段结果（相对片段起点的时间戳），点击单句可跳转预览位置。</summary>
+    public ObservableCollection<AsrTranscriptLineViewModel> AsrLines { get; } = new();
+
+    public bool HasAsrResult => _displayedAsrResult is not null;
+
+    public bool HasAsrError => !string.IsNullOrEmpty(AsrErrorText);
+
+    /// <summary>当前选区是否可发起识别：已加载视频、没有进行中的转写、选区时长有效。</summary>
+    public bool CanTranscribeSelection =>
+        HasVideo && !IsAsrRunning && _outPoint - _inPoint >= MinSelection;
+
+    /// <summary>识别当前时间轴选区（InPoint → OutPoint）。</summary>
+    [RelayCommand(CanExecute = nameof(CanRunTranscribeSelection))]
+    private async Task TranscribeSelectionAsync()
+    {
+        if (_currentVideoPath is null || _duration <= TimeSpan.Zero)
+        {
+            ReportAsrUnavailable();
+            return;
+        }
+
+        var start = _inPoint;
+        var end = _outPoint;
+        if (end - start < MinSelection)
+        {
+            AsrErrorText = "请先在时间轴上选择有效的入出点区间。";
+            AsrStatusText = "选区无效";
+            return;
+        }
+
+        await RunAsrAsync(_currentVideoPath, start, end, highlight: null).ConfigureAwait(true);
+    }
+
+    /// <summary>转写某条高能推荐卡片的 [位置-10s, 位置+20s] 区间。</summary>
+    [RelayCommand]
+    private async Task TranscribeHighlightAsync(ClipHighlightItemViewModel? item)
+    {
+        if (item is null)
+        {
+            return;
+        }
+
+        if (_currentVideoPath is null || _duration <= TimeSpan.Zero)
+        {
+            ReportAsrUnavailable();
+            return;
+        }
+
+        if (item.AsrResult is { } existing)
+        {
+            // 已有结果（含 Provider 缓存命中）时只把同一结果展开到右侧面板，不重复发起任务。
+            ShowAsrResult(existing, existing.ClipStart, existing.ClipEnd);
+            AsrStatusText = BuildAsrCompletedText();
+            return;
+        }
+
+        if (IsAsrRunning)
+        {
+            return;
+        }
+
+        var start = Clamp(item.Position - HighlightLead, TimeSpan.Zero, _duration);
+        var end = Clamp(item.Position + HighlightTail, TimeSpan.Zero, _duration);
+        if (end - start < MinSelection)
+        {
+            item.AsrError = "高能片段过短，无法转写。";
+            AsrErrorText = item.AsrError;
+            AsrStatusText = "片段过短，无法转写";
+            return;
+        }
+
+        await RunAsrAsync(_currentVideoPath, start, end, item).ConfigureAwait(true);
+    }
+
+    /// <summary>点击卡片摘要：把该卡片已有结果展开到右侧面板（不强制 seek）。</summary>
+    [RelayCommand]
+    private void ShowHighlightAsr(ClipHighlightItemViewModel? item)
+    {
+        if (item?.AsrResult is not { } result)
+        {
+            return;
+        }
+
+        ShowAsrResult(result, result.ClipStart, result.ClipEnd);
+        AsrStatusText = BuildAsrCompletedText();
+        IsAsrPanelVisible = true;
+    }
+
+    /// <summary>取消进行中的转写；状态会在任务收尾时变为「已取消」。</summary>
+    [RelayCommand]
+    private void CancelAsr()
+    {
+        if (!IsAsrRunning || _asrCts is null)
+        {
+            return;
+        }
+
+        AsrStatusText = "正在取消…";
+        try
+        {
+            _asrCts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    /// <summary>右侧面板点击单句：把播放器 seek 到「结果片段起点 + 相对偏移」的绝对时间。</summary>
+    public void SeekToAsrLine(AsrTranscriptLineViewModel? line)
+    {
+        if (line is null || _displayedAsrResult is null || _duration <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        SeekTo(_displayedAsrResult.ClipStart + line.RelativeStart);
+    }
+
+    /// <summary>复制成功后由 View 调用：面板状态改为「已复制到剪贴板」。</summary>
+    public void NotifyAsrTextCopied()
+    {
+        AsrErrorText = null;
+        AsrStatusText = "已复制到剪贴板";
+    }
+
+    /// <summary>复制失败时由 View 调用：把异常转成面板上的中文提示，避免 async void 事件处理器崩溃。</summary>
+    public void NotifyAsrCopyFailed(string message)
+    {
+        AsrErrorText = $"复制识别文本失败：{message}";
+    }
+
     // ---- 初始化 / 场次 ----
 
     public async Task InitializeAsync(CancellationToken ct = default)
@@ -558,6 +726,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable
             _currentSession = session;
             _currentVideoPath = videoPath;
             _currentDanmakuPath = danmakuPath;
+            ResetAsrState();
             _sourceVideoCodec = string.IsNullOrWhiteSpace(metadata.VideoCodec) ? "h264" : metadata.VideoCodec;
             VideoTitle = Path.GetFileName(videoPath);
             VideoSubtitle = BuildVideoSubtitle(videoPath, session, metadata);
@@ -660,6 +829,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable
             }
 
             HighlightMarkers = markers;
+            RefreshHighlightTranscribeAvailability();
         }
         catch (OperationCanceledException)
         {
@@ -1169,12 +1339,198 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable
         _outputFileNameAuto = true;
     }
 
+    // ---- 语音识别私有辅助 ----
+
+    private bool CanRunTranscribeSelection() => CanTranscribeSelection;
+
+    /// <summary>
+    /// 统一的转写执行入口：全局互斥、取消与异常都归一为面板文案，不向 UI 线程抛。
+    /// 成功后同时回填右侧面板与（高能入口的）卡片结果。
+    /// </summary>
+    private async Task RunAsrAsync(
+        string videoPath,
+        TimeSpan start,
+        TimeSpan end,
+        ClipHighlightItemViewModel? highlight)
+    {
+        if (IsAsrRunning)
+        {
+            return;
+        }
+
+        var version = ++_asrVersion;
+        ReplaceCancellationSource(ref _asrCts);
+        var ct = _asrCts!.Token;
+
+        IsAsrRunning = true;
+        AsrErrorText = null;
+        AsrStatusText = highlight is null ? "正在识别当前选区…" : "正在转写高能片段…";
+        if (highlight is not null)
+        {
+            highlight.IsTranscribing = true;
+            highlight.AsrError = null;
+        }
+
+        try
+        {
+            var result = await _asr.TranscribeSegmentAsync(videoPath, start, end, ct).ConfigureAwait(true);
+            if (version != _asrVersion || _disposed)
+            {
+                return;
+            }
+
+            if (highlight is not null)
+            {
+                highlight.AsrResult = result;
+            }
+
+            ShowAsrResult(result, start, end);
+            AsrStatusText = BuildAsrCompletedText();
+        }
+        catch (OperationCanceledException)
+        {
+            if (version == _asrVersion && !_disposed)
+            {
+                AsrErrorText = null;
+                AsrStatusText = "已取消";
+            }
+        }
+        catch (Exception ex)
+        {
+            if (version == _asrVersion && !_disposed)
+            {
+                var message = string.IsNullOrWhiteSpace(ex.Message)
+                    ? "语音识别失败，请稍后重试。"
+                    : ex.Message.Trim();
+                AsrErrorText = message;
+                AsrStatusText = "识别失败";
+                StatusText = $"语音识别失败：{message}";
+                if (highlight is not null)
+                {
+                    highlight.AsrError = message;
+                }
+            }
+        }
+        finally
+        {
+            if (highlight is not null)
+            {
+                highlight.IsTranscribing = false;
+            }
+
+            // 全局互斥标记必须无条件复位：即使期间切换了视频（version 变化）也不能卡在「转写中」。
+            IsAsrRunning = false;
+        }
+    }
+
+    /// <summary>把一次识别结果写入右侧面板：全文、分段行、片段范围与来源标签。</summary>
+    private void ShowAsrResult(AsrTranscriptResult result, TimeSpan start, TimeSpan end)
+    {
+        _displayedAsrResult = result;
+        AsrProviderLabel = string.IsNullOrWhiteSpace(result.ProviderLabel) ? "未知服务商" : result.ProviderLabel.Trim();
+        AsrFullText = (result.FullText ?? string.Empty).Trim();
+        AsrRangeText = $"{ClipExportTaskViewModel.FormatTime(start)} - {ClipExportTaskViewModel.FormatTime(end)}";
+        AsrLines.Clear();
+
+        if (result.Segments is { Count: > 0 } segments)
+        {
+            foreach (var segment in segments)
+            {
+                if (string.IsNullOrWhiteSpace(segment.Text))
+                {
+                    continue;
+                }
+
+                AsrLines.Add(new AsrTranscriptLineViewModel(segment));
+            }
+        }
+
+        if (AsrLines.Count == 0 && AsrFullText.Length > 0)
+        {
+            // 纯文本响应（没有分段时间戳）也照常显示为一行，点击跳转到片段起点。
+            AsrLines.Add(new AsrTranscriptLineViewModel(
+                new AsrTranscriptSegment(TimeSpan.Zero, end - start, AsrFullText)));
+        }
+
+        if (AsrFullText.Length == 0 && AsrLines.Count > 0)
+        {
+            AsrFullText = string.Join(Environment.NewLine, AsrLines.Select(line => line.Text));
+        }
+
+        OnPropertyChanged(nameof(HasAsrResult));
+    }
+
+    private string BuildAsrCompletedText() =>
+        AsrLines.Count > 0 ? $"识别完成：{AsrLines.Count} 句" : "识别完成：未识别到文本";
+
+    /// <summary>没有视频时的友好提示：同时写入状态与错误行，保证面板可见。</summary>
+    private void ReportAsrUnavailable()
+    {
+        AsrErrorText = "请先打开本地视频";
+        AsrStatusText = "请先打开本地视频";
+    }
+
+    /// <summary>切换视频/场次时清空面板与所有卡片结果，并取消进行中的转写。</summary>
+    private void ResetAsrState()
+    {
+        _asrVersion++;
+        try
+        {
+            _asrCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        _displayedAsrResult = null;
+        AsrLines.Clear();
+        AsrFullText = string.Empty;
+        AsrProviderLabel = string.Empty;
+        AsrRangeText = string.Empty;
+        AsrErrorText = null;
+        AsrStatusText = "尚未识别";
+        foreach (var highlight in Highlights)
+        {
+            highlight.AsrResult = null;
+            highlight.AsrError = null;
+            highlight.IsTranscribing = false;
+        }
+
+        OnPropertyChanged(nameof(HasAsrResult));
+        RaiseAsrAvailability();
+    }
+
+    /// <summary>按全局互斥状态刷新每张高能卡片「🎙 转写」按钮的可用性。</summary>
+    private void RefreshHighlightTranscribeAvailability()
+    {
+        foreach (var highlight in Highlights)
+        {
+            highlight.CanTranscribe = !IsAsrRunning;
+        }
+    }
+
+    private void RaiseAsrAvailability()
+    {
+        OnPropertyChanged(nameof(CanTranscribeSelection));
+        TranscribeSelectionCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnIsAsrRunningChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanTranscribeSelection));
+        TranscribeSelectionCommand.NotifyCanExecuteChanged();
+        RefreshHighlightTranscribeAvailability();
+    }
+
+    partial void OnAsrErrorTextChanged(string? value) => OnPropertyChanged(nameof(HasAsrError));
+
     private void RaiseSelectionChanged()
     {
         OnPropertyChanged(nameof(InText));
         OnPropertyChanged(nameof(OutText));
         OnPropertyChanged(nameof(SelectionText));
         RaiseExportAvailability();
+        RaiseAsrAvailability();
     }
 
     private void RaiseExportAvailability() => OnPropertyChanged(nameof(CanExport));
@@ -1208,6 +1564,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable
             _loadCts?.Cancel();
             _waveformCts?.Cancel();
             _exportCts?.Cancel();
+            _asrCts?.Cancel();
         }
         catch (ObjectDisposedException)
         {
@@ -1216,9 +1573,11 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable
         _loadCts?.Dispose();
         _waveformCts?.Dispose();
         _exportCts?.Dispose();
+        _asrCts?.Dispose();
         _loadCts = null;
         _waveformCts = null;
         _exportCts = null;
+        _asrCts = null;
         Highlights.Clear();
         Sessions.Clear();
         ExportTasks.Clear();

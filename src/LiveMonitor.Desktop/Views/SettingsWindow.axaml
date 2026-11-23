@@ -49,6 +49,59 @@
         <Border Background="#151923" BorderBrush="#262B36" BorderThickness="1"
                 CornerRadius="8" Padding="14">
           <StackPanel Spacing="10">
+            <TextBlock Text="语音识别（ASR）" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
+            <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                  ColumnSpacing="12" RowSpacing="8">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="识别服务"
+                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="0" Grid.Column="1" x:Name="AsrPresetBox" FontSize="12"
+                        HorizontalAlignment="Stretch" SelectionChanged="OnAsrPresetChanged">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding DisplayName}" FontSize="12"
+                               ToolTip.Tip="{Binding Description}" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="接口地址"
+                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
+              <TextBox Grid.Row="1" Grid.Column="1" x:Name="AsrEndpointBox" FontSize="12"
+                       Watermark="https://api.example.com/v1/audio/transcriptions" />
+
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="模型"
+                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
+              <TextBox Grid.Row="2" Grid.Column="1" x:Name="AsrModelBox" FontSize="12"
+                       Watermark="例如 FunAudioLLM/SenseVoiceSmall" />
+
+              <TextBlock Grid.Row="3" Grid.Column="0" Text="语言"
+                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="3" Grid.Column="1" x:Name="AsrLanguageBox" FontSize="12"
+                        HorizontalAlignment="Stretch" />
+
+              <TextBlock Grid.Row="4" Grid.Column="0" Text="API Key"
+                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
+              <TextBox Grid.Row="4" Grid.Column="1" x:Name="AsrApiKeyBox" FontSize="12"
+                       PasswordChar="●" Watermark="粘贴 API Key" />
+            </Grid>
+            <TextBlock x:Name="AsrPresetDescriptionText" FontSize="10" Foreground="#6B7484"
+                       TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button x:Name="AsrSaveButton" Content="保存" FontSize="11" Padding="12,4"
+                      Click="OnSaveAsrSettings" />
+              <Button x:Name="AsrTestButton" Content="测试连接" FontSize="11" Padding="10,4"
+                      Click="OnTestAsrConnection" />
+            </StackPanel>
+            <TextBlock x:Name="AsrStatusText" FontSize="10" Foreground="#7C8596"
+                       TextWrapping="Wrap" Text="尚未读取语音识别设置。" />
+            <TextBlock FontSize="10" Foreground="#6B7484" TextWrapping="Wrap"
+                       Text="API Key 使用 Windows DPAPI 加密保存，仅当前 Windows 用户可解密，不会写入日志或明文数据库。「测试连接」只验证当前表单内容、不落盘；自定义服务需填写 OpenAI 兼容的 /audio/transcriptions 接口地址。" />
+          </StackPanel>
+        </Border>
+
+        <Border Background="#151923" BorderBrush="#262B36" BorderThickness="1"
+                CornerRadius="8" Padding="14">
+          <StackPanel Spacing="10">
             <TextBlock Text="弹幕屏蔽词库" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
             <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
               <TextBox Grid.Column="0" x:Name="KeywordBox"
