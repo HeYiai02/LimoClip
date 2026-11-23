@@ -1,6 +1,6 @@
-# 直播监控与自动切片应用 — 技术架构与接口设计文档（v1.7，2026-11-23）
+# 直播监控与自动切片应用 — 技术架构与接口设计文档（v1.8，2026-11-23）
 
-> 版本说明：v1.7 按 V0.5-A 实施口径修订——剪辑台云端 ASR（语音转写）已落地，Core/Media/Desktop 契约与实现以代码为准；v1.6 的 V0.4 修订内容保持不变（剪辑台 / 双波形时间轴 / 双模式切片导出）。v1.5 的 V0.3 修订内容保持不变（**环形缓冲、本地→NAS/云盘异步归档与 `rclone`、手动转 MP4 已确认取消**；录制能力为独立录制中心 + 全程 `.mkv` + 同名伴随 `.jsonl`）。V0.3 / V0.4 的完整规格、API 与验收记录分别以 `limoclip_v0_3.md` / `limoclip_v0_4.md` 与 `HANDOFF.md` 为准；V0.5-A 的完整规格与验收见 `limoclip_v0_5_asr.md` 与 `HANDOFF.md`。**平台/插件热更新（V0.5-B）与虎牙/斗鱼/抖音（V0.5-C）尚未开始，暂缓**；多轨 NLE 仅评估不做。
+> 版本说明：v1.8 按 V0.5-B 实施口径修订——平台插件热更新底座（IPlatformPlugin / providers-manifest + Ed25519 验签 / PluginLoadContext / PluginUpdateService / CliUpdater）与 YouTube 平台插件已落地，并通过阶段 B 验收（监控 / 录制含分离音频 / 剪辑波形 / 双版导出 / ASR）；v1.7 的 V0.5-A 修订内容保持不变；v1.6/v1.5 的 V0.4/V0.3 修订内容保持不变。V0.4/V0.5-A/V0.5-B 的完整规格与验收记录以 `limoclip_v0_4.md` / `limoclip_v0_5_asr.md` 与 `HANDOFF.md` 为准。**虎牙/斗鱼/抖音（V0.5-C）尚未开始**；多轨 NLE 仅评估不做。
 
 
 ## 1. 项目定位与核心架构决策
@@ -59,8 +59,13 @@ LiveMonitor.sln
 │   ├── LiveMonitor.Platforms.Common/    # 公共解析：PlatformDefaults / JsonRead / YtDlpRunner
 │   ├── LiveMonitor.Platforms.Bilibili/  # BilibiliProvider（原生 get_info / getRoomPlayInfo）
 │   ├── LiveMonitor.Platforms.Twitch/    # TwitchProvider（yt-dlp -j；V0.1 不去广告）
-│   ├── LiveMonitor.Platforms/           # [平台调度层] PlatformFactory 组合各 Provider
-│   │   └── PlatformFactory.cs           # URL / PlatformType 路由
+│   ├── LiveMonitor.Platforms/           # [平台调度层] PlatformFactory 组合各 Provider（V0.5-B 起支持运行期原子换表）
+│   │   ├── PlatformFactory.cs           # URL / PlatformType 路由 + ReplaceProvider/RemoveProvider
+│   │   ├── DanmakuClientFactory.cs      # 内置弹幕客户端 switch + 插件覆盖表
+│   │   └── Plugins/                     # V0.5-B 插件底座：PluginTrust / Ed25519Verifier / ProvidersManifest /
+│   │                                    # PlatformPluginLoadContext / PlatformPluginLoader / PlatformPluginHost /
+│   │                                    # PluginUpdateService / BuiltInPlatformPlugins
+│   ├── LiveMonitor.Plugins.YouTube/     # V0.5-B YouTube 平台插件（URL 解析 / yt-dlp 状态 / InnerTube 实时弹幕）
 │   │
 │   ├── LiveMonitor.Danmaku/             # [弹幕管线与分析层] 单例复用、过滤、高能检测
 │   │   ├── Filters/                     # KeywordFilter, BilibiliUnicycleFilter
@@ -225,8 +230,14 @@ public record StreamQuality(
     int Height,
     int Fps,
     string StreamUrl,
-    IReadOnlyDictionary<string, string> RequiredHeaders
-);
+    IReadOnlyDictionary<string, string> RequiredHeaders,
+    // V0.5-B：YouTube 等平台的 HLS 音视频分离；有音频地址时录制走 ffmpeg 第二路输入、播放走 mpv audio-file
+    string? AudioStreamUrl = null,
+    IReadOnlyDictionary<string, string>? AudioHeaders = null
+)
+{
+    public bool HasSeparateAudio => !string.IsNullOrWhiteSpace(AudioStreamUrl);
+}
 
 public record RoomStatus(
     string RoomId,
@@ -249,6 +260,25 @@ public interface IPlatformProvider
     // B站 getDanmuInfo 自 2026-11 起需要 WBI 签名（BilibiliWbiSigner：nav 密钥 + mixin/w_rid），
     // 未签名会返回 code=-352；签名与密钥缓存封装在 BilibiliDanmakuClient 内。
     // 未在 IPlatformProvider 上增加 CreateDanmakuClient。
+}
+```
+
+V0.5-B 追加（已实现，平台插件契约）：
+
+```csharp
+namespace LiveMonitor.Core.Interfaces;
+
+/// <summary>平台插件入口：内置 B站/Twitch/YouTube 与后续本地插件统一走该契约。</summary>
+public interface IPlatformPlugin
+{
+    PlatformType Platform { get; }
+    string PluginId { get; }
+    string Version { get; }
+
+    IPlatformProvider CreateStreamProvider(HttpClient httpClient, string ytDlpPath);
+
+    // 返回 null 表示该平台没有弹幕客户端（DanmakuManager 以 null 停止重试，不得抛异常代替）。
+    IDanmakuClient? CreateDanmakuClient(string roomId, string? authCookie = null, HttpClient? httpClient = null);
 }
 ```
 
@@ -444,7 +474,7 @@ B站独轮车过滤管线必须前置在 `IHighlightDetector` 与弹幕落盘之
    * **海外 CLI 层**：客户端定期检查 GitHub Releases（支持镜像加速）自动替换 `tools/` 下的 `yt-dlp.exe`（Twitch/YouTube 共用）。
    * **国内插件 DLL 层**：B站/抖音/斗鱼/虎牙独立编译为 30~80 KB 的 `Provider.*.dll`，由 GitHub/Gitee 上的 `providers-manifest.json` 维护版本与 SHA256；客户端下载后先用内置公钥做 **Ed25519 数字签名校验**，通过后经 `AssemblyLoadContext` 热加载替换。
    * **签名脚本层**：针对斗鱼、抖音高频换壳的前端混淆签名，由插件内置 `Jint` 加载热更新的 `.js` 签名脚本。
-   * **当前状态（2026-11-23）**：以上三层热更新尚未实现（V0.5-B/C 暂缓）；平台 Provider 已按 V0.1 拆成独立类库（`Platforms.Bilibili` / `Platforms.Twitch` / `Platforms.Common`），当前仅支持“替换 DLL 后重启生效”的静态替换。
+   * **当前状态（2026-11-23，V0.5-B 已实现）**：CLI 层 `CliUpdater` 已实现（yt-dlp `--version` 对比 GitHub latest、下载校验 MZ 后原子替换，入口在设置页「组件与插件更新」）；DLL 插件层已实现（`IPlatformPlugin` 契约、`providers-manifest.json` + Ed25519 验签、`PlatformPluginLoadContext` 内存流 + 可回收加载、`PlatformPluginHost` 安装/版本比较/无活跃任务时原子换表、`PluginUpdateService` 同步清单与安装）；YouTube 已作为内置插件平台提供（内置 B站/Twitch 亦通过 `IPlatformPlugin` 注册）。斗鱼/抖音的“签名脚本层”（Jint + 热更新 .js）随 V0.5-C 一起实现，尚未开始。
 
 ### 6.5 存储安全与高并发账号风控边界
 * **本地落盘与映射盘**：全程录像直接写入目标目录（默认 `%UserProfile%\Videos\LimoClip`，可全局或按直播间覆盖，允许指向 NAS 映射盘）；不做本地→云盘异步归档与 `rclone` 集成。弱网/映射盘抖动由 `-rw_timeout 15s` + 30 秒无进度判卡死兜底；强杀宿主由 Job Object 保证 ffmpeg 无残留。
@@ -461,4 +491,5 @@ B站独轮车过滤管线必须前置在 `IHighlightDetector` 与弹幕落盘之
 | **V0.3 录制引擎与录制中心** | 新增 `LiveMonitor.Media`：`RecordingManager`（手动/自动录制状态机、60s 开播轮询、断流分段退避、崩溃恢复）、`FfmpegFullRecorder`（`-c copy` `.mkv` + stdin `q` 优雅停录 + 首帧锚点）、`DanmakuJsonlRecorder`（同名伴随 `.jsonl`）、`RecordingHighlightTracker`（高能绑定 SessionId/Offset）、Windows Job Object 防僵尸；Desktop 录制中心（全局/独立目录、自动录制、实时指标、历史录像、删除确认）。 | 已验收：0 路播放时多路录制持续写入、停录 `.mkv` 可播（ffmpeg 解码 exit=0）、强杀宿主后 ffmpeg ≤1s 内终止、重启后未收尾会话标 Failed。**环形缓冲 / 异步归档 / 手动 MP4 已确认取消。** |
 | **V0.4 剪辑台（已实现）** | Core 剪辑契约与按会话高能查询；Media/Editing：伴随 jsonl 读取、ffmpeg 探测（无 ffprobe）、流式波形 + 缓存、ASS 转换、硬编探测、双版导出、回放游标；Desktop：本地预览播放器、双波形缩放时间轴、剪辑台四区视图、主窗口第三视图「✂ 剪辑台」、录制中心「✂ 去剪辑」入口。 | 已验收：录制中心 → 剪辑台加载 → 弹幕回放 → 选区 → 双版导出（GUI 实测 <2s），471 个单元测试全绿；本地文件打开与无伴随 jsonl 降级由单测覆盖；2h 长录像与硬编真机待补测。 |
 | **V0.5-A 云端 ASR（已实现）** | Core `AsrTranscriptSegment/AsrTranscriptResult/IAsrProvider` + 5 个 `Asr*` 设置键；Media `Asr/OpenAiCompatibleAsrProvider`（抽音/multipart/双格式解析/缓存/取消/Job Object）；Desktop `AsrSettingsStore`（4 预设 + DPAPI Key + `/models` 连通性测试）+ 设置页「语音识别（ASR）」分区 + 剪辑台「🎙 识别当前选区 / 高能卡片转写 / 逐句点击跳转 / 复制全文」。 | 已验收：2 分钟以内片段全流程 ≤15s（实测 55s 音频约 11s，siliconflow_cn / FunAudioLLM/SenseVoiceSmall）；缓存重启命中不发网络（单测覆盖）；496 个单元测试全绿；真实 GUI 录制→剪辑→转写链路通过。 |
-| **V0.5-B/C 平台热更新与国内平台（未开始，暂缓）** | B：`IPlatformPlugin` 契约、`providers-manifest.json` + Ed25519 验签、`PluginLoadContext`、`CliUpdater`（yt-dlp）、YouTube 插件与 WebView2 登录扩展；C：虎牙（Tars/Wup）、斗鱼（WSS + Jint 签名脚本）、抖音（Protobuf + ttwid 风控）插件。 | 待恢复时验证：篡改 1 字节被拒载、合法新版可热加载、YouTube 监控/录制/剪辑全链路、三国内平台粘贴链接识别/起播/实时弹幕/全程录制。前置调研与风险清单（R1~R12）见 `HANDOFF.md` 与 `limoclip_v0_5_asr.md` §4。 |
+| **V0.5-B 平台插件热更新底座 + YouTube（已实现）** | Core `IPlatformPlugin`、`StreamQuality.AudioStreamUrl/AudioHeaders`；Platforms `Plugins/`（PluginTrust / Ed25519Verifier / ProvidersManifest / PluginLoadContext / PlatformPluginLoader / PlatformPluginHost / PluginUpdateService / BuiltInPlatformPlugins）、工厂原子换表、B站/Twitch 内置插件化、Common `ToolLocator/PluginVersionInfo/PluginVersionComparer/CliUpdater`；新工程 `LiveMonitor.Plugins.YouTube`（URL 解析 + yt-dlp 状态 + InnerTube 弹幕）；Desktop 设置页「组件与插件更新」、AppServices 接线、mpv `audio-file` 与 ffmpeg 双输入音频；`scripts/PluginSigner` + 签名/打包脚本、`plugins/` 清单与说明。 | 已验收：篡改 DLL 被拒载/合法插件加载（单测）；真实 YouTube 直播 `4t4AQ15yj1M` 添加/监控 1080P30、录制 49.97s（视频+HE-AAC 音频+77 弹幕）、剪辑波形、双版导出（含音频）、ASR 全部通过；640 个单元测试全绿。插件安装/热生效实机路径待首个签名插件发布后补测。 |
+| **V0.5-C 国内平台（未开始）** | 虎牙（Tars/Wup 协议、CmdId 1400）、斗鱼（WSS 弹幕 + Jint 执行 ub98484234 签名脚本、extraScripts 热更新）、抖音（Protobuf PushFrame + ttwid 风控）三个平台独立插件；斗鱼/抖音签名脚本层（Jint）随本阶段落地。 | 待实现后验证：三平台粘贴链接识别/起播/实时弹幕/全程录制，单平台失效不影响其余；前置调研与风险清单（R1~R12）见 `HANDOFF.md` 与 `limoclip_v0_5_asr.md` §4/§5。 |
