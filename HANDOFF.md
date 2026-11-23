@@ -1,121 +1,131 @@
-# LiveMonitor V0.2 交接（弹幕引擎与高能空跑）
+# LiveMonitor V0.3 交接（录制中心与全程录制引擎）
 
 ## 状态
 
-- 仓库：`E:\code\liveSurveilance`，分支 `main`；最近提交见 `git log --oneline -5`（本轮为独轮车计数口径修正，前序 `95173db`、`15c7bad`、`690a4d6`）；工作树干净。
-- 构建：`dotnet build LiveMonitor.sln -c Release` 0 错误；已知警告仅 `MSB3277`（WebView2/WPF WindowsBase 冲突）、`CS9057`（Dock 分析器版本）、`WFAC010`、`AVLN3001`。
-- 测试：**311/311 通过** —— Data 21、Platforms 120、Danmaku 96、Desktop 74（Release）。
-- 工程：新增 `src/LiveMonitor.Danmaku`、`tests/LiveMonitor.Danmaku.Tests`，解决方案现 **12 个工程**。
-- 文档：`code_artifact.md` v1.4（长期架构）、`limoclip_v0_2.md`（V0.2 设计与实施记录）、`STEP8_REPORT.md`（V0.1 性能基线，仅作历史参考；已确认不再做 Step 6 性能对比）。
-- 第三方二进制：`tools/` 下 `libmpv-2.dll`、`yt-dlp.exe`、`ffmpeg/`、`mpv/` 仍被 `.gitignore` 排除，按 `tools/README.md` 准备；`tools/cacert.crt` 已入库。
+- 分支 `main`；改动**尚未提交**（详见文末“工作树”，勿误删未跟踪文件）。
+- 构建：`dotnet build LiveMonitor.sln --no-restore` → **0 错误**、8 警告（MSB3277/CS9057/WFAC010/AVLN3001/NU1803，均为既有环境告警）。
+- 测试：Data 35 / Platforms 120 / Danmaku 98 / Media 95 / Desktop 74 = **422 全绿**（2026-11-23）。
+- 验收：GUI 冒烟通过；V0.3 实机录制验收全流程通过（脚本 `.cache/step6-acceptance.ps1`，证据 `.cache/step6-*.png`）。
+- 实现依据：`limoclip_v0_3.md`（V0.3 起以此为准；`code_artifact.md` 的 V0.3 段落是早期设想，环形缓冲 / NAS 归档 / 手动转 MP4 已确认砍掉）。
 
-## V0.2 已实现内容
+## V0.3 已实现内容
 
-### Core（新增契约，不动既有 API）
+### Core（新增契约）
 
-- Models：`DanmakuMessage`（Timestamp 约定为**客户端本地接收时间**；表情字段 `IsSticker` / `Emotes`）、`DanmakuEmote`（表情名/图片地址/平台 ID）、`HighlightEvent`、`HighlightRuleOptions`（含 `Normalize()` 夹取与 6 个默认值）。
-- Interfaces：`IDanmakuClient`、`IDanmakuClientFactory`、`IDanmakuFilter`、`IHighlightDetector`、`IHighlightEventRepository`。
-- `AppSettingKeys` 追加 6 个 Highlight 键 + `DanmakuStickerVisible`（纯表情包是否渲染，默认开）。
-
-### Platforms（弹幕客户端）
-
-- `LiveMonitor.Platforms.Bilibili`：`BilibiliPacketParser`（纯函数，16B 大端头、zlib/brotli、递归解包、DANMU_MSG/SEND_GIFT/SUPER_CHAT_MESSAGE、op7 认证包、op2 心跳包；表情解析：`info[0][12] == 1` 大表情取 `info[0][13].url`、`info[0][15].extra` 二次 JSON 的 `emots` 取行内表情，只收文本中出现的表情）、`BilibiliWbiSigner`（WBI mixin 置换 + `w_rid` 签名；`getDanmuInfo` 自 2026-11 起必须签名，否则返回 `-352`，客户端缓存 `nav` 的 img/sub key 1 小时）、`IBilibiliWebSocketConnection` + `ClientWebSocketBilibiliConnection`、`BilibiliDanmakuClient`（nav 取密钥 → getDanmuInfo → wss /sub → 认证 → 30s 心跳；单次连接失败即抛，不重连）。
-- `LiveMonitor.Platforms.Twitch`：`TwitchIrcParser`（解析 `@emotes=id:start-end,...` 标签生成静态图 URL，不拉取 7TV/BTTV/FFZ 词典）、`ITwitchIrcConnection` + `ClientWebSocketTwitchConnection`、`TwitchDanmakuClient`（匿名只读 IRC：CAP/PASS/NICK/JOIN、PING/PONG、RECONNECT、多行帧、IRCv3 tags）。
-- `LiveMonitor.Platforms.DanmakuClientFactory : IDanmakuClientFactory`（Bilibili / Twitch，其他平台返回 null）。
-
-### Danmaku（新工程）
-
-- `Filters/KeywordFilter`：包含匹配 + 正则（`Compiled | IgnoreCase | CultureInvariant`，100ms 超时）；非法正则跳过并记日志；可热更新。
-- `Filters/BilibiliUnicycleFilter`：≤6 字短情绪词与游客 uid=0 放行、10 分钟静默、30s 长文本 / 15s 完全一致 / 60s 机械复读、15 分钟无发言状态驱逐；`FoldEmotes` 把每个 `[表情]` 折算 1 字符后再算长度/归一化，`IsSticker` 纯表情包直接放行（避免表情连发被误杀）。
-- `Analyzers/SlidingWindowDetector`：按房间 1 秒环形桶，加权短窗/基线、绝对条数下限、冷却、`666/草/神回/Pog` +0.5 权重。
-- `HighlightSettingsStore`：通过 `IAppSettingsRepository` 读写高能参数（InvariantCulture，非法值回落默认）。
-- `DanmakuManager`：按 `(Platform, RoomId)` 引用计数共享连接；Acquire 返回 `DanmakuSessionHandle`（批量 50ms `MessagesReceived`）；管线 = KeywordFilter → BilibiliUnicycleFilter → SlidingWindowDetector → 批量渲染；高能事件事件广播 + 异步落盘；退避 3s→10s→30s→60s（稳定 30s 重置），可注入 delay/clock；`ReloadSettingsAsync` / `UpdateHighlightRulesAsync` / `SetUnicycleEnabledAsync` 热更新；`DisposeAsync` 断连 + flush。独轮车计数按「被拦截的不同用户数」统计（全局 key=`(Platform, SenderUid)`，跨房间去重，同一用户只计一次），事件 `UnicycleBlockedUserCountChanged` 推送累计用户数。
+- `Enums/RecordingStatus.cs`：Starting=0 / Recording=1 / Stopping=2 / Completed=3 / Failed=4。
+- `Entities/RecordingTarget.cs`：`LiveRoomId`、`AutoRecordEnabled`、`CustomSaveDirectory?`、`UpdatedAt`。
+- `Entities/RecordingSession.cs`：`Id`、`LiveRoomId?`、平台 / 房间快照、状态、视频 / 弹幕路径、开始 / 结束时间、时长、大小、弹幕数、高能数、`ErrorMessage?`。
+- `Models/RecordingProgress.cs`：`SessionId`、`Duration`、`FileSizeBytes`、`BitrateKbps`、`DanmakuCount`、`HighlightCount`。
+- `Interfaces/IRecordingTargetRepository.cs`、`IRecordingSessionRepository.cs`、`IFullStreamRecorder.cs`、`IHighlightEventEnricher.cs`。
+- `Models/HighlightEvent.cs`：新增 init 属性 `RecordingSessionId?`、`RecordingOffsetMs?`。
+- `AppSettingKeys.cs`：`RecordingDefaultDirectory`（默认 `%UserProfile%\Videos\LimoClip`）、`RecordingPollIntervalSeconds`（默认 60，范围 10~600）。
 
 ### Data
 
-- `HighlightEvents` 表 + `IX_HighlightEvents_TriggerTime` 索引；`HighlightEventRepository`（AddAsync/GetRecentAsync/ClearAsync，UTC "O" 往返）。
+- 新表 `RecordingTargets`（PK = LiveRoomId，FK → LiveRooms `ON DELETE CASCADE`）与 `RecordingSessions`（`LiveRoomId` 可空，FK → LiveRooms **`ON DELETE SET NULL`**，会话独立于直播间生命周期）。
+- `HighlightEvents` 幂等迁移：`PRAGMA table_info` 缺列才 `ALTER TABLE` 加 `RecordingSessionId TEXT` / `RecordingOffsetMs INTEGER`；`PRAGMA user_version = 4`。
+- `RecordingTargetRepository`（upsert）、`RecordingSessionRepository`（按最近 / 按房间查询、未完成查询）；索引 `IX_RecordingSessions_StartedAt`、`_LiveRoomId`、`_PlatformRoom`。
 
-### Desktop（集成）
+### Media（新工程 `src/LiveMonitor.Media`，net8.0-windows，依赖 Core + Danmaku）
 
-- `Controls/DanmakuOverlay`：Avalonia 自绘，由共享的 `DanmakuRenderTicker`（60fps、多窗格共用一个 DispatcherTimer，Stopwatch 计算帧 delta）驱动，控件自身不再各起定时器；车道渲染、同屏上限 30（紧凑 15）、pending 600、超限丢渲染不丢统计、阴影/礼物配色；表情渲染默认开启静态图片（`DanmakuEmoteText` 拆分文本/表情段，`DanmakuEmoteImageCache` 内存 LRU 200 张 + 磁盘缓存，`%LOCALAPPDATA%` 不可写时退到 `%TEMP%/LiveMonitor/emote-cache`），只解码首帧、不做动画；缓存未命中时先显示 `[表情名]` 文本并后台下载。
-- 表情设置：`DanmakuStickerVisible`（纯表情包是否渲染，默认开）、`DanmakuEmoteImagesVisible`（行内/纯表情是否下载并显示静态图片，默认开；关闭后全部退化为 `[表情]` 文本）。
-- `MpvPlayerView`：Video 之上、状态层之下插入 `DanmakuLayer`；`DanmakuMasterEnabled`（全局总闸）与 `DataContext` 上的 `IsDanmakuVisible`（窗格开关）共同决定可见性；`PushDanmaku/ClearDanmaku`；紧凑模式切 15 条上限。
-- `MainWindowViewModel`：`_danmakuHandles` + `SyncDanmakuSubscriptions()` 在房间增删/换位/方案加载/重建/启动全部路径 reconcile；订阅只跟「房间在工作区」绑定；消息批量 UI 线程投递（tile 播放器 + 焦点浮层）；`InitializeDanmakuAsync` 启动回填高能事件；`ApplyDanmakuMasterSettingAsync` 应用全局总闸；`Dispose` 释放订阅并最多等 2s flush。
-- 焦点浮层：`ToggleFocusAsync` 里 `new MpvPlayerView { DataContext = tile }` 修复弹幕开关/标题绑定；同房间共享连接（不额外 Acquire）。
-- 高能事件面板：工作区右侧叠加 `Border`（不塞 Dock，避免污染 `DockLayoutJson`）；顶栏「高能事件」开关；内存 200 条 + 清空/收起 + 空态。
-- 状态栏：`UnicycleBlockedText` 接 manager 全局累计被拦截用户数（显示为「独轮车已拦: N 人」，同一用户只计一次）。
-- 设置页：屏蔽词条新增「正则」勾选；新增高能参数卡片（短窗/基线/倍数/绝对下限/冷却/加权关键词，保存/恢复默认）；新增「渲染纯表情包弹幕」开关（写 `DanmakuStickerVisible`，关闭后纯表情包仅统计与高能检测）与「显示表情图片（静态，多屏时建议关闭）」开关（写 `DanmakuEmoteImagesVisible`）；`MainWindow.OnSettings` 关闭后调用 `Danmaku.ReloadSettingsAsync()` + 重新应用全局总闸。
+- `Recording/ProcessJobGuard.cs`：Windows Job Object `KILL_ON_JOB_CLOSE`，宿主退出由内核杀死 ffmpeg。
+- `Recording/FfmpegArgumentBuilder.cs`：`-headers` 严格 `Key: Value\r\n` 且在 `-i` 前、UA 单独 `-user_agent`、`-rw_timeout 15000000`、显式 `-ca_file <cacert>`、`-c copy -f matroska -progress pipe:1`。
+- `Recording/FfmpegProgressParser.cs`、`Recording/FfmpegLocator.cs`（ffmpeg 与 cacert 的定位，支持从 BaseDirectory 向上 8 层查找）。
+- `Recording/FfmpegFullRecorder.cs`：stdin `q` 优雅停录 + 超时 `Kill(entireProcessTree)`；首个 `out_time_us>0` 作为首帧锚点（5s 内未解析回退进程启动时间）；进度事件、退出事件、stderr 尾部摘要。
+- `Recording/DanmakuJsonlRecorder.cs`：伴随 `.jsonl`（首行 meta，后续 dm，`offsetMs` 相对首帧）；中文不再被 `\uXXXX` 转义。
+- `Recording/RecordingFileNaming.cs`：`{UTC yyyyMMdd_HHmmss}_#{DisplayNumber}_{SafeAlias}_{RoomId}.mkv`，剔除 Windows 非法字符。
+- `Recording/RecordingHighlightTracker.cs`：`IHighlightEventEnricher` 实现，把高能事件同步补全 `RecordingSessionId` / `RecordingOffsetMs` 后再广播与落盘（消除竞态）。
+- `Recording/RecordingManager.cs`（1688 行）：手动 / 自动录制状态机、原画画质（无 `cookie` 时也走匿名）、断流自动分段与 5~60s 退避重试（最多 5 次）、30s 无进度判卡死、`InitializeAsync` 崩溃恢复（未完成会话标 Failed）、60s 开播轮询（`SemaphoreSlim(4,4)`）、删除记录连文件删除、`DisposeAsync` 停录。
 
-## 与 `limoclip_v0_2.md` 的关键偏差（以本文件为准）
+### Danmaku
 
-1. **工厂形态**：没有实现 `IPlatformProvider.CreateDanmakuClient`；改为 Core `IDanmakuClientFactory` + `Platforms/DanmakuClientFactory`，保证 `LiveMonitor.Danmaku` 只依赖 Core。
-2. **B站只收不发**：V0.2 不做发送弹幕；游客可连接，登录后独轮车单用户识别才完整（游客 uid=0 按设计放行）。Cookie 白名单没有 `buvid3`，缺失时用无名 `spi` 接口兜底，失败则降级空串。
-3. **弹幕连接生命周期**：只与「房间是否在工作区」绑定；单窗格弹幕开关与全局总闸（设置页 `DanmakuPreviewEnabled`）**只停渲染**，连接、高能统计、独轮车计数继续跑。
-4. **正则过滤开放**：`DanmakuBlockKeywords.IsRegex` 已可用；设置页勾选即生效。
-5. **高能参数持久化 + 事件落盘**：参数写 `AppSettings`；`HighlightEvent` 写 `HighlightEvents` 表，启动回填面板最近 200 条。
-6. **面板落点**：右侧叠加层，不写 Dock 结构。
-7. **房间号**：弹幕客户端直接用 DB 中 `LiveRoom.RoomId`（B站为 `get_info` 返回的真实 room_id），不重走短号解析。
-8. **表情/表情包**：元数据保留（`IsSticker` / `Emotes`）+ 过滤防误杀（`FoldEmotes` 折算、`IsSticker` 豁免）+ 渲染可选降级；V0.2 后续按用户反馈补了「静态表情图片」渲染（默认开、可关，LRU 200 + 磁盘缓存，只解码首帧、不跑 GIF/WebP 动画）；高能统计照常计入表情弹幕；V0.4 导出 `.ass` 时行内表情保留 `[表情]` 文本。
-9. **独轮车计数口径**：按「被拦截的不同用户数」统计（全局 key=`(Platform, SenderUid)`，跨房间去重，同一用户被拦多条只计一次），不是拦截条数；状态栏显示为「独轮车已拦: N 人」。
+- `DanmakuManager`：新增 `HighlightEventEnricher` 属性；`OnHighlightDetected` 先同步补全，再用同一实例广播 + 异步落盘。
 
-## Step 6 真实网络验证（2026-11-22，自动化部分已完成）
+### Desktop（录制中心 UI）
 
-- **GUI 启动冒烟**：重编后用 `cmd /c start` 直启（`LIVEMONITOR_DB` 指向 `.cache`），窗口标题 `LiveMonitor`、进程 Responding、SQLite 建库成功、`startup-error.log` 无新增 → 启动/DI/DanmakuManager 初始化正常。GUI 输出目录里的旧 `startup-error.log`（15:29）是 V0.1 历史残留，勿误判。
-- **B站握手根因**：`getDanmuInfo?id=...&type=0` 原先只带 UA/Referer 时返回 `code=-352`；补 buvid Cookie、Origin、Sec-Fetch 等仍 `-352`。根因是 B站已对 `getDanmuInfo` 加 **WBI 签名**要求。用匿名 `https://api.bilibili.com/x/web-interface/nav`（`code=-101` 但 `data.wbi_img` 仍返回）取 img/sub key，按置换表算 mixin，对查询参数（`id`、`type=0`、`web_location=444.8`、`wts`）排序 + MD5 得 `w_rid` 后返回 `code=0`（token 252 字节、6 个 host）。已落地 `BilibiliWbiSigner` + 客户端密钥缓存 + 新增 5 个 signer 测试与 2 个客户端签名测试（Platforms 107→114）。
-- **真实收弹幕（游客态）**：E2E 临时工程（`.cache/e2e-danmaku`，未入 sln）用真实客户端连接：B站房间 `21452505` 30s 收到 **24 条**（含 brotli 嵌套解包）；Twitch `ludwig` 30s 收到 **3 条** PRIVMSG（`eslcs` 虽然 live 但当时 chat 静默，0 条属正常）。另用原始 WS 探针验证过 B站 8 帧解析 9 条、Twitch ludwig 25s 2 条。
-- 频道是否在播的探测方法：GET `https://www.twitch.tv/{channel}` HTML 匹配 `"isLiveBroadcast":true`（decapi.me 在本机 DNS 不可用）。
-- 探针经验：对 `ClientWebSocket.ReceiveAsync` 用短超时 CTS 反复取消会 **abort 连接**；探针应使用单次 deadline CTS。
+- 顶栏 `📺 监控工作区` / `⏺ 录制中心` 切换：`IsVisible` 隐藏，不销毁 Dock 与播放器；录制中心隐藏侧栏 / 状态栏、保留顶栏。
+- `RecordingCenterViewModel` / `RecordingTargetItemViewModel` / `RecordingHistoryItemViewModel` / `RecordingUiFormat` / `RecordingCenterView.axaml(.cs)` / `ConfirmDeleteRecordingWindow`：
+  - 全局录像目录读写、逐房间「开播自动录制」、独立目录覆盖、立即开录 / 停止；
+  - 实时指标（时长 / 码率 / 大小 / 弹幕 / 高能）与历史录像列表（打开文件夹 / 删除）；
+  - 删除前弹窗确认（连 `.mkv` / `.jsonl` 一起删，不可恢复）；正在录制的会话禁止删除。
+- `AppServices`：构造并公开 `RecordingManager Recordings`、`RecordingTargets`、`RecordingSessions`；providerResolver 未注册平台返回 `null`。
+- `MainWindowViewModel`：`IsRecordingCenterVisible`、`RecordingCenter`（懒创建）；弹幕与录制引擎初始化后调用 `RecordingCenter.InitializeAsync`（订阅实时进度，**这是指标刷新修复点**）；`DeleteRoomAsync` 在删直播间前先停录（用户决定：删直播间保留录制历史）；`Dispose` 先释放录制中心与录制引擎。
+- `MainWindow.axaml(.cs)`：录制中心宿主 Border、`ApplyShellLayout`、Esc 切回监控、注入删除确认窗与目录选择。
+- `LiveMonitor.Desktop.csproj`：增加 Media 工程引用；`tools/ffmpeg/ffmpeg.exe` 复制到输出目录（`tools\ffmpeg\ffmpeg.exe`），`cacert.crt` 复制到根目录。
 
-## 已知限制 / 待验收
+## 实机验收证据（2026-11-23）
 
-1. **Step 6 剩余项（人工）**：独轮车误杀率、高能阈值稳定性仍需人工挂机；阈值默认值可能有误报/漏报，需要拿真实直播调。B站游客态真实收发已验证通过（见上节）；登录态（SESSDATA）下 uid 非 0 与独轮车单用户识别待验证；Twitch 真实 wss 匿名收流已验证。**性能对比已确认不需要做**（不再对比 STEP8 的 CPU/内存/UI 帧率）。
-2. Twitch 匿名每连接 JOIN 限速与 20~30 路 per-room WS 压力未测；Twitch 侧不做独轮车判定（符合设计）。
-3. B站 WBI 密钥来自匿名 `nav` 接口（缓存 1h）；若该接口后续收敛匿名访问，会抛 `InvalidOperationException`（消息含 "WBI"）并按退避重连，需要再评估备选密钥获取方式。
-4. 高能落盘 `DisposeAsync` flush 无超时（仓储异常会被吞并记日志，但极端挂起时退出最多被 VM 的 2s 等待兜住）。
-5. 弹幕渲染被全局关闭时仍保持连接；移出工作区才释放。
-6. `_wiredTiles` 只增不减等 V0.1 既有问题未修（不属 V0.2 范围）。
+脚本 `.cache/step6-acceptance.ps1`（临时库 `.cache/step6/livemonitor.db`，录制目录 `.cache/recordings`，UIA + Python sqlite seed/inspect）：
+
+- 0 路播放时启动 2 路录制（B站 6650029 第五人格赛事、7734200 哔哩哔哩英雄联盟赛事），25s 后 mkv 持续增长（1.8MB / 0.8MB），ffmpeg 2 进程。
+- 停录后 mkv 终态 8.2MB / 4.5MB，jsonl 含正确 meta 与 dm 行，`ffmpeg -v error -i <mkv> -f null -` 两文件 `exit=0`（可播、可拖动）。
+- 强杀 `LiveMonitor.Desktop.exe`：ffmpeg 在 **0.23s** 内全部消失（Job Object 生效），被杀 mkv 仍可解码（exit=0）。
+- 重启 App：未收尾会话被标 `Failed`，`ErrorMessage` = “程序异常退出，录制未正常收尾，文件可能不完整。”，文件大小保留。
+- 截图：`.cache/step6-04-recording-25s.png`、`.cache/step6-06-after-crash-recovery.png`；指标刷新复测 `.cache/probe2-recording-12s.png`（录制中显示 时长 / 码率 / 大小）。
+
+## 与 `limoclip_v0_3.md` 的偏差 / 实现决策（以本文件为准）
+
+1. **删直播间保留历史**：文档原写 `RecordingSessions.LiveRoomId FK ON DELETE CASCADE`，按用户决定改为可空 + `ON DELETE SET NULL`；历史按 `(Platform, RoomId)` 查询，重新添加同一直播间后仍能看到旧录像。
+2. **删除历史记录 = 删文件 + 删 DB 行**，且 UI 先弹确认框；正在进行的会话禁止删除。
+3. **手动停止自动录制后抑制自动重启**：抑制到该场直播下播或用户再次手动开录；断流自动续录有退避与最大次数。
+4. **新增 `-ca_file`**：随包静态 ffmpeg 在本机无法注册 Windows 证书库，HTTPS 输入报 `Failure registering the Windows certificate store` / `error:0A000086` → 显式传 `tools\cacert.crt`（文档 §2 未列，实机验收发现）。
+5. **录制中心在启动时初始化**（订阅事件 + 首次刷新），未打开过录制中心也能持续更新指标；`SwitchToRecordingCenter` 再幂等初始化一次兜底。
+6. **jsonl 中文不转义**（`JavaScriptEncoder.UnsafeRelaxedJsonEscaping`），便于人工与 V0.4 剪辑台阅读，仍是合法 JSON。
+7. **高能绑定只在有录制会话时生效**（`RecordingHighlightTracker` 未注册则原样返回），录制中心未启动不影响监控的高能面板。
+
+## 已知限制 / 待办
+
+- 本机实验环境：App 进程无法在 `%UserProfile%\Videos` 下创建目录（沙箱/权限差异），验收用 AppSettings 覆盖目录；真实用户环境预期正常，但发布前建议手动验证默认目录创建失败时的提示文案。
+- 自动录制 60s 轮询对 Twitch 每房间一次 `yt-dlp -j`，20~30 路下的开销尚未压测；可考虑按平台 / 错峰。
+- B站轮播房（`live_status=2`）会被当作开播并录制（V0.2 语义沿用），未加过滤。
+- 自动续录最多 5 次，超过后交回 60s 轮询；长时间断流场景未长时间挂机验证。
+- 高能事件 → 录像时间点跳转 / 剪辑台消费属于 V0.4。
+- `code_artifact.md` 的 V0.3 段落仍是早期设想（环形缓冲 / NAS 归档 / ClipTask），本版以 `limoclip_v0_3.md` 与本文件为准，后续可一并清理。
+- 所有改动未 `git commit`；`limoclip_v0_3.md` 仍未跟踪。
+
+## 工作树（未提交）
+
+修改：`LiveMonitor.sln`、`src/LiveMonitor.Core/AppSettingKeys.cs`、`Models/HighlightEvent.cs`、`Danmaku/DanmakuManager.cs`、`Data/LiveMonitorDatabase.cs`、`Data/Repositories/HighlightEventRepository.cs`、`Desktop/LiveMonitor.Desktop.csproj`、`Desktop/Services/AppServices.cs`、`Desktop/ViewModels/MainWindowViewModel.cs`、`Desktop/Views/MainWindow.axaml(.cs)`、`tests/LiveMonitor.Danmaku.Tests/DanmakuManagerTests.cs`。
+
+新增：`limoclip_v0_3.md`、`src/LiveMonitor.Core` 下 8 个录制契约文件、`src/LiveMonitor.Data/Repositories/Recording*Repository.cs`、`src/LiveMonitor.Media/`（14 个文件）、`src/LiveMonitor.Desktop` 下 9 个录制中心文件、`tests/LiveMonitor.Data.Tests/RecordingRepositoryTests.cs`、`tests/LiveMonitor.Media.Tests/`（8 个测试文件 + csproj）。
 
 ## 构建 / 测试
 
-便携 SDK 在 `.dotnet`，每次先设置：
+每次 pwsh 先设环境（缺失会报 `MSBuildTemp` 权限错误）：
 
 ```powershell
 $root = 'E:\code\liveSurveilance'
-$env:DOTNET_ROOT = Join-Path $root '.dotnet'
-$env:PATH = "$env:DOTNET_ROOT;$env:PATH"
-$env:DOTNET_CLI_HOME = Join-Path $root '.dotnet-home'
-$env:NUGET_PACKAGES = Join-Path $root '.nuget'
-$env:APPDATA = Join-Path $root '.appdata'
-$env:LOCALAPPDATA = Join-Path $root '.appdata'
-$env:TEMP = Join-Path $root '.cache\temp'
-$env:TMP = $env:TEMP
+$env:DOTNET_ROOT = "$root\.dotnet"
+$env:PATH = "$root\.dotnet;$env:PATH"
+$env:DOTNET_CLI_HOME = "$root\.dotnet-home"
+$env:NUGET_PACKAGES = "$root\.nuget\packages"
+$env:APPDATA = "$root\.appdata"
+$env:LOCALAPPDATA = "$root\.appdata"
+$env:TMP = "$root\.cache\temp"
+$env:TEMP = "$root\.cache\temp"
+dotnet build "$root\LiveMonitor.sln" --no-restore
 ```
+
+测试（先 build，再逐个 `--no-build`）：
 
 ```powershell
-& "$root\.dotnet\dotnet.exe" build "$root\LiveMonitor.sln" --no-restore --nologo -v minimal
-& "$root\.dotnet\dotnet.exe" test "$root\tests\LiveMonitor.Data.Tests\LiveMonitor.Data.Tests.csproj" --no-build --nologo -v minimal
-& "$root\.dotnet\dotnet.exe" test "$root\tests\LiveMonitor.Platforms.Tests\LiveMonitor.Platforms.Tests.csproj" --no-build --nologo -v minimal
-& "$root\.dotnet\dotnet.exe" test "$root\tests\LiveMonitor.Danmaku.Tests\LiveMonitor.Danmaku.Tests.csproj" --no-build --nologo -v minimal
-& "$root\.dotnet\dotnet.exe" test "$root\tests\LiveMonitor.Desktop.Tests\LiveMonitor.Desktop.Tests.csproj" --no-build --nologo -v minimal
+dotnet test "$root\tests\LiveMonitor.Data.Tests" --no-build
+dotnet test "$root\tests\LiveMonitor.Platforms.Tests" --no-build
+dotnet test "$root\tests\LiveMonitor.Danmaku.Tests" --no-build
+dotnet test "$root\tests\LiveMonitor.Media.Tests" --no-build
+dotnet test "$root\tests\LiveMonitor.Desktop.Tests" --no-build
 ```
 
-运行 GUI：`& "$root\.dotnet\dotnet.exe" run --project src/LiveMonitor.Desktop`（直接 Start-Process，不要把输出重定向到文件）。
+GUI 冒烟：`.cache/app-smoke.ps1`（启动 → 截图 → UIA 切监控/录制中心 → 停止）。实机验收：`.cache/step6-acceptance.ps1`（临时库 + UIA + Python seed，结束自动清理）。
 
-## 后续建议顺序
+## 约束（沿用 V0.1/V0.2）
 
-1. 人工 Step 6 剩余部分：添加 B站热门房 + Twitch 房间，观察状态栏「独轮车已拦: N 人」计数与高能面板；性能对比不再要求（用户已确认）。
-2. 用真实直播回调高能参数（短窗 10s / 基线 180s / 3.0× / 下限 15 / 冷却 60），必要时改默认值并补文档。
-3. 验证 B站登录态（SESSDATA）下 uid 非 0、独轮车规则生效；确认游客态提示。
-4. 提交建议按层拆分：Core+Danmaku 契约/逻辑、Platforms 弹幕客户端、Data 落盘、Desktop 集成、docs。
-
-## 约束（沿用 V0.1，仍有效）
-
-- 平台逻辑保持现状：B站原生 API、Twitch `yt-dlp -j`；不换 streamlink、不处理 Twitch SSAI 广告。
-- 焦点放大、音频逻辑、`PlatformCredentials`、`PlatformType` 语义保持现状；不为性能回退 `aid=no`。
-- 不重构 V0.1 既有模块；界面沿用现有风格。
-- GUI 用 `Start-Process` 直启、不重定向输出；截图/临时 DB/测试产物放 `.cache/`，不提交。
-- `dotnet test` 的 `VSTEST_ARTIFACTS_DIRECTORY` 提示是旧 Test.Sdk 噪音，不影响结果。
+- 平台逻辑保持现状：B站原生接口（含 WBI 签名）、Twitch `yt-dlp -j`；不换 streamlink；不处理 SSAI 广告。
+- 焦点放大 / 音频总线 / `PlatformCredentials` / `PlatformType` 语义不动。
+- 不为性能回退 `aid=no`；不重构既有 V0.1/V0.2 模块。
+- 界面沿用现有深色风格（#0F1115 / #151923 / #262B36，圆角 8，内边距 14）。
+- 截图 / 临时 DB / 测试产物放 `.cache/`；第三方二进制不入库（`scripts/fetch-tools.ps1` 补齐，ffmpeg 自 V0.3 起为硬依赖）。
 
 ## 新 session 首条消息（可直接复制）
 
-> 你在 `E:\code\liveSurveilance`。先读 `HANDOFF.md`、`limoclip_v0_2.md`、`code_artifact.md`、`STEP8_REPORT.md`，不要改代码。复述当前 V0.2 实现状态、build/test 结果与未提交改动范围；随后按 HANDOFF 的「后续建议顺序」做 Step 6 真实直播联调验收（性能对比已确认不做），不重构、不改平台/焦点/音频语义。
+> 阅读 `HANDOFF.md`、`limoclip_v0_3.md` 与 `limoclip_v0_2.md`，先核对 `git status` 与全量测试，再按需开始 V0.4（剪辑台 / 波形 / 切片 / ASR / 平台热更新）。

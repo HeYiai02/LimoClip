@@ -4,7 +4,8 @@
 
 - `livemonitor_v0_1.md`：V0.1 施工契约（v1.7）
 - `limoclip_v0_2.md`：V0.2 弹幕引擎详细设计实施文档（含实施记录）
-- `code_artifact.md`：长期架构全景（v1.4）
+- `limoclip_v0_3.md`：V0.3 独立录制中心与全程录制引擎设计实施文档（含实施记录 §8）
+- `code_artifact.md`：长期架构全景（v1.5，已按 V0.3 口径更新）
 - `livemonitor_v0_1.html`：交互 / 视觉基准原型
 
 ## V0.2 进度（弹幕引擎与高能空跑，已实现，待真实直播验收）
@@ -17,6 +18,19 @@
 - [~] Step 6（真实网络验证已完成，人工挂机验收待做）：B站 `getDanmuInfo` 补 WBI 签名后游客态真实收弹幕 24 条（房间 21452505）；Twitch 匿名 IRC 真实收弹幕 3 条（ludwig）；GUI 启动冒烟正常（窗口存活、DB 创建、无启动错误）。剩余人工挂机项：独轮车误杀率、高能阈值稳定性、B站登录态（SESSDATA）下 uid 非 0；**性能对比已确认不做**
 
 > 说明：实际实现用 Core 的 `IDanmakuClientFactory`（平台工厂在 `Platforms` 聚合层）取代了原计划的 `IPlatformProvider.CreateDanmakuClient`，使 `LiveMonitor.Danmaku` 只依赖 Core；B站 V0.2 只收弹幕、不发弹幕，游客可连，登录后独轮车单用户识别才完整。
+
+## V0.3 进度（录制中心与全程录制引擎，已实现并完成实机验收）
+
+实现依据：`limoclip_v0_3.md`（V0.3 起验收口径以该文档为准；`code_artifact.md` 的 V0.3 段落是早期设想，环形缓冲 / NAS 归档 / 手动转 MP4 已确认砍掉）。
+
+- [x] Step 1：Core 录制契约（`RecordingTarget` / `RecordingSession` / `RecordingStatus` / `RecordingProgress` / 两个仓储接口 / `IFullStreamRecorder` / `IHighlightEventEnricher`）+ `LiveMonitor.Media`、`LiveMonitor.Media.Tests`（sln 现 14 个工程）
+- [x] Step 2：Data 新增 `RecordingTargets` / `RecordingSessions` 表、`HighlightEvents` 迁移 `RecordingSessionId` / `RecordingOffsetMs`（`PRAGMA user_version=4`）、两个仓储与迁移测试
+- [x] Step 3：`ProcessJobGuard`（Job Object `KILL_ON_JOB_CLOSE`）、`FfmpegArgumentBuilder`、`FfmpegProgressParser`、`FfmpegLocator`、`FfmpegFullRecorder`（`-c copy` .mkv、stdin `q` 优雅停录、`-progress pipe:1` 首帧锚点）、`DanmakuJsonlRecorder`（meta + dm 行）
+- [x] Step 4：`RecordingManager`（手动 / 自动录制状态机、原画画质、断流退避重试、30s 卡死判定、崩溃恢复、`RecordingHighlightTracker` 高能绑定 SessionId / Offset、60s 开播轮询、删除记录连文件删除）
+- [x] Step 5：录制中心 UI（顶栏「📺 监控工作区 / ⏺ 录制中心」切换不销毁 Dock 与播放器；全局目录、逐房间自动录制、立即开录 / 停止、实时时长 / 码率 / 大小 / 弹幕 / 高能、历史列表、删除确认弹窗）+ `AppServices` 接线 + ffmpeg 打包复制
+- [x] Step 6：实机验收（2026-11-23，B站 6650029 / 7734200）：0 路播放时 2 路录制持续写入 mkv + jsonl；停录后 mkv 可播（ffmpeg 解码 exit=0）；强杀宿主后 ffmpeg 0.23s 内全部退出且文件可播；重启后未收尾会话标 Failed 并保留文件大小
+- 测试：Data 35 / Platforms 120 / Danmaku 98 / Media 95 / Desktop 74 = **422 全绿**；构建 0 错误
+- 实机问题修复：静态 ffmpeg 在 Windows 注册证书库失败导致 HTTPS 拉流 `I/O error` → 显式传 `-ca_file tools\cacert.crt`；录制中心实时指标不刷新（`RecordingCenterViewModel.InitializeAsync` 未被调用）；jsonl 中文被 `\uXXXX` 转义
 
 ## 当前进度
 

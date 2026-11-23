@@ -1,4 +1,7 @@
-# 直播监控与自动切片应用 — 技术架构与接口设计文档（v1.4，2026-11-22）
+# 直播监控与自动切片应用 — 技术架构与接口设计文档（v1.5，2026-11-23）
+
+> 版本说明：v1.5 按 V0.3 实施口径修订——**环形缓冲、本地→NAS/云盘异步归档与 `rclone`、手动转 MP4 已确认取消**；录制能力为独立录制中心 + 全程 `.mkv` 录制 + 同名伴随 `.jsonl`。V0.3 的完整规格、表结构与验收记录以 `limoclip_v0_3.md` 与 `HANDOFF.md` 为准；剪辑台、波形、切片与 ASR 属 V0.4。
+
 
 ## 1. 项目定位与核心架构决策
 
@@ -10,10 +13,10 @@
 2. **高并发（20~30 路）低开销约束**：非焦点窗口默认静音（音频解码常开 `aid=auto`，仅切 `mute`）、单实例缓存为 `demuxer-max-bytes=4M`（高清 8M / 低清 3M）、`demuxer-max-back-bytes=0`，并在高路数紧凑布局下通过滤镜将非焦点画面压至 `15fps`，结合运行时丢帧率动态降级；若 20~30 路压测证明音频解码是瓶颈，再评估退回 `aid=no`。
 3. **预览流、录制流与弹幕展示解耦**：
    * 前端分屏按窗口物理尺寸拉取匹配清晰度（焦点放大时切原画），且多屏默认关闭画面弹幕渲染（支持单窗底部独立开关）。
-   * 后台开启“自动切片”或“全程录制”的直播间独立拉取**原画流**，并强制维持弹幕连接，将过滤后的弹幕连同精确相对时间戳写入伴随文件（`.jsonl` / `.xml`）。
+   * V0.3 起由独立「录制中心」按直播间开启全程录制：录制流独立拉取**原画流**与 Cookie，不受监控清晰度降级影响；同时共享监控侧的单条弹幕 WebSocket（引用计数），将过滤后的弹幕连同相对首帧时间戳写入同名伴随 `.jsonl`。自动切片与剪辑属 V0.4。
 4. **广告处理边界**：YouTube 依赖 `yt-dlp` 直连底层流天然绕过绝大多数网页广告；Twitch 当前保持 **`yt-dlp -j`** 解析 HLS，不剔除服务端 SSAI 广告（V0.1 明确接受该限制）；后续如需去广告，再评估 `streamlink --twitch-disable-ads` 或自定义 M3U8 代理，不在本版范围。支持通过内置 `WebView2` 登录透传账号凭证解锁原画与会员免广告。
-5. **本地落盘 + 异步归档存储**：严禁 FFmpeg 将实时录像流直接写入挂载云盘（防止网络抖动导致录屏中断或损坏）。所有实时录制一律先写本地硬盘，录像结束或切片导出后，由后台异步归档服务通过 SMB / WebDAV / `rclone` 上传至用户指定的 NAS 或云盘。
-6. **主数据与方案解耦**：将“直播间主库”、“窗口布局方案”与“自动切片/录制任务方案”拆分为独立实体并通过多对多关联，配合窗口差量切换（Diff）与后台单路拉流复用（引用计数）。
+5. **本地落盘与录制目录**：全程录制由 FFmpeg 以 `-c copy` 直接写 `.mkv`（崩溃可播），默认目录 `%UserProfile%\Videos\LimoClip`，可按全局或按直播间覆盖；目标目录允许指向 NAS 映射盘，但不做本地→云盘异步归档与 `rclone` 集成（V0.3 已确认取消）。弱网/映射盘抖动由 `-rw_timeout` 与 30 秒无进度判卡死兜底。
+6. **主数据与方案解耦**：将“直播间主库”、“窗口布局方案”与“录制偏好（按直播间 `AutoRecordEnabled` / `CustomSaveDirectory`）”拆分为独立实体，配合窗口差量切换（Diff）与弹幕单路复用（引用计数）。
 7. **三层热更新抗反爬**：海外平台通过自动更新外部 CLI（`yt-dlp`，Twitch/YouTube 共用）跟进社区修复；国内平台抽离为独立插件 DLL，托管在 GitHub/Gitee 仓库并通过 .NET `AssemblyLoadContext` + **Ed25519 数字签名校验**实现免重装热替换（斗鱼/抖音可辅以 `Jint` 热更新签名 JS）。
 
 ---
@@ -28,9 +31,9 @@
 | **视频播放引擎** | `LibMpv.Avalonia` (`libmpv`) | D3D11 硬件解码、原生 FLV/HLS 协议解析、独立音轨与画质控制 |
 | **平台账号登录** | `WebView2` + Windows DPAPI | 内置官方登录窗捕获 Cookie/Token，本机系统级加密持久化 |
 | **多平台流解析** | `yt-dlp` + 国内插件 DLL (+ `Jint`) | Twitch / YouTube 均走 `yt-dlp`；国内四平台走热更新插件；V0.1 不做 Twitch 去广告 |
-| **录制与剪辑引擎** | FFmpeg + `CliWrap` | 环形缓冲/全程录制、无损切割（`-c copy`）、硬件加速弹幕烧录（`nvenc/qsv/amf`） |
-| **语音识别（ASR）** | `Sherpa-ONNX` (SenseVoiceSmall) + OpenAI 兼容 API | 仅对高能推荐片段或框选区间进行离线/云端语音转文字 |
-| **异步存储归档** | SMB / WebDAV / `rclone` (`CliWrap`) | 本地录像与成品切片完成后异步上传至 NAS 或第三方网盘 |
+| **录制与剪辑引擎** | FFmpeg（`Process` 直接调用）+ CliWrap（V0.1 解析） | 全程录制（`-c copy` `.mkv` + 伴随 `.jsonl`）、Windows Job Object 防僵尸；V0.4 再做无损切割与硬件烧录 |
+| **语音识别（ASR）** | `Sherpa-ONNX` (SenseVoiceSmall) + OpenAI 兼容 API | 仅对高能推荐片段或框选区间进行离线/云端语音转文字（V0.4） |
+| **存储归档（V0.3 起移除）** | — | 原 SMB / WebDAV / `rclone` 异步归档已确认取消；录制目录可直接指向 NAS 映射盘 |
 | **本地持久化** | SQLite (`Microsoft.Data.Sqlite`) | 主库、窗口方案、任务方案、高能打点、加密凭证与屏蔽词库（WAL 模式） |
 
 ---
@@ -43,9 +46,11 @@
 LiveMonitor.sln
 ├── src/
 │   ├── LiveMonitor.Core/                # [核心域层] 实体模型、枚举、核心接口、全局配置
-│   │   ├── Entities/                    # LiveRoom, LayoutProfile, LayoutSlot, ClipTaskProfile 等
-│   │   ├── Models/                      # StreamQuality, RoomStatus, DanmakuMessage, HighlightEvent, AsrSegment
-│   │   └── Interfaces/                  # IPlatformProvider, IDanmakuClient, IRingBufferRecorder, IAsrProvider 等
+│   │   ├── Entities/                    # LiveRoom, LayoutProfile, LayoutSlot, RecordingTarget, RecordingSession
+│   │   ├── Models/                      # StreamQuality, RoomStatus, DanmakuMessage, HighlightEvent, RecordingProgress
+│   │   ├── Enums/                       # PlatformType, RecordingStatus 等
+│   │   └── Interfaces/                  # IPlatformProvider, IDanmakuClient, IFullStreamRecorder,
+│   │                                    # IRecordingTargetRepository, IRecordingSessionRepository, IHighlightEventEnricher 等
 │   │
 │   ├── LiveMonitor.Platforms.Common/    # 公共解析：PlatformDefaults / JsonRead / YtDlpRunner
 │   ├── LiveMonitor.Platforms.Bilibili/  # BilibiliProvider（原生 get_info / getRoomPlayInfo）
@@ -53,48 +58,43 @@ LiveMonitor.sln
 │   ├── LiveMonitor.Platforms/           # [平台调度层] PlatformFactory 组合各 Provider
 │   │   └── PlatformFactory.cs           # URL / PlatformType 路由
 │   │
-│   ├── LiveMonitor.Danmaku/             # [弹幕管线与分析层] 单例复用、过滤、落盘、高能检测
-│   │   ├── Filters/
-│   │   │   ├── KeywordFilter.cs         # 本地统一关键词屏蔽
-│   │   │   └── UnicycleFilter.cs        # 独轮车自动识别过滤器（豁免 <=6 字短情绪词）
-│   │   ├── Analyzers/
-│   │   │   └── SlidingWindowDetector.cs # 弹幕密度突增 + 关键词加权检测
-│   │   ├── DanmakuRecorder.cs           # 将过滤后弹幕按相对时间戳写入伴随 .jsonl / .xml
-│   │   └── DanmakuManager.cs            # 按 LiveRoomId 单例复用连接并分发
+│   ├── LiveMonitor.Danmaku/             # [弹幕管线与分析层] 单例复用、过滤、高能检测
+│   │   ├── Filters/                     # KeywordFilter, BilibiliUnicycleFilter
+│   │   ├── Analyzers/                   # SlidingWindowDetector
+│   │   ├── HighlightSettingsStore.cs    # 高能参数持久化
+│   │   ├── DanmakuSessionHandle.cs      # 按会话的引用计数句柄（录制中心复用同一连接）
+│   │   └── DanmakuManager.cs            # 按 (Platform, RoomId) 单例复用连接并分发
 │   │
-│   ├── LiveMonitor.Media/               # [媒体引擎层] 录制、提取、双模式剪辑、波形与归档
-│   │   ├── Recording/
-│   │   │   ├── RecordingManager.cs      # 引用计数单路原画流复用调度器
-│   │   │   ├── FfmpegRecorder.cs        # 支持 RingBuffer（环形）与 FullRecord（全程）双模式
-│   │   │   └── ClipExtractor.cs         # 延迟合并 [T-N, T+M] 分片并切分对应弹幕片段
-│   │   ├── Editing/
-│   │   │   ├── ClipExporter.cs          # 无弹幕版(-c copy) / 有弹幕版(ASS烧录 + 硬件编码)
-│   │   │   └── WaveformService.cs       # 提取音频 PCM 波形 + 弹幕密度热力波形
-│   │   ├── Asr/
-│   │   │   ├── SherpaOnnxAsrProvider.cs # 本地离线 SenseVoiceSmall 识别
-│   │   │   └── OpenAiApiAsrProvider.cs  # 兼容 OpenAI /v1/audio/transcriptions 的免费/云端 API
-│   │   └── Storage/
-│   │       └── ArchiveUploader.cs       # 本地落盘后异步上传 NAS / 网盘（SMB / WebDAV / rclone）
+│   ├── LiveMonitor.Media/               # [媒体引擎层] V0.3 全程录制（V0.4 再扩展剪辑/ASR）
+│   │   └── Recording/
+│   │       ├── RecordingManager.cs      # 录制状态机：手动/自动、轮询、断流重试、崩溃恢复
+│   │       ├── FfmpegFullRecorder.cs    # -c copy 全程 .mkv + stdin q 优雅停录 + 首帧锚点
+│   │       ├── FfmpegArgumentBuilder.cs # headers/UA/rw_timeout/-ca_file/进度管道参数构造
+│   │       ├── FfmpegProgressParser.cs  # 解析 -progress pipe:1（out_time_us/total_size/bitrate）
+│   │       ├── FfmpegLocator.cs         # 定位 ffmpeg 与随包 cacert
+│   │       ├── DanmakuJsonlRecorder.cs  # 同名伴随 .jsonl（meta + dm，相对首帧偏移）
+│   │       ├── RecordingFileNaming.cs   # {时间戳}_#{序号}_{主播}_{房间号}
+│   │       ├── RecordingHighlightTracker.cs # 高能事件绑定 SessionId/Offset（IHighlightEventEnricher）
+│   │       └── ProcessJobGuard.cs       # Windows Job Object（KILL_ON_JOB_CLOSE）
 │   │
 │   ├── LiveMonitor.Data/                # [数据持久层] SQLite WAL 初始化与仓储实现
-│   │   ├── SqliteConnectionFactory.cs
-│   │   └── Repositories/
+│   │   ├── LiveMonitorDatabase.cs
+│   │   └── Repositories/                # Room/LayoutProfile/HighlightEvent/RecordingTarget/RecordingSession 等
 │   │
-│   └── LiveMonitor.Desktop/             # [表现层] Avalonia 桌面端主程序（当前 V0.1 共 9 个项目；V0.4 独立插件化时再把平台项目编译为 Provider.*.dll）
-│       ├── Controls/                    # MpvPlayerView, DanmakuOverlay, ClipTimelineView
-│       ├── Services/                    # WorkspacePlayerManager (Diff), PerformanceMonitor, WebView2Login
-│       ├── ViewModels/
-│       └── Views/
+│   └── LiveMonitor.Desktop/             # [表现层] Avalonia 桌面端主程序
+│       ├── Controls/                    # MpvPlayerView, DanmakuOverlay
+│       ├── Services/                    # WorkspacePlayerManager (Diff), PerformanceMonitor, WebView2Login, AppServices
+│       ├── ViewModels/                  # MainWindowViewModel, RecordingCenter/Target/History 等
+│       └── Views/                       # MainWindow, SettingsWindow, RecordingCenterView, 确认弹窗等
 │
 └── tools/                               # 外部依赖目录（支持独立自动更新）
-    ├── cacert.crt                       # mpv 访问 B站/HTTPS 所需 CA bundle
+    ├── cacert.crt                       # 随包 CA bundle（ffmpeg HTTPS 拉流与 mpv 共用）
     ├── ffmpeg/
-    │   └── ffmpeg.exe
+    │   └── ffmpeg.exe                   # V0.3 起为硬依赖，构建时复制到输出目录
     ├── libmpv-2.dll
     ├── mpv/
     │   └── mpv.exe
-    ├── yt-dlp.exe
-    └── rclone.exe                       # 可选：用于云盘异步归档
+    └── yt-dlp.exe
 ```
 
 ---
@@ -144,32 +144,41 @@ public class LayoutSlot
 }
 ```
 
-### 4.3 录制与自动切片任务方案（Clip Task Profile）
+### 4.3 录制偏好与录制会话（V0.3 实际实体）
+
+V0.3 起按直播间保存录制偏好；录制会话独立于直播间生命周期——删除直播间时 `LiveRoomId` 置空、历史与文件保留，重新添加同一 `(Platform, RoomId)` 后仍可回看。原 `ClipTaskProfile` / `RecordMode.RingBuffer` 设计已废弃（切片与剪辑属 V0.4）。
+
 ```csharp
 namespace LiveMonitor.Core.Entities;
 
-public enum RecordMode { RingBuffer, FullRecord }
-
-public class ClipTaskProfile
+public class RecordingTarget
 {
-    public Guid Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public bool IsEnabled { get; set; }
-    public RecordMode Mode { get; set; } = RecordMode.RingBuffer; // 环形缓冲切片 或 全程录制+高能打点
-    public int BeforeSeconds { get; set; } = 120;                 // 高能往前保留秒数 N
-    public int AfterSeconds { get; set; } = 60;                   // 高能往后保留秒数 M
-    public double DensityMultiplier { get; set; } = 3.0;          // 弹幕密度触发倍数
-    public string KeywordsJson { get; set; } = "[]";
-    public string LocalStagingDirectory { get; set; } = string.Empty; // 实时录制本地暂存目录（强制本地盘）
-    public string? RemoteArchiveTarget { get; set; }              // 可选：异步归档目标（SMB/WebDAV/rclone 路径）
-    public bool DeleteLocalAfterArchive { get; set; } = false;
-    public List<ClipTaskTarget> Targets { get; set; } = [];
+    public Guid LiveRoomId { get; set; }             // 主键，外键 → LiveRooms（级联删除）
+    public bool AutoRecordEnabled { get; set; }      // 开播后自动录制
+    public string? CustomSaveDirectory { get; set; } // 覆盖全局目录（可指向 NAS 映射盘）
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
-public class ClipTaskTarget
+public enum RecordingStatus { Starting = 0, Recording = 1, Stopping = 2, Completed = 3, Failed = 4 }
+
+public class RecordingSession
 {
-    public Guid ClipTaskProfileId { get; set; }
-    public Guid LiveRoomId { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? LiveRoomId { get; set; }            // 删直播间后置空（ON DELETE SET NULL）
+    public PlatformType Platform { get; set; }
+    public string RoomId { get; set; } = string.Empty;          // 平台原始房间号，用于历史回看
+    public string RoomDisplayName { get; set; } = string.Empty; // 快照，如 "#1 晚风游戏室"
+    public string StreamTitle { get; set; } = string.Empty;
+    public RecordingStatus Status { get; set; } = RecordingStatus.Starting;
+    public string VideoFilePath { get; set; } = string.Empty;   // .mkv
+    public string DanmakuFilePath { get; set; } = string.Empty; // .jsonl
+    public DateTime StartedAt { get; set; } = DateTime.UtcNow;  // 首帧锚点后校准
+    public DateTime? EndedAt { get; set; }
+    public double DurationSeconds { get; set; }
+    public long FileSizeBytes { get; set; }
+    public int DanmakuCount { get; set; }
+    public int HighlightCount { get; set; }
+    public string? ErrorMessage { get; set; }
 }
 ```
 
@@ -265,51 +274,50 @@ public interface IHighlightDetector
 }
 ```
 
-### 5.3 录制、双模式导出、ASR 与异步归档接口
+### 5.3 录制引擎接口（V0.3 实际）与 V0.4 预留接口
+
+> V0.2 侧实际契约以代码为准：`DanmakuMessage` 含 `Platform` 字段，弹幕客户端事件为 `MessageReceived` / `Disconnected`（非 `OnMessageReceived` / `OnDisconnected`）。`IStorageArchiveService` 随异步归档方案一并移除。
+
 ```csharp
 namespace LiveMonitor.Core.Interfaces;
 
-public record ClipExportOptions(
-    string InputVideoPath,
-    string? CompanionDanmakuPath,
-    string OutputVideoPath,
-    TimeSpan StartTime,
-    TimeSpan EndTime,
-    bool BurnDanmaku = false,              // false = 秒级无损(-c copy); true = 烧录 ASS 字幕并启用硬编
-    bool PreferHardwareEncoder = true      // 自动探测 nvenc / qsv / amf
-);
-
-public record AsrTranscriptSegment(TimeSpan Start, TimeSpan End, string Text);
-
-public interface IMediaEditorService
+/// <summary>全程录制器：FfmpegFullRecorder 实现；测试可注入 fake。</summary>
+public interface IFullStreamRecorder : IAsyncDisposable
 {
-    /// <summary>提取音频 PCM 峰值数组（归一化 0~1）</summary>
-    Task<float[]> ExtractAudioWaveformAsync(string videoPath, int sampleCount, CancellationToken ct = default);
-
-    /// <summary>读取伴随弹幕文件，按时间桶聚合生成弹幕密度热力曲线（归一化 0~1）</summary>
-    Task<float[]> ExtractDanmakuDensityAsync(string danmakuFilePath, TimeSpan totalDuration, int bucketCount, CancellationToken ct = default);
-
-    /// <summary>导出无弹幕版（无损秒切）或有弹幕版（硬编烧录）</summary>
-    Task<string> ExportClipAsync(ClipExportOptions options, IProgress<double>? progress = null, CancellationToken ct = default);
+    event Action<DateTimeOffset>? OnFirstFrameAnchored;          // 首帧锚点（-progress 首个 out_time_us>0）
+    event Action<TimeSpan, long, double>? OnProgressUpdated;      // 时长 / 已写字节 / 码率 kbps
+    event Action<int, string?>? OnExited;                         // 退出码 / stderr 尾部摘要
+    Task StartAsync(StreamQuality sourceQuality, string outputMkvPath, CancellationToken ct = default);
+    Task StopGracefullyAsync(TimeSpan timeout);                   // stdin 'q'，超时 Kill(entireProcessTree)
 }
 
-public interface IAsrProvider
+/// <summary>高能事件在广播/落盘前同步补全录制会话绑定（无阻塞、不抛）。</summary>
+public interface IHighlightEventEnricher
 {
-    string ProviderName { get; }
-    /// <summary>仅对指定片段音频执行语音转写（禁止对数小时全程录像直接调用）</summary>
-    Task<IReadOnlyList<AsrTranscriptSegment>> TranscribeSegmentAsync(
-        string videoOrAudioPath,
-        TimeSpan startTime,
-        TimeSpan endTime,
-        CancellationToken ct = default);
+    HighlightEvent Enrich(HighlightEvent highlightEvent);
 }
 
-public interface IStorageArchiveService
+public interface IRecordingTargetRepository
 {
-    /// <summary>录像结束或导出完成后，异步上传至 NAS / 云盘并在校验通过后按需清理本地文件</summary>
-    Task ArchiveAsync(string localFilePath, string remoteTarget, bool deleteLocalOnSuccess, CancellationToken ct = default);
+    Task<IReadOnlyList<RecordingTarget>> GetAllAsync(CancellationToken ct = default);
+    Task<RecordingTarget?> GetAsync(Guid liveRoomId, CancellationToken ct = default);
+    Task UpsertAsync(RecordingTarget target, CancellationToken ct = default);
+    Task DeleteAsync(Guid liveRoomId, CancellationToken ct = default);
+}
+
+public interface IRecordingSessionRepository
+{
+    Task AddAsync(RecordingSession session, CancellationToken ct = default);
+    Task UpdateAsync(RecordingSession session, CancellationToken ct = default);
+    Task<RecordingSession?> GetByIdAsync(Guid id, CancellationToken ct = default);
+    Task<IReadOnlyList<RecordingSession>> GetRecentAsync(int limit = 200, CancellationToken ct = default);
+    Task<IReadOnlyList<RecordingSession>> GetByRoomAsync(PlatformType platform, string roomId, int limit = 100, CancellationToken ct = default);
+    Task<IReadOnlyList<RecordingSession>> GetUnfinishedAsync(CancellationToken ct = default);
+    Task DeleteAsync(Guid id, CancellationToken ct = default);
 }
 ```
+
+V0.4 预留（剪辑台 / 波形 / 双模式导出 / ASR，当前未实现）：`ClipExportOptions`、`IMediaEditorService`（音频波形 / 弹幕密度 / 导出）、`IAsrProvider` 保持不变。
 
 ---
 
@@ -327,8 +335,8 @@ B站独轮车过滤管线必须前置在 `IHighlightDetector` 与弹幕落盘之
 * **硬性豁免**：长度 $\le 6$ 字的短情绪词（如 `666`、`？？？`、`哈哈哈`、`神回`）绝不参与同一账号复读拦截，保护高能切片检测准确度。
 
 ### 6.3 弹幕波形、全程录制打点与双模式导出
-* **弹幕密度波形**：剪辑台将音频波形与 5 秒时间桶的弹幕密度热力曲线叠加显示，即使游戏 BGM 铺满也能一眼定位高能波峰。
-* **全程录制模式**：去掉 `-segment_wrap` 滚动覆盖参数，采用 `.ts` 或 `fragmented mp4` / `.mkv` 持续写入防断电损坏；后台高能检测器将 `[T-N, T+M]` 存为标记区间，在工作台时间轴高亮展示。
+* **全程录制模式（V0.3 已实现）**：FFmpeg `-c copy -f matroska` 直接写 `.mkv`（不重编码、崩溃可播），通过 stdin `q` 优雅收尾写索引，Windows Job Object 保证宿主退出时无僵尸 ffmpeg；同名 `.jsonl` 写过滤后弹幕（首行 meta，后续 dm，`offsetMs` 相对首帧且误差 ≤2s）。后台高能检测器通过 `IHighlightEventEnricher` 给事件绑定 `RecordingSessionId` / `RecordingOffsetMs` 后入库，供 V0.4 剪辑台定位片段。
+* **弹幕密度波形（V0.4）**：剪辑台将音频波形与 5 秒时间桶的弹幕密度热力曲线叠加显示。
 * **ASR 触发边界**：仅对高能推荐片段或用户在时间轴手动框选的区间截取音频送入 `IAsrProvider`（离线 `Sherpa-ONNX` SenseVoiceSmall 或用户自配 OpenAI 兼容免费 API），避免对长录播造成算力与额度浪费。
 * **双版导出**：无弹幕版走 `-c copy` 秒级无损导出；有弹幕版将伴随弹幕转为 `.ass` 后调用 FFmpeg 硬件编码器（`h264_nvenc` / `h264_qsv` / `h264_amf`）加速烧录。
 
@@ -342,7 +350,7 @@ B站独轮车过滤管线必须前置在 `IHighlightDetector` 与弹幕落盘之
    * **签名脚本层**：针对斗鱼、抖音高频换壳的前端混淆签名，由插件内置 `Jint` 加载热更新的 `.js` 签名脚本。
 
 ### 6.5 存储安全与高并发账号风控边界
-* **本地先写、异步归档**：实时录像流强制落盘至本地硬盘（严禁直写挂载云盘），结束后由 `ArchiveUploader` 异步传输至 NAS/云盘。
+* **本地落盘与映射盘**：全程录像直接写入目标目录（默认 `%UserProfile%\Videos\LimoClip`，可全局或按直播间覆盖，允许指向 NAS 映射盘）；不做本地→云盘异步归档与 `rclone` 集成。弱网/映射盘抖动由 `-rw_timeout 15s` + 30 秒无进度判卡死兜底；强杀宿主由 Job Object 保证 ffmpeg 无残留。
 * **账号风控分级**：20~30 路高并发监控时，仅焦点原画流与后台原画录制流携带绑定 Cookie，其余低画质监控小窗默认走游客态拉流，降低单账号高频并发触发风控的概率。
 
 ---
@@ -353,5 +361,5 @@ B站独轮车过滤管线必须前置在 `IHighlightDetector` 与弹幕落盘之
 | :--- | :--- | :--- |
 | **V0.1 多屏监控室** | `Avalonia` + `Dock.Avalonia` + `LibMpv.Avalonia`；B站 + Twitch（`yt-dlp` 解析，V0.1 不去广告）；主库、窗口方案 Diff 切换、平铺自由调大小、`WebView2` 登录、屏蔽词与独轮车开关配置。 | 常规 6~9 路稳定挂机无泄漏；**20~30 路低功耗（`15fps` + 静音常开 `aid=auto`）极限压测**摸清硬解拐点。 |
 | **V0.2 弹幕引擎与高能空跑** | 落地 B站 + Twitch 实时弹幕客户端、`DanmakuManager` 单例复用、关键词过滤与 **B站独轮车过滤**（Twitch 不做独轮车）、分屏独立弹幕开关与 `SlidingWindowDetector` 高能打点日志（先不录屏）。 | 验证多路弹幕海下 UI 帧率（评估是否回退 `libass`）、B站独轮车拦截准确率与高能密度阈值调优。 |
-| **V0.3 录制引擎与异步归档** | 落地 `RecordingManager`（引用计数单路复用）、`FfmpegRecorder`（环形缓冲 + 全程录制）、伴随弹幕文件落盘、高能自动切片提取以及本地→NAS/云盘异步归档。 | 验证预览流与原画录制解耦、全程录制抗断电完整性、磁盘 I/O 与无僵尸进程清理。 |
-| **V0.4 剪辑台、ASR 与全平台热更新** | 落地音轨+弹幕密度双波形时间轴、双模式导出（无损无弹幕 / 硬编有弹幕）、高能片段 ASR（`Sherpa-ONNX` + 云端 API）；拆出国内独立插件 DLL 热更新体系并补齐抖音、斗鱼、虎牙、YouTube。 | 完成“监控 → 弹幕高能推荐 → 语音预览 → 双版导出 → 云端归档”全链路闭环与免重装热更新验证。 |
+| **V0.3 录制引擎与录制中心** | 新增 `LiveMonitor.Media`：`RecordingManager`（手动/自动录制状态机、60s 开播轮询、断流分段退避、崩溃恢复）、`FfmpegFullRecorder`（`-c copy` `.mkv` + stdin `q` 优雅停录 + 首帧锚点）、`DanmakuJsonlRecorder`（同名伴随 `.jsonl`）、`RecordingHighlightTracker`（高能绑定 SessionId/Offset）、Windows Job Object 防僵尸；Desktop 录制中心（全局/独立目录、自动录制、实时指标、历史录像、删除确认）。 | 已验收：0 路播放时多路录制持续写入、停录 `.mkv` 可播（ffmpeg 解码 exit=0）、强杀宿主后 ffmpeg ≤1s 内终止、重启后未收尾会话标 Failed。**环形缓冲 / 异步归档 / 手动 MP4 已确认取消。** |
+| **V0.4 剪辑台、ASR 与全平台热更新** | 落地音轨+弹幕密度双波形时间轴、双模式导出（无损无弹幕 / 硬编有弹幕）、高能片段 ASR（`Sherpa-ONNX` + 云端 API）；拆出国内独立插件 DLL 热更新体系并补齐抖音、斗鱼、虎牙、YouTube。 | 完成“监控 → 弹幕高能推荐 → 语音预览 → 双版导出”全链路闭环与免重装热更新验证。 |
