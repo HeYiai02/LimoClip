@@ -98,13 +98,14 @@ public sealed class ProvidersManifestTests
     }
 
     [Fact]
-    public void Validate_EmptyPlugins_ReportsError()
+    public void Validate_EmptyPlugins_IsAllowed()
     {
         var manifest = ProvidersManifest.Parse(BuildManifestJson(pluginsJson: "[]"));
 
         var errors = manifest.Validate();
 
-        Assert.Contains(errors, e => e.Contains("没有任何插件条目"));
+        Assert.Empty(errors);
+        Assert.Empty(manifest.Plugins);
     }
 
     [Fact]

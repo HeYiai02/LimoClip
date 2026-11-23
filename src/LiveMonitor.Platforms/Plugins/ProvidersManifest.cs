@@ -70,11 +70,7 @@ public sealed class ProvidersManifest
             errors.Add($"不支持的 manifestVersion：{ManifestVersion}（当前支持 {SupportedManifestVersion}）。");
         }
 
-        if (Plugins.Count == 0)
-        {
-            errors.Add("manifest 中没有任何插件条目。");
-        }
-
+        // 允许 plugins 为空数组：表示当前没有发布任何插件更新（主程序可继续使用内置平台）。
         var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < Plugins.Count; i++)
         {

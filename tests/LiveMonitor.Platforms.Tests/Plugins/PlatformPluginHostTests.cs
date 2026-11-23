@@ -223,6 +223,30 @@ public sealed class PlatformPluginHostTests
         return (seed, entry);
     }
 
+    [Fact]
+    public void RegisterBuiltIn_PluginOnlyPlatform_RegistersProviderAndDanmakuOverride()
+    {
+        var factory = new PlatformFactory(new IPlatformProvider[] { new FakeProvider(PlatformType.Bilibili, "bili:") });
+        var danmakuFactory = new DanmakuClientFactory();
+        var root = CreateTempRoot();
+        try
+        {
+            var seed = PluginTestKeys.NewSeed();
+            using var host = CreateHost(root, factory, danmakuFactory, seed, hasActiveTasks: static () => false);
+
+            host.RegisterBuiltIn(new FakePlugin(PlatformType.YouTube, "9.9.9"));
+
+            var provider = factory.GetProvider("fake:live-1");
+            Assert.Equal(PlatformType.YouTube, provider.Platform);
+            Assert.True(provider.CanHandle("fake:live-1"));
+            Assert.True(danmakuFactory.HasOverride(PlatformType.YouTube));
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+        }
+    }
+
     private static PlatformPluginHost CreateHost(
         string root,
         PlatformFactory factory,

@@ -86,6 +86,27 @@ public sealed class PlatformPluginHost : IDisposable
         lock (_sync)
         {
             _builtInVersions[plugin.Platform] = plugin.Version;
+
+            // 纯插件平台（如 YouTube）没有 Platforms.CreateDefault 内置 Provider：
+            // 把内置插件登记进工厂，保证「安装即支持」；B 站/Twitch 已有 Provider，不重复替换。
+            if (!HasPlatformProvider(plugin.Platform))
+            {
+                _platformFactory.ReplaceProvider(plugin.CreateStreamProvider(_httpClient, _ytDlpPath));
+                _danmakuFactory.RegisterOrReplace(plugin.Platform, plugin.CreateDanmakuClient);
+            }
+        }
+    }
+
+    private bool HasPlatformProvider(PlatformType platform)
+    {
+        try
+        {
+            _platformFactory.GetProvider(platform);
+            return true;
+        }
+        catch (NotSupportedException)
+        {
+            return false;
         }
     }
 
