@@ -32,4 +32,20 @@ public static class AppSettingKeys
 
     /// <summary>自动录制的开播轮询间隔（秒），默认 60；取值 10~600。</summary>
     public const string RecordingPollIntervalSeconds = "RecordingPollIntervalSeconds";
+
+    // V0.5-A 剪辑台云端 ASR（设置页持久化；API Key 经 DpapiCookieProtector 加密）
+    /// <summary>ASR 预设 ID：siliconflow_cn / siliconflow_global / groq / custom。</summary>
+    public const string AsrProviderPreset = "AsrProviderPreset";
+
+    /// <summary>ASR 转写接口完整地址（OpenAI 兼容 /v1/audio/transcriptions）。</summary>
+    public const string AsrEndpoint = "AsrEndpoint";
+
+    /// <summary>ASR 模型名，如 FunAudioLLM/SenseVoiceSmall、whisper-large-v3-turbo。</summary>
+    public const string AsrModel = "AsrModel";
+
+    /// <summary>Windows DPAPI 加密后的 API Key（Base64），只能由 Data 层 DpapiCookieProtector 解密。</summary>
+    public const string AsrEncryptedApiKey = "AsrEncryptedApiKey";
+
+    /// <summary>识别语言；默认 auto（自动检测），与 OpenAI 兼容接口的 language 参数对应。</summary>
+    public const string AsrLanguage = "AsrLanguage";
 }
