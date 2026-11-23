@@ -25,6 +25,75 @@ public sealed class HighlightEventRepositoryTests
         command.CommandText =
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_HighlightEvents_TriggerTime';";
         Assert.Equal(1L, Convert.ToInt64(await command.ExecuteScalarAsync()));
+
+        command.CommandText =
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_HighlightEvents_RecordingSessionId';";
+        Assert.Equal(1L, Convert.ToInt64(await command.ExecuteScalarAsync()));
+    }
+
+    [Fact]
+    public async Task GetByRecordingSession_ReturnsOnlyBoundEvents_OrderedByOffset()
+    {
+        await using var test = await TestDatabase.CreateAsync();
+        var repository = new HighlightEventRepository(test.Database);
+
+        var sessionId = Guid.NewGuid();
+        var otherSessionId = Guid.NewGuid();
+
+        await repository.AddAsync(new HighlightEvent(
+            PlatformType.Bilibili, "room-1", BaseTime.AddMinutes(5), 9.0, 2.0, "second")
+        {
+            RecordingSessionId = sessionId,
+            RecordingOffsetMs = 125_000
+        });
+        await repository.AddAsync(new HighlightEvent(
+            PlatformType.Bilibili, "room-1", BaseTime, 6.0, 1.0, "first")
+        {
+            RecordingSessionId = sessionId,
+            RecordingOffsetMs = 30_000
+        });
+        await repository.AddAsync(new HighlightEvent(
+            PlatformType.Bilibili, "room-1", BaseTime.AddMinutes(9), 3.0, 1.0, "other")
+        {
+            RecordingSessionId = otherSessionId,
+            RecordingOffsetMs = 1_000
+        });
+        // 未绑定会话的实况高能事件不应出现在剪辑台推荐里。
+        await repository.AddAsync(new HighlightEvent(
+            PlatformType.Douyu, "room-2", BaseTime.AddMinutes(12), 2.0, 1.0, "unbound"));
+
+        var events = await repository.GetByRecordingSessionAsync(sessionId);
+        Assert.Equal(2, events.Count);
+        Assert.Equal(new[] { 30_000L, 125_000L }, events.Select(item => item.RecordingOffsetMs ?? -1).ToArray());
+        Assert.Equal("first", events[0].TriggerReason);
+        Assert.Equal("second", events[1].TriggerReason);
+        Assert.All(events, item => Assert.Equal(sessionId, item.RecordingSessionId));
+    }
+
+    [Fact]
+    public async Task GetByRecordingSession_RespectsLimit_AndHandlesEmptyInputs()
+    {
+        await using var test = await TestDatabase.CreateAsync();
+        var repository = new HighlightEventRepository(test.Database);
+
+        var sessionId = Guid.NewGuid();
+        for (var i = 0; i < 5; i++)
+        {
+            await repository.AddAsync(new HighlightEvent(
+                PlatformType.Bilibili, "room-1", BaseTime.AddSeconds(i), 1.0 + i, 0.5, $"r{i}")
+            {
+                RecordingSessionId = sessionId,
+                RecordingOffsetMs = i * 1_000
+            });
+        }
+
+        var limited = await repository.GetByRecordingSessionAsync(sessionId, limit: 2);
+        Assert.Equal(2, limited.Count);
+        Assert.Equal(new[] { 0L, 1_000L }, limited.Select(item => item.RecordingOffsetMs ?? -1).ToArray());
+
+        Assert.Empty(await repository.GetByRecordingSessionAsync(Guid.Empty));
+        Assert.Empty(await repository.GetByRecordingSessionAsync(sessionId, limit: 0));
+        Assert.Empty(await repository.GetByRecordingSessionAsync(Guid.NewGuid()));
     }
 
     [Fact]

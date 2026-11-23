@@ -294,6 +294,22 @@ public sealed class InMemoryHighlightEventRepository : IHighlightEventRepository
         }
     }
 
+    public Task<IReadOnlyList<HighlightEvent>> GetByRecordingSessionAsync(
+        Guid sessionId,
+        int limit = 500,
+        CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            IReadOnlyList<HighlightEvent> result = _events
+                .Where(highlightEvent => highlightEvent.RecordingSessionId == sessionId)
+                .OrderBy(highlightEvent => highlightEvent.RecordingOffsetMs ?? 0)
+                .Take(Math.Max(limit, 0))
+                .ToArray();
+            return Task.FromResult(result);
+        }
+    }
+
     public Task ClearAsync(CancellationToken ct = default)
     {
         lock (_gate)

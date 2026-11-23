@@ -170,6 +170,15 @@ public sealed class LiveMonitorDatabase
         await EnsureColumnAsync(connection, "HighlightEvents", "RecordingOffsetMs",
             "INTEGER", ct).ConfigureAwait(false);
 
+        // 旧库的 HighlightEvents 在补列之前不能建该索引，因此放在 EnsureColumn 之后。
+        await using (var sessionIndex = connection.CreateCommand())
+        {
+            sessionIndex.CommandText =
+                "CREATE INDEX IF NOT EXISTS IX_HighlightEvents_RecordingSessionId " +
+                "ON HighlightEvents(RecordingSessionId);";
+            await sessionIndex.ExecuteNonQueryAsync(ct);
+        }
+
         await using (var version = connection.CreateCommand())
         {
             version.CommandText = "PRAGMA user_version = 4;";

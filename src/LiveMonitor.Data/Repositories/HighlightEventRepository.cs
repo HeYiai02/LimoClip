@@ -94,6 +94,39 @@ public sealed class HighlightEventRepository : IHighlightEventRepository
         return events;
     }
 
+    public async Task<IReadOnlyList<HighlightEvent>> GetByRecordingSessionAsync(
+        Guid sessionId,
+        int limit = 500,
+        CancellationToken ct = default)
+    {
+        if (sessionId == Guid.Empty || limit <= 0)
+        {
+            return Array.Empty<HighlightEvent>();
+        }
+
+        var events = new List<HighlightEvent>();
+
+        await using var connection = _database.OpenConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT {SelectColumns}
+            FROM HighlightEvents
+            WHERE RecordingSessionId = $sessionId
+            ORDER BY COALESCE(RecordingOffsetMs, 0), TriggerTime
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$sessionId", SqliteValues.ToDb(sessionId));
+        command.Parameters.AddWithValue("$limit", limit);
+
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            events.Add(ReadEvent(reader));
+        }
+
+        return events;
+    }
+
     public async Task ClearAsync(CancellationToken ct = default)
     {
         await using var connection = _database.OpenConnection();
