@@ -52,6 +52,7 @@ public sealed class HuyaProvider : IPlatformProvider
     {
         var candidate = NormalizeRoomToken(roomId);
         var snapshot = await _api.GetRoomAsync(candidate, ct).ConfigureAwait(false);
+
         if (!snapshot.IsLive)
         {
             return RoomStatus.Offline(snapshot.RoomId, PlatformType.Huya, snapshot.RoomName, snapshot.Nick);
