@@ -1,10 +1,10 @@
-# LiveMonitor 交接（截至 V0.5-C Step9：六平台联调 + v0.5.0 打包；含本机运行规避方案）
+# LiveMonitor 交接（截至 V0.5-D：断流重连状态 + 六平台登录；V0.5-A/B/C 已完成并打包；含本机运行规避方案）
 
 ## 状态
 
-- 分支 `main`；**当前 HEAD 为 V0.5-C Step7 收尾提交（登录后可见 `git log` 顶部；斗鱼插件提交见文末「V0.5-C 增量（Step7 斗鱼）」，其后为本次文档提交）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避、波形修复、产品侧加固、V0.5-B 六次提交、V0.5-C Step6 两次提交、Step7 两次提交，提交清单见文末各节。
+- 分支 `main`；**当前 HEAD 为 V0.5-D 收尾提交（登录后可见 `git log` 顶部）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避、波形修复、产品侧加固、V0.5-B 六次提交、V0.5-C Step6/Step7/Step8/Step9 各两次提交、V0.5-D 两次功能提交，提交清单见文末各节。
 - 构建：`dotnet build LiveMonitor.sln --no-restore` → **0 错误**，8~14 警告（MSB3277 / NU1803 / NU1900 等，均为本机环境既有告警，无新增代码告警）。
-- 测试：Data 37 / Platforms **437** / Danmaku 98 / Media **168** / Desktop 94 = **834 全绿**（V0.4 基线 471；V0.5-A +7 Media、+18 Desktop；产品侧加固 +17 Media；V0.5-B +125 Platforms、+2 Media；V0.5-C Step6 虎牙 +65 Platforms、Step7 斗鱼 +63 Platforms、Step8 抖音 +64 Platforms、http 流 ca_file 修复 +2 Media）。
+- 测试：Data 37 / Platforms **437** / Danmaku 98 / Media **168** / Desktop **106** = **846 全绿**（V0.4 基线 471；V0.5-A +7 Media、+18 Desktop；产品侧加固 +17 Media；V0.5-B +125 Platforms、+2 Media；V0.5-C Step6 虎牙 +65 Platforms、Step7 斗鱼 +63 Platforms、Step8 抖音 +64 Platforms、http 流 ca_file 修复 +2 Media；V0.5-D +2 断流状态文案 +6 六平台登录配置）。
 - 验收：V0.4 GUI 端到端通过（脚本 `.cache/v04-acceptance2.ps1`，证据 `.cache/v04b-*.png`）；V0.5-A 完成真实 API 验证（55s 音频约 11s 返回，见「V0.5-A 增量」）；本机运行规避后完成真实 GUI 录制/打开目录/ASR 验证；**V0.5-B 阶段验收通过**（YouTube 添加/监控/录制 49.97s（含音频）/剪辑波形/双版导出（含音频）/ASR，见「V0.5-B 增量」）；V0.5-C Step6 虎牙：插件、协议单测与真实探针（拉流状态 + 20s 内 86 条弹幕）通过，但本机为海外出口、虎牙 CDN 对海外网络限流，GUI 播放/录制未能完整验证（见「V0.5-C 增量」）；V0.5-C Step7 斗鱼：插件、协议单测、真实探针与 **GUI 全链路验收通过**（真实录制 56.8s/11.4MB 含音频 + 72 条弹幕、剪辑台波形与混流、双版导出均含音频，见「V0.5-C 增量（Step7 斗鱼）」）。
 - 实现依据：`limoclip_v0_4.md`（V0.4）、`limoclip_v0_5_asr.md`（V0.5-A/B，已按实现修订 P0 偏差）；`code_artifact.md` 已更新为 v2.1。
 - **V0.5-B 已完成并通过阶段 B 验收；V0.5-C 已全部完成：Step6 虎牙、Step7 斗鱼、Step8 抖音（三个平台插件 + 单测 + 真实探针，斗鱼/抖音 GUI 全链路验收通过；虎牙 GUI 受本机海外网络限流未完整验证）、Step9 六平台联调与 v0.5.0 打包已完成**（`artifacts/LimoClip-v0.5.0-win-x64.zip` 190.58MB，SHA256 `0fda2c4e…1b43ed`，冒烟启动通过）。恢复开发先读本文件「新 session 首条消息」「V0.5-B 增量」「V0.5-C 增量」。多轨 NLE 只评估、不实现。
@@ -152,7 +152,7 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 
 ## 新 session 首条消息（可直接复制）
 
-> 阅读 `HANDOFF.md`、`limoclip_v0_5_asr.md`，先核对 `git log --oneline -8` 与全量测试（build + 五套测试，应为 **834 全绿**）。V0.5-A、V0.5-B、产品侧加固均已完成并验收，V0.5-C 已全部完成（Step6 虎牙、Step7 斗鱼、Step8 抖音、Step9 六平台联调 + v0.5.0 打包），**V0.5 里程碑收尾完成**。恢复开发前先读「V0.5-B 增量」「V0.5-A 增量」与「本机运行限制」；本机运行一律使用仓库启动器 `scripts/refresh-and-run.ps1`（桌面快捷方式也指向它），不要直接运行工作区内 bin 下的 exe。插件签名私钥不在仓库内，需向用户索取或使用环境变量 `LIVEMONITOR_PLUGIN_KEY`。
+> 阅读 `HANDOFF.md`、`limoclip_v0_5_asr.md`，先核对 `git log --oneline -8` 与全量测试（build + 五套测试，应为 **846 全绿**）。V0.5-A、V0.5-B、产品侧加固均已完成并验收，V0.5-C 已全部完成（Step6 虎牙、Step7 斗鱼、Step8 抖音、Step9 六平台联调 + v0.5.0 打包），**V0.5-D 已把「断流误显示未开播」改为重连态并补全六平台登录**。恢复开发前先读「V0.5-B 增量」「V0.5-A 增量」与「本机运行限制」；本机运行一律使用仓库启动器 `scripts/refresh-and-run.ps1`（桌面快捷方式也指向它），不要直接运行工作区内 bin 下的 exe。插件签名私钥不在仓库内，需向用户索取或使用环境变量 `LIVEMONITOR_PLUGIN_KEY`。
 
 ## V0.5-A 增量（2026-11-23）：剪辑台语音识别（ASR）
 
@@ -384,3 +384,37 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 ### 新 session 首条消息（V0.5 收尾后）
 
 - V0.5（A/B/C）已全部完成：编辑台云端 ASR、平台插件热更新底座 + YouTube、虎牙/斗鱼/抖音插件、六平台联调与 v0.5.0 打包。全量测试 **834 全绿**，HEAD 见 `git log` 顶部。下一步可选：发布 v0.5.0 Release、抖音签名脚本离线化、虎牙国内网络复验、多轨 NLE 评估等。
+
+## V0.5-D 增量（2026-11-23）：断流重连状态 + 六平台 WebView2 登录
+
+### 状态
+
+- 用户反馈（当日）：虎牙直播间频繁突然显示「未开播」，但主播仍在播；设置页只能登录 B 站/Twitch，要求补全其余平台。
+- 完成：① 直播流意外中断不再误显示「未开播」，改为「重连中/直播流中断，正在自动重连…」并复用既有退避重连（3/10/30 秒、60 秒复检）；录制侧 ffmpeg 对 http/https 输入加断流重连参数。② 账号设置支持 **B 站 / Twitch / YouTube / 虎牙 / 斗鱼 / 抖音** 六个平台登录（WebView2 登录窗 + Cookie 采集 + DPAPI 加密保存）。
+- 提交：`90e79ac fix(player): 直播流中断显示为「重连中」并自动重连，不再误显示未开播`、`a151a0a feat(settings): 账号设置支持 YouTube/虎牙/斗鱼/抖音 WebView2 登录，补全六平台`。
+- 校验：解决方案 build 0 错误 7 警告；五套测试 **846 全绿**（Desktop 94→106，新增断流状态文案 2 例 + 六平台登录配置 6 例）。
+
+### 实现要点
+
+- 状态模型：`PlayerState` 新增 `Reconnecting`；`MpvPlayerView` 的 EOF 分支不再设 `Offline`，而是 `Reconnecting` +「直播流已中断，正在自动重连…」并触发 `ReconnectRequested`；`ApplyStateVisuals` 对 Reconnecting 显示加载条 +「直播流中断」+「重新连接」按钮。
+- 文案集中：新增 `src/LiveMonitor.Desktop/Player/PlayerStateText.cs`（连接中/直播中/已停止/重连中/播放失败），`WorkspacePlayerManager.OnPlayerStateChanged` 与 `ScheduleFailureRecheck` 统一使用；房间卡片在重连期间显示「重连中」而不是「已停止」，重连等待时显示「直播流已中断，60 秒后自动重试」。
+- 录制韧性：`FfmpegArgumentBuilder.AppendReconnectOptions` 对 http/https 输入追加 `-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2`（视频与分离音频两路；本地文件不加）。
+- 登录配置：`src/LiveMonitor.Desktop/Services/PlatformLoginProfiles.cs` 定义每平台登录页/Cookie 域名/命名 Cookie/是否全量采集/自动捕获标记：B 站（passport + SESSDATA 等 5 个）、Twitch（auth-token 等）、YouTube（accounts.google.com，SID/HSID/SSID/APISID/SAPISID/LOGIN_INFO/__Secure-*）、虎牙/斗鱼/抖音（登录页 + 全量 Cookie 采集）。`WebViewLoginService` 按配置加载登录页并采集（命名平台 1.5 秒自动捕获，全量平台用「我已登录，采集 Cookie」按钮），临时 user-data 目录自动清理。
+- 设置页：平台账号改为 `AccountRowsPanel` 动态生成六行（名称/绑定状态/登录/清除），登录态显示「已绑定（Cookie 已加密保存）」；添加房间提示与插件默认文案同步到六平台。
+
+### 验证证据（GUI，`E:\LimoClip-v05-run`，pid 18088）
+
+- 设置页六平台行齐全：B 站已绑定，其余未绑定；六个「登录」按钮与「清除」按钮存在。
+- 虎牙登录窗：WebView2 正常加载 huya.com，底部「我已登录，采集 Cookie」与提示正常。
+- YouTube 登录窗：加载 accounts.google.com 登录页，提示「登录完成后会自动捕获；若未自动完成，可点击右侧按钮手动采集。」；截图 `.cache/v05d-youtube-login.png`。
+- 断流修复：打开虎牙 `#14 杨齐家丶`，本机海外网络 1 帧后断开，窗格显示「重连中」、「直播流中断」、「直播流已中断，正在自动重连…」与「重新连接」按钮（不再显示未开播）；截图 `.cache/v05d-huya-reconnecting.png`。
+- 录制回归：录制斗鱼 `#15 yyfyyf` 约 15 秒 → 文件 `D:\clipRecord\20261123_155443_#15_yyfyyf_9999.mkv`（10,745,311B，ffprobe h264+aac，19.179s，34 条弹幕，DB Status=3 无错误），确认新增 `-reconnect` 参数被 ffmpeg 正常接受。
+
+### 已知限制 / 后续
+
+- 目前只有 YouTube Provider 会把登录 Cookie 交给 yt-dlp 使用；虎牙/斗鱼/抖音 的 Cookie 已安全保存，但对应 Provider 仍走匿名接口（更高画质/风控通过率需要后续接入 Cookie 请求头）。
+- 虎牙 CDN 对海外 IP 限流仍在，本机只能验证断流重连与登录窗，完整播放/录制需国内网络复验。
+
+### 新 session 首条消息（V0.5-D 后）
+
+- V0.5（A/B/C）已完成并打包 v0.5.0；V0.5-D 已修复「断流误显示未开播」并补全六平台登录，全量测试 **846 全绿**。下一步可选：把虎牙/斗鱼/抖音 Cookie 接入各 Provider 提升画质与风控通过率、发布 v0.5.0 Release、虎牙国内网络复验、多轨 NLE 评估等。
