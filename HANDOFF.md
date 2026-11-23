@@ -7,6 +7,7 @@
 - 测试：Data 37 / Platforms 120 / Danmaku 98 / Media 140 / Desktop 76 = **471 全绿**（2026-11-23；V0.3 基线为 422，本版 +49）。
 - 验收：GUI 端到端通过（脚本 `.cache/v04-acceptance2.ps1`，证据 `.cache/v04b-*.png`）：录制中心 →「✂ 去剪辑」→ 场次加载 → 高能列表 → 预览播放（弹幕回放）→ ±5s/设入出点 → 同时导出两版 → 烧录版弹幕帧抽检。
 - 实现依据：`limoclip_v0_4.md`（V0.4 起以此为准）。ASR、平台热更新、插件热更新、多轨 NLE 属 V0.5 / 后续，本版未做。
+- **V0.5-A 增量（2026-11-23）**：剪辑台语音识别（ASR）已实现并完成构建/测试/GUI 冒烟，详见文末「V0.5-A 增量」；V0.5-B（热更新底座 + YouTube）与 C（虎牙/斗鱼/抖音）未开始。
 
 ## V0.4 已实现内容
 
@@ -86,7 +87,7 @@
 
 ## 已知限制 / 待办（V0.5）
 
-- ASR（文档已留扩展位）、平台/插件热更新（YouTube/抖音/斗鱼/虎牙录制 + 三层热更新）。
+- ASR（V0.5-A 已实现，见下一节）、平台/插件热更新（YouTube/抖音/斗鱼/虎牙录制 + 三层热更新，V0.5-B/C 未开始）。
 - 2h 以上长录像的波形内存/时间轴拖拽未压测（设计已按流式 + 2000 桶 + 缓存；文档验收项待补测）。
 - 硬编路径（nvenc/qsv/amf）本机不可用，仅验证回退 `libx264`；硬编机器需实测导出与探测日志。
 - 无弹幕版 `-c copy` 存在关键帧对齐偏移（1~3s，UI 已提示，属预期）；烧录版为精确重编码。
@@ -147,4 +148,61 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 
 ## 新 session 首条消息（可直接复制）
 
-> 阅读 `HANDOFF.md`、`limoclip_v0_4.md`，先核对 `git log --oneline -6` 与全量测试（build + 五套测试，应为 471 全绿），再按需开始 V0.5（ASR / 平台热更新）或处理「已知限制」中的验收补测项。
+> 阅读 `HANDOFF.md`、`limoclip_v0_5_asr.md`，先核对 `git log --oneline -6` 与全量测试（build + 五套测试，应为 496 全绿），再按需继续 V0.5-B（插件热更新底座 + YouTube）或处理「已知限制」中的验收补测项。
+
+## V0.5-A 增量（2026-11-23）：剪辑台语音识别（ASR）
+
+### 状态
+
+- 实现依据：`limoclip_v0_5_asr.md` §3 + §7 Step 1/2（已按实现修订 P0 偏差：包名、缓存键、`TryAssign`、`CreateDanmakuClient` 可空、ASR 为分区而非 Tab、高能卡片按钮拆分）。
+- 构建：`dotnet build LiveMonitor.sln --no-restore` → **0 错误**；仅既有环境告警（MSB3277 / NU1803 / NU1900 / CS9057 / CS0108 / WFAC010 / AVLN3001 / xUnit2009 等）。
+- 测试：Data 37 / Platforms 120 / Danmaku 98 / Media 147 / Desktop 94 = **496 全绿**（V0.4 基线 471；本增量 +7 Media、+18 Desktop）。
+- 验收：GUI 冒烟脚本 `.cache/v05a-smoke.ps1`（UIAutomation，UTF-8 BOM）通过：剪辑台右侧「🎙 语音识别」面板可见（`尚未识别` / `🎙 识别当前选区`），设置窗新增「语音识别（ASR）」分区（预设/地址/模型/语言/API Key/保存/测试连接）可见；证据 `.cache/v05a-2-clip-studio.png`、`.cache/v05a-3-settings-asr.png`。
+- 未做：V0.5-B（BouncyCastle 验签、PluginLoadContext、providers-manifest、CliUpdater、YouTube 插件、WebView2 登录扩展）、V0.5-C（虎牙/斗鱼/抖音）。
+
+### Core
+
+- `Models/AsrTranscriptSegment.cs`：`record AsrTranscriptSegment(TimeSpan RelativeStart, TimeSpan RelativeEnd, string Text)`。
+- `Models/AsrTranscriptResult.cs`：`record AsrTranscriptResult(TimeSpan ClipStart, TimeSpan ClipEnd, string FullText, IReadOnlyList<AsrTranscriptSegment> Segments, string ProviderLabel, DateTimeOffset CreatedAtUtc)`。
+- `Interfaces/IAsrProvider.cs`：`Task<AsrTranscriptResult> TranscribeSegmentAsync(string videoPath, TimeSpan startTime, TimeSpan endTime, CancellationToken ct = default)`；约定命中缓存不发网络，失败抛 `InvalidOperationException`（消息可直接展示）。
+- `AppSettingKeys`：新增 `AsrProviderPreset` / `AsrEndpoint` / `AsrModel` / `AsrEncryptedApiKey`（DPAPI Base64，仅 Data 层可解密）/ `AsrLanguage`（默认 `auto`）。
+
+### Media（新目录 `src/LiveMonitor.Media/Asr`）
+
+- `OpenAiCompatibleAsrProvider.cs`：仅云端 OpenAI 兼容 `/v1/audio/transcriptions`；ctor `(HttpClient, string ffmpegPath, ProcessJobGuard?, Func<Task<AsrApiConfig?>>, string cacheDirectory)`；支持 4 预设（硅基流动国内/国际、Groq、自定义），非 siliconflow 预设使用 `verbose_json`。
+- 流程：校验参数与配置 → 缓存命中直接返回 → ffmpeg 抽音（`-ss -t -vn -ac 1 -ar 16000 -c:a libmp3lame -b:a 64k`，临时 MP3 进 `ProcessJobGuard.TryAssign`）→ multipart 上传 → `verbose_json` 400 时降级 `json` 重试一次 → 优先 `segments` 否则顶层 `text` 单段 → 写缓存；单段上限 15 分钟。
+- 缓存：`%LocalAppData%/LiveMonitor/cache/asr/{sha256}.asr.json`，键 = `SHA256(Path.GetFullPath|fileSize|lastWriteUtc.Ticks|startMs|endMs|model)`；缓存损坏按未命中重试。
+- 生命周期：`IDisposable` 释放注入的 `HttpClient` 与 `ProcessJobGuard`（组合根直接 new 后由 `AppServices` 接管，见下）。
+
+### Desktop
+
+- `Services/AsrSettingsStore.cs`：4 预设静态表 + `LoadAsync/GetConfigAsync/SaveAsync/TestConnectionAsync`；Key 仅以 DPAPI 密文存储、永不回显；`BuildModelsUrl` 把 `/audio/transcriptions` 换成 `/models` 做连通性测试。
+- `Services/AppServices.cs`：新增 `Asr`（`OpenAiCompatibleAsrProvider`，专用 HttpClient 10 分钟超时、独立 `ProcessJobGuard`、缓存目录）与 `AsrSettings` 属性；`DisposeClipExportResources()` 同时释放 ASR 资源。
+- `Views/SettingsWindow.axaml(.cs)`：单 ScrollViewer 内新增「语音识别（ASR）」分区（预设 ComboBox、接口地址、模型、语言、`PasswordChar` API Key、保存、测试连接、彩色状态与 DPAPI 说明）。
+- `ViewModels/ClipStudioViewModel.cs`：新增 ASR 状态区（`IsAsrRunning` / 状态 / 错误 / 服务商 / 全文 / 范围 / `AsrLines`）、`TranscribeSelectionCommand`（当前 In/Out 选区）、`TranscribeHighlightCommand`（高能位置 −10s ~ +20s）、`ShowHighlightAsrCommand`、`CancelAsrCommand`、`SeekToAsrLine`（`ClipStart + RelativeStart` 绝对定位）、复制/失败回调；全局互斥 + 版本号防陈旧回调，切换视频/场次清空卡片结果。
+- `ViewModels/ClipHighlightItemViewModel.cs`：卡片转写状态（`IsTranscribing/CanTranscribe/AsrResult/AsrError/AsrSummary…`）。
+- `ViewModels/AsrTranscriptLineViewModel.cs`（新）：分段行只读展示模型。
+- `Views/ClipStudioView.axaml(.cs)`：高能卡片 DataTemplate 根改为 `StackPanel`，「跳转」与「🎙 转写」并列（避免嵌套 Button 冒泡）、有结果时显示摘要；右侧新增「🎙 语音识别」面板（识别当前选区/取消/进度/状态/错误/复制文本/逐句列表点击 seek）；剪贴板访问只在 View 层。
+
+### 测试
+
+- Media +7：`OpenAiCompatibleAsrProviderTests`（未配置友好消息、超 15 分钟拒绝、出点≤入点、`verbose_json` 分段+二次调用缓存命中零网络、纯 `text` 回退、400 降级重试、401 错误消息）+ 复用 `TestHttpMessageHandler`。
+- Desktop +18：`AsrSettingsStoreTests` 14（预设/DPAPI 回写/Key 保留与清除/custom/URL 构造/连通性测试/回退已存 Key/401 透传）+ `ClipStudioViewModelTests` 4（无视频提示、选区识别+分句绝对 seek、Provider 异常友好展示、高能卡片识别与二次复用不重复调用）。
+
+### 偏差 / 实现决策（以本文件为准）
+
+1. ASR 做成设置窗内**分区**而非 Tab（现有设置窗无 TabControl，见 `limoclip_v0_5_asr.md` 已修订）。
+2. 缓存键在文档基础上包含 `Path.GetFullPath` 与 `model`（文档已同步）。
+3. Provider 参考代码的 `AddProcess` 改为实际 API `ProcessJobGuard.TryAssign`。
+4. `AsrSettingsStore.TestConnectionAsync` 走 `GET {endpoint 基址}/models`；不暴露 `/models` 的第三方服务会显示失败（不影响真实转写）。
+5. 剪辑台面板常显；卡片已有结果时再次点击只展开到面板、不重复请求（与 Provider 缓存叠加）。
+6. 高能卡片摘要截断 60 字符（ToolTip 显示全文）。
+7. 未接入真实云端 API 手测（本机无 API Key），真实链路留待用户配置 Key 后按验收项验证。
+
+## 提交记录（V0.5-A）
+
+| 提交 | 内容 |
+| :--- | :--- |
+| `feat(asr): 新增 V0.5-A 语音识别领域契约与云端 Provider` | Core 2 模型 + 1 接口 + 5 设置键；`Media/Asr/OpenAiCompatibleAsrProvider`；Media 7 个单测 + `TestHttpMessageHandler` |
+| `feat(desktop): 设置页与剪辑台接入云端语音识别` | `AsrSettingsStore`、AppServices 接线、设置窗 ASR 分区、剪辑台卡片/面板、`AsrTranscriptLineViewModel`、Desktop 18 个测试 |
+| `docs(v0.5-a): 收录 ASR 设计文档并更新 HANDOFF` | `limoclip_v0_5_asr.md`（P0 修订后版）、本文件 |
