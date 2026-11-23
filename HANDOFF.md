@@ -1,10 +1,10 @@
-# LiveMonitor 交接（截至 V0.5-D：断流重连状态 + 六平台登录；V0.5-A/B/C 已完成并打包；含本机运行规避方案）
+# LiveMonitor 交接（截至 V0.5-F：虎牙断流修复（Cookie + 分段录制）；V0.5-A/B/C 已完成并打包；含本机运行规避方案）
 
 ## 状态
 
-- 分支 `main`；**当前 HEAD 为 V0.5-D 收尾提交（登录后可见 `git log` 顶部）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避、波形修复、产品侧加固、V0.5-B 六次提交、V0.5-C Step6/Step7/Step8/Step9 各两次提交、V0.5-D 两次功能提交，提交清单见文末各节。
+- 分支 `main`；**当前 HEAD 为 V0.5-F 收尾提交 `147be90`（虎牙分段录制）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避、波形修复、产品侧加固、V0.5-B 六次提交、V0.5-C Step6/Step7/Step8/Step9 各两次提交、V0.5-D 两次功能提交、V0.5-E 三次提交（虎牙 Cookie/线路/画质、斗鱼+抖音 Cookie、HANDOFF）、V0.5-F 一次提交（分段录制 + 重叠裁剪），提交清单见文末各节。
 - 构建：`dotnet build LiveMonitor.sln --no-restore` → **0 错误**，8~14 警告（MSB3277 / NU1803 / NU1900 等，均为本机环境既有告警，无新增代码告警）。
-- 测试：Data 37 / Platforms **437** / Danmaku 98 / Media **168** / Desktop **106** = **846 全绿**（V0.4 基线 471；V0.5-A +7 Media、+18 Desktop；产品侧加固 +17 Media；V0.5-B +125 Platforms、+2 Media；V0.5-C Step6 虎牙 +65 Platforms、Step7 斗鱼 +63 Platforms、Step8 抖音 +64 Platforms、http 流 ca_file 修复 +2 Media；V0.5-D +2 断流状态文案 +6 六平台登录配置）。
+- 测试：Data 37 / Platforms **448** / Danmaku 98 / Media **178** / Desktop **106** = **867 全绿**（V0.4 基线 471；V0.5-A +7 Media、+18 Desktop；产品侧加固 +17 Media；V0.5-B +125 Platforms、+2 Media；V0.5-C Step6 虎牙 +65 Platforms、Step7 斗鱼 +63 Platforms、Step8 抖音 +64 Platforms、http 流 ca_file 修复 +2 Media；V0.5-D +2 断流状态文案 +6 六平台登录配置；V0.5-E +11 Platforms（三平台 Cookie 接入）；V0.5-F +10 Media（分段录制 + 重叠裁剪 + 时长实测））。
 - 验收：V0.4 GUI 端到端通过（脚本 `.cache/v04-acceptance2.ps1`，证据 `.cache/v04b-*.png`）；V0.5-A 完成真实 API 验证（55s 音频约 11s 返回，见「V0.5-A 增量」）；本机运行规避后完成真实 GUI 录制/打开目录/ASR 验证；**V0.5-B 阶段验收通过**（YouTube 添加/监控/录制 49.97s（含音频）/剪辑波形/双版导出（含音频）/ASR，见「V0.5-B 增量」）；V0.5-C Step6 虎牙：插件、协议单测与真实探针（拉流状态 + 20s 内 86 条弹幕）通过，但本机为海外出口、虎牙 CDN 对海外网络限流，GUI 播放/录制未能完整验证（见「V0.5-C 增量」）；V0.5-C Step7 斗鱼：插件、协议单测、真实探针与 **GUI 全链路验收通过**（真实录制 56.8s/11.4MB 含音频 + 72 条弹幕、剪辑台波形与混流、双版导出均含音频，见「V0.5-C 增量（Step7 斗鱼）」）。
 - 实现依据：`limoclip_v0_4.md`（V0.4）、`limoclip_v0_5_asr.md`（V0.5-A/B，已按实现修订 P0 偏差）；`code_artifact.md` 已更新为 v2.1。
 - **V0.5-B 已完成并通过阶段 B 验收；V0.5-C 已全部完成：Step6 虎牙、Step7 斗鱼、Step8 抖音（三个平台插件 + 单测 + 真实探针，斗鱼/抖音 GUI 全链路验收通过；虎牙 GUI 受本机海外网络限流未完整验证）、Step9 六平台联调与 v0.5.0 打包已完成**（`artifacts/LimoClip-v0.5.0-win-x64.zip` 190.58MB，SHA256 `0fda2c4e…1b43ed`，冒烟启动通过）。恢复开发先读本文件「新 session 首条消息」「V0.5-B 增量」「V0.5-C 增量」。多轨 NLE 只评估、不实现。
@@ -152,7 +152,7 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 
 ## 新 session 首条消息（可直接复制）
 
-> 阅读 `HANDOFF.md`、`limoclip_v0_5_asr.md`，先核对 `git log --oneline -8` 与全量测试（build + 五套测试，应为 **846 全绿**）。V0.5-A、V0.5-B、产品侧加固均已完成并验收，V0.5-C 已全部完成（Step6 虎牙、Step7 斗鱼、Step8 抖音、Step9 六平台联调 + v0.5.0 打包），**V0.5-D 已把「断流误显示未开播」改为重连态并补全六平台登录**。恢复开发前先读「V0.5-B 增量」「V0.5-A 增量」与「本机运行限制」；本机运行一律使用仓库启动器 `scripts/refresh-and-run.ps1`（桌面快捷方式也指向它），不要直接运行工作区内 bin 下的 exe。插件签名私钥不在仓库内，需向用户索取或使用环境变量 `LIVEMONITOR_PLUGIN_KEY`。
+> 阅读 `HANDOFF.md`、`limoclip_v0_5_asr.md`，先核对 `git log --oneline -8` 与全量测试（build + 五套测试，应为 **867 全绿**）。V0.5-A、V0.5-B、产品侧加固均已完成并验收，V0.5-C 已全部完成（Step6 虎牙、Step7 斗鱼、Step8 抖音、Step9 六平台联调 + v0.5.0 打包），V0.5-D 已把「断流误显示未开播」改为重连态并补全六平台登录，**V0.5-E 已把虎牙/斗鱼/抖音 Cookie 接入 Provider 并修复虎牙播放（HS 线 + ratio 多档），V0.5-F 已把录制改为「分段录制 + concat 合并 + 重叠裁剪」，虎牙录制恢复可用（实测 84s 文件可播放）**。恢复开发前先读「V0.5-B 增量」「V0.5-A 增量」与「本机运行限制」；本机运行一律使用仓库启动器 `scripts/refresh-and-run.ps1`（桌面快捷方式也指向它），不要直接运行工作区内 bin 下的 exe。插件签名私钥不在仓库内，需向用户索取或使用环境变量 `LIVEMONITOR_PLUGIN_KEY`。
 
 ## V0.5-A 增量（2026-11-23）：剪辑台语音识别（ASR）
 
@@ -449,3 +449,36 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 ### 新 session 首条消息（V0.5-E 后）
 
 - 虎牙/斗鱼/抖音 Cookie 已接入 Provider，虎牙播放已修复并实测稳定（蓝光20M/HS 线）；全量测试 **857 全绿**。下一步：修复虎牙录制（分段录制+concat 或 HLS 方案）、回归其它平台录制、推送提交、发布 v0.5.0 Release。
+
+## V0.5-F 增量（2026-11-24）：虎牙分段录制（断流录制修复）
+
+### 状态
+
+- 问题：V0.5-E 后虎牙播放已稳定，但录制产物损坏。根因：虎牙 CDN 每次 HTTP FLV 连接仅维持约 3~17 秒；`-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2` 重连后 FLV 时间戳从 0 重计，继续写同一个 matroska 会触发非单调 DTS、时间戳坍缩，文件只有前约 1.5 秒有效（ffprobe `duration=N/A`、`File ended prematurely`），停止时 ffmpeg 也不收尾、被强杀。
+- 方案：录制改为「分段录制 + 停止时 concat 合并」——每段独立 ffmpeg 进程、独立 `*.partNNN.mkv`；监控到 ffmpeg 退出且直播仍在线时自动续段（最多连续 6 次失败、间隔 2 秒）；停止时用 ffmpeg concat demuxer 无损合并分片；合并失败保留分片并把错误写入 `session.ErrorMessage`。
+- 分段重叠：探针发现虎牙 CDN 每次连接会从缓存关键帧起点重发一小段，分片间内容重叠约 1~3 秒。合并前用 ffmpeg 快速实测每片真实时长（`-map 0:v:0 -c copy -progress pipe:1 -f null NUL`），结合每片墙钟起点计算重叠，concat 列表逐片追加 `inpoint` 裁掉重复内容；合并成功后以合并结果作为 DB 时长/大小的权威口径。
+- 校验：build 0 错误；五套测试 **867 全绿**（Data 37 / Platforms 448 / Danmaku 98 / Media 178 / Desktop 106；Media +10：`SegmentOverlapPlannerTests` 5 + `RecordingManagerTests` 分段续录/合并/失败等）。
+- GUI 验收（国内网络，`E:\LimoClip-v05-run`，pid 34952）：录制虎牙 `#14 杨齐家丶` 墙钟 83.93 秒 → 合并文件 `D:\clipRecord\20261123_175854_#14_杨齐家丶_60066.mkv` 69,333,609B、ffprobe `duration=84.371s`、h264 1920×1080 60fps + aac + subrip、视频包 5556，解码无致命错误（仅 concat 拼接点轻微非单调 DTS 告警）；DB 会话 `Status=Completed, DurationSeconds=80.455, FileSizeBytes=69,333,609（与文件一致）, DanmakuCount=160, ErrorMessage=None`；37 个分片全部合并删除。
+
+### 实现要点
+
+- `src/LiveMonitor.Core/Interfaces/IFullStreamRecorder.cs`：新增 `double? SourceTimelineStartSeconds { get; }`（可选，输入流绝对时间轴起点）。
+- `src/LiveMonitor.Media/Recording/FfmpegFullRecorder.cs`：loglevel info 下从 stderr 解析 `Duration: N/A, start: X` 记录输入时间轴起点。
+- `src/LiveMonitor.Media/Recording/FfmpegArgumentBuilder.cs`：移除 `-reconnect` 参数（分段录制不再续写同一文件）、`-loglevel` 改 `info`。
+- 新增 `src/LiveMonitor.Media/Recording/SegmentMerger.cs`：`RecordedSegment(Path, Duration, SourceTimelineStartSeconds, StartOffset)`、`SegmentOverlapPlanner`（墙钟起点优先、重叠最多裁到保留 0.2s、时间轴重启回退处理）、`FfmpegSegmentMerger`（0/1/多段、逐段实测时长、concat + inpoint、超时与清理）。
+- `src/LiveMonitor.Media/Recording/RecordingManager.cs`：`ActiveRecording` 改为 `Parts` + `CurrentPartPath` + `CurrentPartStartedAt`；`TryStartNextPartAsync` 自动续段（重新拉取直播状态与画质、刷新签名 URL），`CaptureCurrentPart` 记录每段时长/墙钟偏移，`FinalizeOnceAsync` 合并后以合并结果写 DB 时长/大小；卡死/离线/主动停止语义保留。
+- 测试：新增 `SegmentOverlapPlannerTests`（5 用例）；`RecordingManagerTests` 改写/新增续段、合并失败、单段合并、启动失败等用例；`RecordingManagerTestSupport` 增加 Fake merger 与 delay 注入。
+
+### 已知限制
+
+- concat `inpoint` 只能对齐到关键帧，拼接点仍可能有约 1 帧重复与轻微 DTS 告警；DB `DurationSeconds` 以合并内容时长为基准，可能比 ffprobe duration 短数秒（本次 80.455 vs 84.371，差异来自首段预缓冲与关键帧对齐），以文件实际时长为准。
+- 虎牙 HLS 刷新 403、`-reconnect` 写坏 MKV 的结论保留（见 V0.5-E 节）；抖音 sign.js 仍运行时获取。
+
+### 验证证据
+
+- 虎牙播放截图 `.cache/v05e-huya-cookie-play.png`（1440×900，直播中/蓝光20M/0% 丢帧）。
+- 录制产物 `D:\clipRecord\20261123_175854_#14_杨齐家丶_60066.mkv`（69,333,609B / 84.371s / 1080p60 + aac + subrip），DB 会话 `Platform=4 / Status=3 / DurationSeconds=80.455 / FileSizeBytes=69,333,609 / DanmakuCount=160 / ErrorMessage=None`，`leftover parts=0`。
+
+### 新 session 首条消息（V0.5-F 后）
+
+- 虎牙断流播放与录制均已修复（Cookie + HS 线 + ratio 多档 + 分段录制/concat 去重叠），全量测试 **867 全绿**，HEAD `147be90`。下一步可选：虎牙长时间录制稳定性回归（>10 分钟）、其它平台录制回归、发布 v0.5.0 Release、抖音 sign.js 离线化。
