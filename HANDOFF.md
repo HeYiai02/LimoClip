@@ -418,3 +418,34 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 ### 新 session 首条消息（V0.5-D 后）
 
 - V0.5（A/B/C）已完成并打包 v0.5.0；V0.5-D 已修复「断流误显示未开播」并补全六平台登录，全量测试 **846 全绿**。下一步可选：把虎牙/斗鱼/抖音 Cookie 接入各 Provider 提升画质与风控通过率、发布 v0.5.0 Release、虎牙国内网络复验、多轨 NLE 评估等。
+
+## V0.5-E 增量（2026-11-24）：三平台 Cookie 接入 + 虎牙线路/画质改造
+
+### 状态
+
+- 用户反馈：网络切到国内后虎牙仍有断流；六个平台账号都已登录，要求把虎牙/斗鱼/抖音 Cookie 接入 Provider 再试。
+- 完成：① `HuyaApiClient`/`HuyaProvider` 支持登录 Cookie 请求头，`HuyaRoomSnapshot` 增加 `MaxBitRate`；② 虎牙画质改为按 `bitRateInfo`/`liveData.bitRate` 生成 `ratio` 档位（500/2000/4000/8000/20000 → 450/720/1080p），并优先选择 **HS 线路**（实测最稳）而不是原来的 AL 线；③ 虎牙弹幕客户端请求也带 Cookie；④ `DouyuApiClient`/`DouyuProvider` 与 `DouyinApiClient`/`DouyinDanmakuClient`/`DouyinProvider` 全链路透传登录 Cookie（betard、getH5Play、抖音 enter 与 WSS 均带合并后的 Cookie）；⑤ 抖音 `BuildCookieHeader` 合并登录 Cookie 与 ttwid。
+- 校验：build 0 错误；五套测试 **857 全绿**（Data 37 / Platforms 448 / Danmaku 98 / Media 168 / Desktop 106；Platforms +11：虎牙 Cookie/多档画质、斗鱼 Cookie、抖音 Cookie 合并）。
+- GUI 验收（国内网络，`E:\LimoClip-v05-run`，pid 29424）：打开虎牙 `#14 杨齐家丶` 稳定播放「直播中」、画质「蓝光20M · 30fps」、硬解、解码正常 0% 丢帧；截图 `.cache/v05e-huya-cookie-play.png`。
+
+### 实现要点
+
+- 虎牙 API：`GetRoomAsync(string roomIdOrHost, string? cookie, CancellationToken ct)` 在请求头加 `Cookie`（`NormalizeCookie` 去 CR/LF 防头注入），解析 `liveData.bitRate` 到 `HuyaRoomSnapshot.MaxBitRate`。
+- 虎牙画质：`BuildQualities` 从 `bitRateInfo` 生成多档（`iBitRate==0` 用 `MaxBitRate`），URL 追加 `ratio=`；`SelectStableLine` 稳定性排序 HS(0) < AL(1) < TX(2)，再按 `WebPriorityRate` 降序；每条 quality 的 `RequiredHeaders` 含 UA/Referer/Cookie（mpv 与 ffmpeg 录制都会带上）。
+- 斗鱼：`DouyuApiClient.GetRoomAsync(roomId, cookie, ct)`、`GetJsonAsync(url, cookie, ct)`、`GetStreamQualityAsync(roomId, cookie, ct)` 全带 Cookie，quality headers 注入 Cookie。
+- 抖音：`DouyinApiClient.BuildCookieHeader(cookie, ttwid)` 合并（cookie 已含 `ttwid=` 时原样，否则 `cookie; ttwid=...`）；enter 请求、拉流 headers、弹幕 WSS 均使用合并后的 Cookie。
+
+### 已知问题（阻塞，下一步优先）
+
+- **虎牙录制仍不可用**：虎牙 CDN 每次 HTTP FLV 连接只维持约 3~17 秒（随线路不同），连接结束后时间戳从 0 重新开始；`FfmpegArgumentBuilder` 现有的 `-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2` 会让 ffmpeg 重连后继续写同一个 matroska，muxer 收到非单调 DTS 后时间戳坍缩，产物只有约 1.5 秒有效数据（ffprobe `duration=N/A`、`File ended prematurely`），且停止时 ffmpeg 不收尾、被强杀。
+- 手工复现确认：同样参数直接跑 ffmpeg 会持续输出 `Non-monotonic DTS; previous: 6300, current: 77; changing to 6300`；去掉 reconnect 则连接在 3~6 秒即 EOF（文件有效但极短）。`-use_wallclock_as_timestamps 1` 可消除 DTS 告警，但 ffmpeg 收尾会挂起（需后续改为约定超时后强杀 + 修复容器）。
+- 候选方案：① 录制改为「分段录制 + 停止时 ffmpeg concat 合并」（每段独立 mkv，天然避开时间戳重置）；② 播放/录制同时提供虎牙 HLS 源（`data.stream.hls.multiLine`，`ratio` 参数可覆盖 500~20000），但 HLS playlist 刷新会 403，需要验证刷新策略；③ 其它平台的录制回归（斗鱼/抖音/YouTube 已验证可用）。
+
+### 验证证据
+
+- 虎牙播放截图 `.cache/v05e-huya-cookie-play.png`（1440×900，直播中/蓝光20M/0% 丢帧）。
+- 录制失败产物 `D:\clipRecord\20261123_170522_#14_杨齐家丶_60066.mkv`（4,718,592B，ffprobe duration=N/A）+ DB 会话 `Platform=4 / Status=3 / DurationSeconds=94.82 / FileSizeBytes=4718592 / DanmakuCount=363`。
+
+### 新 session 首条消息（V0.5-E 后）
+
+- 虎牙/斗鱼/抖音 Cookie 已接入 Provider，虎牙播放已修复并实测稳定（蓝光20M/HS 线）；全量测试 **857 全绿**。下一步：修复虎牙录制（分段录制+concat 或 HLS 方案）、回归其它平台录制、推送提交、发布 v0.5.0 Release。
