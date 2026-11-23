@@ -62,28 +62,11 @@ public sealed class PlatformFactory
 
     public static PlatformFactory CreateDefault(HttpClient? httpClient = null, string? ytDlpPath = null)
     {
-        var executable = ResolveYtDlpPath(ytDlpPath);
+        var executable = ToolLocator.ResolveYtDlpPath(ytDlpPath);
         return new PlatformFactory(new IPlatformProvider[]
         {
             new BilibiliProvider(httpClient),
             new TwitchProvider(executable)
         });
-    }
-
-    private static string ResolveYtDlpPath(string? ytDlpPath)
-    {
-        if (!string.IsNullOrWhiteSpace(ytDlpPath))
-        {
-            return ytDlpPath;
-        }
-
-        var candidates = new[]
-        {
-            Path.Combine(AppContext.BaseDirectory, "yt-dlp.exe"),
-            Path.Combine(Environment.CurrentDirectory, "tools", "yt-dlp.exe"),
-            Path.Combine(Environment.CurrentDirectory, "yt-dlp.exe")
-        };
-
-        return candidates.FirstOrDefault(File.Exists) ?? candidates[0];
     }
 }
