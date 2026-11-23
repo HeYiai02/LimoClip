@@ -6,7 +6,8 @@
 - `limoclip_v0_2.md`：V0.2 弹幕引擎详细设计实施文档（含实施记录）
 - `limoclip_v0_3.md`：V0.3 独立录制中心与全程录制引擎设计实施文档（含实施记录 §8）
 - `limoclip_v0_4.md`：V0.4 剪辑台（本地预览 / 波形时间轴 / 双版切片导出）设计实施文档
-- `code_artifact.md`：长期架构全景（v1.6，已按 V0.4 口径更新）
+- `limoclip_v0_5_asr.md`：V0.5 ASR / 平台插件热更新 / 国内平台补齐设计实施文档（V0.5-A 已实现，B/C 暂缓）
+- `code_artifact.md`：长期架构全景（v1.7，已按 V0.5-A 口径更新）
 - `HANDOFF.md`：当前版本交接（实现清单、验收证据、偏差与已知限制）
 - `livemonitor_v0_1.html`：交互 / 视觉基准原型
 
@@ -47,6 +48,16 @@
 - 测试：Data 37 / Platforms 120 / Danmaku 98 / Media 140 / Desktop 76 = **471 全绿**；构建 0 错误
 - 验收：GUI 脚本 `.cache/v04-acceptance2.ps1`（证据 `.cache/v04b-*.png`）——场次加载、弹幕回放、选区联动、双版导出 **1.9s** 完成（clean 13.30s / burned 11.20s），烧录帧弹幕清晰；本地文件 picker 已验证可打开并过滤 `*.mkv/*.mp4`，实际加载逻辑由 Desktop 单测覆盖
 - 验收中修复：右侧入点/出点文本不刷新、导出文件名不随选区更新、波形视觉接近平线、旧库迁移索引早于补列、`UseWindowsForms` 下 Avalonia 类型歧义
+
+## V0.5-A 进度（剪辑台云端语音识别 / ASR，已实现并完成真实 API 验收）
+
+实现依据：`limoclip_v0_5_asr.md` §3 + §7 Step 1/2（已按实现修订 P0 偏差：包名、缓存键、`TryAssign`、`CreateDanmakuClient` 可空、ASR 为分区而非 Tab、高能卡片按钮拆分）。
+
+- [x] Step 1：Core `AsrTranscriptSegment` / `AsrTranscriptResult` / `IAsrProvider` + 5 个 `Asr*` AppSettings；`LiveMonitor.Media/Asr/OpenAiCompatibleAsrProvider`（ffmpeg 抽 16kHz MP3 → OpenAI 兼容 `/v1/audio/transcriptions` → `segments`/`text` 双格式解析 → SHA256 本地缓存 → 取消 / Job Object）+ 7 个单测
+- [x] Step 2：设置页「语音识别（ASR）」分区（4 预设 + DPAPI 加密 Key + `GET /models` 连通性测试）；剪辑台右侧「🎙 语音识别」面板（识别当前选区 / 取消 / 全文 / 服务商 / 逐句点击 seek / 复制文本）；高能卡片「🎙 转写」按钮与摘要；全局互斥 + 版本号防陈旧回调 + 切换视频清空结果；Desktop +18 测试
+- 测试：Data 37 / Platforms 120 / Danmaku 98 / Media 147 / Desktop 94 = **496 全绿**；构建 0 错误
+- 实测（真实 siliconflow Key）：55s 录制片段「识别当前选区」约 11s 返回（`siliconflow_cn / FunAudioLLM/SenseVoiceSmall`），缓存写 `%LocalAppData%/LiveMonitor/cache/asr/{sha256}.asr.json`、临时 MP3 已清理；证据 `.cache/v05bug-3-asr-bottom.png`
+- 限制：`TestConnectionAsync` 走 `GET {base}/models`，不暴露该接口的服务会显示失败（不影响真实转写）；未接入离线 `Sherpa-ONNX`；V0.5-B（插件热更新 + YouTube）与 C（虎牙/斗鱼/抖音）**暂缓**（恢复入口见 `HANDOFF.md`）
 
 ## 当前进度
 
@@ -154,31 +165,22 @@ dotnet test tests/LiveMonitor.Desktop.Tests/LiveMonitor.Desktop.Tests.csproj
 
 ## 本机沙箱环境（重要）
 
-当前工作区使用便携 SDK `.dotnet/`（8.0.428），系统没有安装 .NET SDK。在 `workspace-write` 沙箱下 Schannel 无法写 `%APPDATA%\Microsoft\Crypto`，会报 `SEC_E_NO_CREDENTIALS`；切到 `danger-full-access` 后 B站真实 HTTPS 请求已通过。NuGet 仍走本地 HTTP 代理（避免依赖 Schannel）：
+当前工作区使用便携 SDK `.dotnet/`（8.0.428），系统没有安装 .NET SDK；NuGet 直连 nuget.org（旧的本地 HTTP 代理方案已废弃，`.dev/nuget-proxy.mjs` 不再需要）。每次 dotnet 命令必须把环境变量指到工作区内，否则本机 `TEMP=E:\code\Env\Temp` 在工作区外，MSBuild 会报 `MSB1025 ... MSBuildTemp is denied`：
 
 ```powershell
-# 代理脚本（需要保持运行）
-node .dev/nuget-proxy.mjs
-
-# 还原
-dotnet restore LiveMonitor.sln --configfile .dev/NuGet.offline.config -p:RestoreNoHttpCache=true
-# 之后可加 --no-restore 构建
-dotnet build LiveMonitor.sln --no-restore
+$root = 'E:\code\liveSurveilance'
+$env:DOTNET_ROOT = "$root\.dotnet"
+$env:PATH = "$root\.dotnet;$env:PATH"
+$env:DOTNET_CLI_HOME = "$root\.dotnet-home"
+$env:NUGET_PACKAGES = "$root\.nuget\packages"
+$env:APPDATA = "$root\.appdata"
+$env:LOCALAPPDATA = "$root\.appdata"
+$env:TMP = "$root\.cache\temp"; $env:TEMP = $env:TMP
 ```
 
-每次 dotnet 命令还需要设置：
+另外本机对「位于工作区 `E:\code\liveSurveilance` 内的可执行文件」有强制写沙箱：工作区内 exe 只能写工作区内目录，连它拉起的子进程 `explorer.exe` 也会以 `0xC0000142` 启动失败。因此**不要直接运行 `src/LiveMonitor.Desktop/bin/.../LiveMonitor.Desktop.exe`**，一律使用启动器（桌面快捷方式「LiveMonitor（工作区外运行）」或 `C:\Users\Administrator\LimoClip\refresh-and-run.ps1`）：构建 → 复制到工作区外 `E:\LimoClip-v05-run` → 启动。详见 `HANDOFF.md`「本机运行限制：工作区内可执行文件被强制写沙箱」。
 
-```powershell
-$env:DOTNET_ROOT='E:\code\liveSurveilance\.dotnet'
-$env:PATH="$env:DOTNET_ROOT;$env:PATH"
-$env:DOTNET_CLI_HOME='E:\code\liveSurveilance\.dotnet-home'
-$env:NUGET_PACKAGES='E:\code\liveSurveilance\.nuget\packages'
-$env:APPDATA='E:\code\liveSurveilance\.appdata\Roaming'
-$env:LOCALAPPDATA='E:\code\liveSurveilance\.appdata\Local'
-$env:TEMP='E:\code\liveSurveilance\.cache\temp'; $env:TMP=$env:TEMP
-```
-
-`.dev/`、`.cache/`、`.nuget/`、`.dotnet/` 均为本机辅助目录，已写入 `.gitignore`。在正常机器上直接 `dotnet restore` 即可，不需要代理。
+`.dev/`、`.cache/`、`.nuget/`、`.dotnet/`、`.appdata/` 均为本机辅助目录，已写入 `.gitignore`。在正常机器上直接 `dotnet restore` / `dotnet run` 即可，不受上述限制。
 
 ## Spike 结论
 
@@ -230,14 +232,14 @@ src/
   LiveMonitor.Platforms.Twitch/     Twitch Provider（独立类库）
   LiveMonitor.Platforms/            PlatformFactory 聚合与默认注册、DanmakuClientFactory
   LiveMonitor.Danmaku/              弹幕会话管理（DanmakuManager）、过滤器、高能检测、参数持久化（V0.2）
-  LiveMonitor.Media/                录制引擎（Recording/，V0.3）与剪辑后端（Editing/，V0.4：jsonl/探测/波形/ASS/硬编/导出）
-  LiveMonitor.Desktop/              Avalonia UI、Dock、mpv、WebView2、录制中心与剪辑台
+  LiveMonitor.Media/                录制引擎（Recording/，V0.3）、剪辑后端（Editing/，V0.4：jsonl/探测/波形/ASS/硬编/导出）与云端 ASR（Asr/，V0.5-A）
+  LiveMonitor.Desktop/              Avalonia UI、Dock、mpv、WebView2、录制中心、剪辑台与语音识别面板（V0.5-A）
 tests/
   LiveMonitor.Data.Tests/           Data 层单元测试（xUnit）
   LiveMonitor.Platforms.Tests/      B站 / Twitch 解析与弹幕客户端单元测试（xUnit）
   LiveMonitor.Danmaku.Tests/        弹幕过滤 / 高能检测 / DanmakuManager 单元测试（xUnit，V0.2）
-  LiveMonitor.Media.Tests/          录制与剪辑后端单元测试（xUnit，V0.3/V0.4）
-  LiveMonitor.Desktop.Tests/        Dock Auto-Fit / 结构克隆 / 弹幕渲染 / 剪辑台 ViewModel 单元测试（xUnit）
+  LiveMonitor.Media.Tests/          录制、剪辑后端与云端 ASR（V0.5-A）单元测试（xUnit，V0.3/V0.4/V0.5-A）
+  LiveMonitor.Desktop.Tests/        Dock Auto-Fit / 结构克隆 / 弹幕渲染 / 剪辑台 ViewModel / ASR 设置与剪辑台转写单元测试（xUnit）
 tools/                    运行时二进制目录（默认不入库，用 scripts/fetch-tools.ps1 补齐；cacert.crt 例外）
 scripts/                  fetch-tools.ps1：一键下载 libmpv / yt-dlp / cacert / ffmpeg
 spikes/                   三个技术验证 demo（不参与主解决方案）

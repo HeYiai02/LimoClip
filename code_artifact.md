@@ -1,6 +1,6 @@
-# 直播监控与自动切片应用 — 技术架构与接口设计文档（v1.6，2026-11-23）
+# 直播监控与自动切片应用 — 技术架构与接口设计文档（v1.7，2026-11-23）
 
-> 版本说明：v1.6 按 V0.4 实施口径修订——剪辑台（本地预览 / 双波形时间轴 / 双模式切片导出）已落地，Core/Media/Desktop 契约与实现以代码为准。v1.5 的 V0.3 修订内容保持不变（**环形缓冲、本地→NAS/云盘异步归档与 `rclone`、手动转 MP4 已确认取消**；录制能力为独立录制中心 + 全程 `.mkv` + 同名伴随 `.jsonl`）。V0.3 / V0.4 的完整规格、API 与验收记录分别以 `limoclip_v0_3.md` / `limoclip_v0_4.md` 与 `HANDOFF.md` 为准；ASR、平台/插件热更新与多轨 NLE 顺延 V0.5。
+> 版本说明：v1.7 按 V0.5-A 实施口径修订——剪辑台云端 ASR（语音转写）已落地，Core/Media/Desktop 契约与实现以代码为准；v1.6 的 V0.4 修订内容保持不变（剪辑台 / 双波形时间轴 / 双模式切片导出）。v1.5 的 V0.3 修订内容保持不变（**环形缓冲、本地→NAS/云盘异步归档与 `rclone`、手动转 MP4 已确认取消**；录制能力为独立录制中心 + 全程 `.mkv` + 同名伴随 `.jsonl`）。V0.3 / V0.4 的完整规格、API 与验收记录分别以 `limoclip_v0_3.md` / `limoclip_v0_4.md` 与 `HANDOFF.md` 为准；V0.5-A 的完整规格与验收见 `limoclip_v0_5_asr.md` 与 `HANDOFF.md`。**平台/插件热更新（V0.5-B）与虎牙/斗鱼/抖音（V0.5-C）尚未开始，暂缓**；多轨 NLE 仅评估不做。
 
 
 ## 1. 项目定位与核心架构决策
@@ -32,7 +32,7 @@
 | **平台账号登录** | `WebView2` + Windows DPAPI | 内置官方登录窗捕获 Cookie/Token，本机系统级加密持久化 |
 | **多平台流解析** | `yt-dlp` + 国内插件 DLL (+ `Jint`) | Twitch / YouTube 均走 `yt-dlp`；国内四平台走热更新插件；V0.1 不做 Twitch 去广告 |
 | **录制与剪辑引擎** | FFmpeg（`Process` 直接调用）+ CliWrap（V0.1 解析） | 全程录制（`-c copy` `.mkv` + 伴随 `.jsonl`）、Windows Job Object 防僵尸；V0.4 已实现视频探测、波形提取、无损切割与硬件烧录（硬件探测失败回退 `libx264`） |
-| **语音识别（ASR）** | `Sherpa-ONNX` (SenseVoiceSmall) + OpenAI 兼容 API | 仅对高能推荐片段或框选区间进行离线/云端语音转文字（V0.5） |
+| **语音识别（ASR）** | OpenAI 兼容云端 API（硅基流动 / Groq / 自定义） | V0.5-A 已实现：仅对高能推荐片段或时间轴框选区间抽取音频（FFmpeg → 16kHz 单声道 MP3）调用云端转写，带本地缓存；离线 `Sherpa-ONNX` 仍未实现 |
 | **存储归档（V0.3 起移除）** | — | 原 SMB / WebDAV / `rclone` 异步归档已确认取消；录制目录可直接指向 NAS 映射盘 |
 | **本地持久化** | SQLite (`Microsoft.Data.Sqlite`) | 主库、窗口方案、任务方案、高能打点、加密凭证与屏蔽词库（WAL 模式） |
 
@@ -48,11 +48,13 @@ LiveMonitor.sln
 │   ├── LiveMonitor.Core/                # [核心域层] 实体模型、枚举、核心接口、全局配置
 │   │   ├── Entities/                    # LiveRoom, LayoutProfile, LayoutSlot, RecordingTarget, RecordingSession
 │   │   ├── Models/                      # StreamQuality, DanmakuMessage, HighlightEvent, RecordingProgress,
-│   │   │                                # RecordedDanmakuItem, VideoMetadata, WaveformData, ClipExportRequest, ClipExportProgress
+│   │   │                                # RecordedDanmakuItem, VideoMetadata, WaveformData, ClipExportRequest, ClipExportProgress,
+│   │   │                                # AsrTranscriptSegment, AsrTranscriptResult（V0.5-A）
 │   │   ├── Enums/                       # PlatformType, RecordingStatus 等
 │   │   └── Interfaces/                  # IPlatformProvider, IDanmakuClient, IFullStreamRecorder,
 │   │                                    # IRecordingTargetRepository / IRecordingSessionRepository, IHighlightEventEnricher,
-│   │                                    # IWaveformService, IDanmakuAssConverter, IHardwareEncoderDetector, IClipExporter 等
+│   │                                    # IWaveformService, IDanmakuAssConverter, IHardwareEncoderDetector, IClipExporter,
+│   │                                    # IAsrProvider（V0.5-A）等
 │   │
 │   ├── LiveMonitor.Platforms.Common/    # 公共解析：PlatformDefaults / JsonRead / YtDlpRunner
 │   ├── LiveMonitor.Platforms.Bilibili/  # BilibiliProvider（原生 get_info / getRoomPlayInfo）
@@ -67,7 +69,7 @@ LiveMonitor.sln
 │   │   ├── DanmakuSessionHandle.cs      # 按会话的引用计数句柄（录制中心复用同一连接）
 │   │   └── DanmakuManager.cs            # 按 (Platform, RoomId) 单例复用连接并分发
 │   │
-│   ├── LiveMonitor.Media/               # [媒体引擎层] V0.3 录制 + V0.4 剪辑后端（ASR 属 V0.5）
+│   ├── LiveMonitor.Media/               # [媒体引擎层] V0.3 录制 + V0.4 剪辑后端 + V0.5-A 云端 ASR
 │   │   ├── Recording/
 │   │   │   ├── RecordingManager.cs      # 录制状态机：手动/自动、轮询、断流重试、崩溃恢复
 │   │   │   ├── FfmpegFullRecorder.cs    # -c copy 全程 .mkv + stdin q 优雅停录 + 首帧锚点
@@ -78,7 +80,7 @@ LiveMonitor.sln
 │   │   │   ├── RecordingFileNaming.cs   # {时间戳}_#{序号}_{主播}_{房间号}
 │   │   │   ├── RecordingHighlightTracker.cs # 高能事件绑定 SessionId/Offset（IHighlightEventEnricher）
 │   │   │   └── ProcessJobGuard.cs       # Windows Job Object（KILL_ON_JOB_CLOSE）
-│   │   └── Editing/                     # V0.4 剪辑后端
+│   │   ├── Editing/                     # V0.4 剪辑后端
 │   │       ├── DanmakuJsonlReader.cs    # 伴随 .jsonl 容错读取（坏行/截断跳过、乱序稳定排序）
 │   │       ├── VideoProbeService.cs     # ffmpeg -i stderr 探测时长/分辨率/fps/codec（仓库无 ffprobe）
 │   │       ├── WaveformService.cs       # 4000Hz 单声道流式 PCM、2000 桶峰值 + 弹幕密度 + SHA256 缓存
@@ -86,6 +88,8 @@ LiveMonitor.sln
 │   │       ├── HardwareEncoderDetector.cs # nvenc/qsv/amf 实测探测，回退 libx264
 │   │       ├── ClipExporter.cs          # 无损 clean / 烧录 danmaku 双版导出（Job Object、取消清理）
 │   │       └── DanmakuPlaybackCursor.cs # 回放二分推进与 seek 回看
+│   │   └── Asr/                         # V0.5-A 云端语音识别
+│   │       └── OpenAiCompatibleAsrProvider.cs # 抽音 → multipart 上传 → segments/text 解析 → 本地缓存
 │   │
 │   ├── LiveMonitor.Data/                # [数据持久层] SQLite WAL 初始化与仓储实现
 │   │   ├── LiveMonitorDatabase.cs
@@ -94,9 +98,11 @@ LiveMonitor.sln
 │   └── LiveMonitor.Desktop/             # [表现层] Avalonia 桌面端主程序
 │       ├── Controls/                    # DanmakuOverlay（直播/回放共用）, ClipTimelineControl（双波形时间轴）
 │       ├── Player/                      # MpvPlayerView（直播预览）, LocalClipPlayerView（本地剪辑预览）
-│       ├── Services/                    # WorkspacePlayerManager (Diff), PerformanceMonitor, WebView2Login, AppServices
+│       ├── Services/                    # WorkspacePlayerManager (Diff), PerformanceMonitor, WebView2Login, AppServices,
+│       │                                # AsrSettingsStore（V0.5-A：预设/DPAPI Key/连通性测试）
 │       ├── ViewModels/                  # MainWindowViewModel, RecordingCenter/Target/History,
-│       │                                # ClipStudio / ClipExportTask / ClipHighlightItem / ClipSessionOption
+│       │                                # ClipStudio / ClipExportTask / ClipHighlightItem / ClipSessionOption,
+│       │                                # AsrTranscriptLine（V0.5-A 分段行）
 │       └── Views/                       # MainWindow（三视图 Shell）, SettingsWindow, RecordingCenterView,
 │                                        # ClipStudioView, 确认弹窗等
 │
@@ -386,7 +392,28 @@ public interface IClipExporter
 Task<IReadOnlyList<HighlightEvent>> GetByRecordingSessionAsync(Guid sessionId, int limit = 500, CancellationToken ct = default);
 ```
 
-`IAsrProvider`（ASR）保留为 V0.5 预留，本版未实现。
+V0.5-A 追加（已实现，云端语音识别）：
+
+```csharp
+namespace LiveMonitor.Core.Models;
+
+public sealed record AsrTranscriptSegment(TimeSpan RelativeStart, TimeSpan RelativeEnd, string Text);
+
+public sealed record AsrTranscriptResult(
+    TimeSpan ClipStart, TimeSpan ClipEnd, string FullText,
+    IReadOnlyList<AsrTranscriptSegment> Segments, string ProviderLabel, DateTimeOffset CreatedAtUtc);
+
+namespace LiveMonitor.Core.Interfaces;
+
+public interface IAsrProvider
+{
+    // 命中缓存时不发起网络请求；失败抛 InvalidOperationException（消息可直接展示给用户）
+    Task<AsrTranscriptResult> TranscribeSegmentAsync(string videoPath, TimeSpan startTime, TimeSpan endTime,
+        CancellationToken ct = default);
+}
+```
+
+实现位于 `LiveMonitor.Media/Asr/OpenAiCompatibleAsrProvider.cs`（`AsrApiConfig` 同文件，`record (PresetId, Endpoint, Model, ApiKey, Language = "auto")`），仅支持 OpenAI 兼容 `/v1/audio/transcriptions` 云端接口；配置来自 `AppSettingKeys.AsrProviderPreset / AsrEndpoint / AsrModel / AsrEncryptedApiKey / AsrLanguage`，API Key 以 DPAPI 密文存在 `AppSettings`，由 Desktop 组合根经 `Func<Task<AsrApiConfig?>>` 解密后注入，Media 层不引用 Data。
 
 ---
 
@@ -405,8 +432,8 @@ B站独轮车过滤管线必须前置在 `IHighlightDetector` 与弹幕落盘之
 
 ### 6.3 弹幕波形、全程录制打点与双模式导出
 * **全程录制模式（V0.3 已实现）**：FFmpeg `-c copy -f matroska` 直接写 `.mkv`（不重编码、崩溃可播），通过 stdin `q` 优雅收尾写索引，Windows Job Object 保证宿主退出时无僵尸 ffmpeg；同名 `.jsonl` 写过滤后弹幕（首行 meta，后续 dm，`offsetMs` 相对首帧且误差 ≤2s）。后台高能检测器通过 `IHighlightEventEnricher` 给事件绑定 `RecordingSessionId` / `RecordingOffsetMs` 后入库，供 V0.4 剪辑台定位片段。
-* **弹幕密度波形（V0.4 已实现）**：`WaveformService` 用 `ffmpeg -vn -ac 1 -ar 4000 -f s16le pipe:1` 流式读取 PCM，按 2000 桶取桶内峰值（/32768 归一化）并统计同桶弹幕数后归一化；缓存键为 SHA256(路径|大小|mtime|桶数)，落在 `%LocalAppData%/LiveMonitor/cache/waveforms/*.wf.json`，无音轨时降级为全 0。`ClipTimelineControl` 叠加音频波形与 5 秒桶弹幕热力，支持 1x~60x 视口缩放、平移、In/Out 拖拽与高能标记跳转。
-* **ASR 触发边界（V0.5 预留）**：仅对高能推荐片段或用户在时间轴手动框选的区间截取音频送入 `IAsrProvider`（离线 `Sherpa-ONNX` SenseVoiceSmall 或用户自配 OpenAI 兼容免费 API），避免对长录播造成算力与额度浪费。
+* **弹幕密度波形（V0.4 已实现，V0.5-A 修复绘制）**：`WaveformService` 用 `ffmpeg -vn -ac 1 -ar 4000 -f s16le pipe:1` 流式读取 PCM，按 2000 桶取桶内峰值（/32768 归一化）并统计同桶弹幕数后归一化；缓存键为 SHA256(路径|大小|mtime|桶数)，落在 `%LocalAppData%/LiveMonitor/cache/waveforms/*.wf.json`，无音轨时降级为全 0。`ClipTimelineControl` 叠加音频波形与 5 秒桶弹幕热力，支持 1x~60x 视口缩放、平移、In/Out 拖拽与高能标记跳转；V0.5-A 修复「波形不可见」绘制缺陷（原用非闭合线段填充 → 改为上下包络闭合多边形填充+描边），无可用音频时显示提示文字，并为控件补充 `ToolTip.Tip` 说明各行含义与操作。
+* **ASR 触发边界（V0.5-A 已实现）**：仅对高能推荐片段（位置 −10s ~ +20s）或用户在时间轴手动框选的区间截取音频送 `IAsrProvider`，避免对长录播造成算力与额度浪费。流程：参数/配置校验 → 本地缓存命中直接返回（缓存键 `SHA256(Path.GetFullPath|fileSize|lastWriteUtc.Ticks|startMs|endMs|model)`，落在 `%LocalAppData%/LiveMonitor/cache/asr/{hash}.asr.json`，损坏按未命中）→ ffmpeg 抽 `-vn -ac 1 -ar 16000 -c:a libmp3lame -b:a 64k` 临时 MP3（挂 Job Object）→ multipart 上传（`file/model`，非 siliconflow 预设带 `response_format=verbose_json` 与可选 `language`，400 时降级 `json` 重试一次）→ 优先解析 `segments`（相对时间戳）否则顶层 `text` 单段 → 写缓存。单段上限 15 分钟。设置页「语音识别（ASR）」分区提供 4 预设（硅基流动国内/国际、Groq、自定义）、DPAPI 加密 Key 与 `GET {base}/models` 连通性测试；剪辑台右侧面板展示全文/服务商/逐句列表，点击单句 seek 到 `ClipStart + RelativeStart`。
 * **双版导出（V0.4 已实现）**：`ClipExporter` 的无弹幕版走 `-ss … -t … -c copy -avoid_negative_ts make_zero -movflags +faststart`（hevc 追加 `-tag:v hvc1`，关键帧对齐误差 1~3s 由 UI 提示）；有弹幕版先把伴随 `.jsonl` 转为 ASS（临时目录 + `-vf ass=danmaku.ass`），再由 `HardwareEncoderDetector` 实测可用的 `h264_nvenc` / `h264_qsv` / `h264_amf` 加速烧录，全部失败回退 `libx264`。导出进程挂 Windows Job Object，取消/失败删除残缺输出与临时目录。
 
 ### 6.4 广告处理与三层平台热更新机制
@@ -417,6 +444,7 @@ B站独轮车过滤管线必须前置在 `IHighlightDetector` 与弹幕落盘之
    * **海外 CLI 层**：客户端定期检查 GitHub Releases（支持镜像加速）自动替换 `tools/` 下的 `yt-dlp.exe`（Twitch/YouTube 共用）。
    * **国内插件 DLL 层**：B站/抖音/斗鱼/虎牙独立编译为 30~80 KB 的 `Provider.*.dll`，由 GitHub/Gitee 上的 `providers-manifest.json` 维护版本与 SHA256；客户端下载后先用内置公钥做 **Ed25519 数字签名校验**，通过后经 `AssemblyLoadContext` 热加载替换。
    * **签名脚本层**：针对斗鱼、抖音高频换壳的前端混淆签名，由插件内置 `Jint` 加载热更新的 `.js` 签名脚本。
+   * **当前状态（2026-11-23）**：以上三层热更新尚未实现（V0.5-B/C 暂缓）；平台 Provider 已按 V0.1 拆成独立类库（`Platforms.Bilibili` / `Platforms.Twitch` / `Platforms.Common`），当前仅支持“替换 DLL 后重启生效”的静态替换。
 
 ### 6.5 存储安全与高并发账号风控边界
 * **本地落盘与映射盘**：全程录像直接写入目标目录（默认 `%UserProfile%\Videos\LimoClip`，可全局或按直播间覆盖，允许指向 NAS 映射盘）；不做本地→云盘异步归档与 `rclone` 集成。弱网/映射盘抖动由 `-rw_timeout 15s` + 30 秒无进度判卡死兜底；强杀宿主由 Job Object 保证 ffmpeg 无残留。
@@ -432,4 +460,5 @@ B站独轮车过滤管线必须前置在 `IHighlightDetector` 与弹幕落盘之
 | **V0.2 弹幕引擎与高能空跑** | 落地 B站 + Twitch 实时弹幕客户端、`DanmakuManager` 单例复用、关键词过滤与 **B站独轮车过滤**（Twitch 不做独轮车）、分屏独立弹幕开关与 `SlidingWindowDetector` 高能打点日志（先不录屏）。 | 验证多路弹幕海下 UI 帧率（评估是否回退 `libass`）、B站独轮车拦截准确率与高能密度阈值调优。 |
 | **V0.3 录制引擎与录制中心** | 新增 `LiveMonitor.Media`：`RecordingManager`（手动/自动录制状态机、60s 开播轮询、断流分段退避、崩溃恢复）、`FfmpegFullRecorder`（`-c copy` `.mkv` + stdin `q` 优雅停录 + 首帧锚点）、`DanmakuJsonlRecorder`（同名伴随 `.jsonl`）、`RecordingHighlightTracker`（高能绑定 SessionId/Offset）、Windows Job Object 防僵尸；Desktop 录制中心（全局/独立目录、自动录制、实时指标、历史录像、删除确认）。 | 已验收：0 路播放时多路录制持续写入、停录 `.mkv` 可播（ffmpeg 解码 exit=0）、强杀宿主后 ffmpeg ≤1s 内终止、重启后未收尾会话标 Failed。**环形缓冲 / 异步归档 / 手动 MP4 已确认取消。** |
 | **V0.4 剪辑台（已实现）** | Core 剪辑契约与按会话高能查询；Media/Editing：伴随 jsonl 读取、ffmpeg 探测（无 ffprobe）、流式波形 + 缓存、ASS 转换、硬编探测、双版导出、回放游标；Desktop：本地预览播放器、双波形缩放时间轴、剪辑台四区视图、主窗口第三视图「✂ 剪辑台」、录制中心「✂ 去剪辑」入口。 | 已验收：录制中心 → 剪辑台加载 → 弹幕回放 → 选区 → 双版导出（GUI 实测 <2s），471 个单元测试全绿；本地文件打开与无伴随 jsonl 降级由单测覆盖；2h 长录像与硬编真机待补测。 |
-| **V0.5 ASR、平台/插件热更新与多轨 NLE** | 高能片段 ASR（`Sherpa-ONNX` + 云端 API）与语音预览；拆出国内独立插件 DLL 热更新体系并补齐抖音、斗鱼、虎牙、YouTube；评估多轨 NLE。 | 完成“监控 → 高能推荐 → 语音预览 → 剪辑导出”全链路闭环与免重装热更新验证。 |
+| **V0.5-A 云端 ASR（已实现）** | Core `AsrTranscriptSegment/AsrTranscriptResult/IAsrProvider` + 5 个 `Asr*` 设置键；Media `Asr/OpenAiCompatibleAsrProvider`（抽音/multipart/双格式解析/缓存/取消/Job Object）；Desktop `AsrSettingsStore`（4 预设 + DPAPI Key + `/models` 连通性测试）+ 设置页「语音识别（ASR）」分区 + 剪辑台「🎙 识别当前选区 / 高能卡片转写 / 逐句点击跳转 / 复制全文」。 | 已验收：2 分钟以内片段全流程 ≤15s（实测 55s 音频约 11s，siliconflow_cn / FunAudioLLM/SenseVoiceSmall）；缓存重启命中不发网络（单测覆盖）；496 个单元测试全绿；真实 GUI 录制→剪辑→转写链路通过。 |
+| **V0.5-B/C 平台热更新与国内平台（未开始，暂缓）** | B：`IPlatformPlugin` 契约、`providers-manifest.json` + Ed25519 验签、`PluginLoadContext`、`CliUpdater`（yt-dlp）、YouTube 插件与 WebView2 登录扩展；C：虎牙（Tars/Wup）、斗鱼（WSS + Jint 签名脚本）、抖音（Protobuf + ttwid 风控）插件。 | 待恢复时验证：篡改 1 字节被拒载、合法新版可热加载、YouTube 监控/录制/剪辑全链路、三国内平台粘贴链接识别/起播/实时弹幕/全程录制。前置调研与风险清单（R1~R12）见 `HANDOFF.md` 与 `limoclip_v0_5_asr.md` §4。 |

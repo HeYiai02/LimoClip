@@ -1,13 +1,13 @@
-# LiveMonitor V0.4 交接（剪辑台：本地预览 / 波形时间轴 / 双版切片导出）
+# LiveMonitor 交接（截至 V0.5-A：剪辑台云端 ASR；含本机运行规避方案）
 
 ## 状态
 
-- 分支 `main`；V0.4 已按层提交（提交清单见文末），工作树干净（`limoclip_v0_4.md` 设计文档已随文档提交入库）。
+- 分支 `main`；**当前 HEAD 为文档收尾提交 `docs(v0.5-a): 更新架构/README/交接文档以反映 V0.5-A 收尾`（其前为 `c32367d` 波形修复）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避与波形修复各一次提交，提交清单见文末各节。
 - 构建：`dotnet build LiveMonitor.sln --no-restore` → **0 错误**，8~14 警告（MSB3277 / NU1803 / NU1900 等，均为本机环境既有告警，无新增代码告警）。
-- 测试：Data 37 / Platforms 120 / Danmaku 98 / Media 140 / Desktop 76 = **471 全绿**（2026-11-23；V0.3 基线为 422，本版 +49）。
-- 验收：GUI 端到端通过（脚本 `.cache/v04-acceptance2.ps1`，证据 `.cache/v04b-*.png`）：录制中心 →「✂ 去剪辑」→ 场次加载 → 高能列表 → 预览播放（弹幕回放）→ ±5s/设入出点 → 同时导出两版 → 烧录版弹幕帧抽检。
-- 实现依据：`limoclip_v0_4.md`（V0.4 起以此为准）。ASR、平台热更新、插件热更新、多轨 NLE 属 V0.5 / 后续，本版未做。
-- **V0.5-A 增量（2026-11-23）**：剪辑台语音识别（ASR）已实现并完成构建/测试/GUI 冒烟，详见文末「V0.5-A 增量」；V0.5-B（热更新底座 + YouTube）与 C（虎牙/斗鱼/抖音）未开始。
+- 测试：Data 37 / Platforms 120 / Danmaku 98 / Media 147 / Desktop 94 = **496 全绿**（V0.4 基线 471；V0.5-A 增量 +7 Media、+18 Desktop）。
+- 验收：V0.4 GUI 端到端通过（脚本 `.cache/v04-acceptance2.ps1`，证据 `.cache/v04b-*.png`）；V0.5-A 另完成真实 API 验证（55s 音频约 11s 返回，见「V0.5-A 增量」）；本机运行规避后完成真实 GUI 录制/打开目录/ASR 验证（见「本机运行限制」）。
+- 实现依据：`limoclip_v0_4.md`（V0.4）、`limoclip_v0_5_asr.md`（V0.5-A，已按实现修订 P0 偏差）；`code_artifact.md` 已更新为 v1.7。
+- **V0.5-B（插件热更新底座 + YouTube）与 V0.5-C（虎牙/斗鱼/抖音）未开始，按用户要求暂缓**；恢复时先读本文件「新 session 首条消息」与 V0.5-A 增量节。多轨 NLE 只评估、不实现。
 
 ## V0.4 已实现内容
 
@@ -87,7 +87,8 @@
 
 ## 已知限制 / 待办（V0.5）
 
-- ASR（V0.5-A 已实现，见下一节）、平台/插件热更新（YouTube/抖音/斗鱼/虎牙录制 + 三层热更新，V0.5-B/C 未开始）。
+- ASR（V0.5-A 已实现并完成真实 API 验收，见下一节）、平台/插件热更新（YouTube/抖音/斗鱼/虎牙录制 + 三层热更新，V0.5-B/C 未开始，**按用户要求暂缓**）。
+- 产品侧加固待办（普通用户机器更稳妥，本版未改）：录制前目标目录可写性预检、`ffmpeg exit -13 / Permission denied` 明确中文提示与建议目录、「打开目录」失败提示；并把本机启动器 `refresh-and-run.ps1` 纳入仓库 `scripts/`（当前只存在于 `C:\Users\Administrator\LimoClip`）。
 - 2h 以上长录像的波形内存/时间轴拖拽未压测（设计已按流式 + 2000 桶 + 缓存；文档验收项待补测）。
 - 硬编路径（nvenc/qsv/amf）本机不可用，仅验证回退 `libx264`；硬编机器需实测导出与探测日志。
 - 无弹幕版 `-c copy` 存在关键帧对齐偏移（1~3s，UI 已提示，属预期）；烧录版为精确重编码。
@@ -148,7 +149,7 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 
 ## 新 session 首条消息（可直接复制）
 
-> 阅读 `HANDOFF.md`、`limoclip_v0_5_asr.md`，先核对 `git log --oneline -6` 与全量测试（build + 五套测试，应为 496 全绿），再按需继续 V0.5-B（插件热更新底座 + YouTube）或处理「已知限制」中的验收补测项。
+> 阅读 `HANDOFF.md`、`limoclip_v0_5_asr.md`，先核对 `git log --oneline -8` 与全量测试（build + 五套测试，应为 496 全绿）。V0.5-A 已完成并真实 API 验收；**V0.5-B（插件热更新底座 + YouTube）与 V0.5-C（虎牙/斗鱼/抖音）按用户要求暂缓，默认不要继续**。恢复开发前先读「V0.5-A 增量」与「本机运行限制」；可选收尾项见「已知限制 / 待办（V0.5）」中的产品侧加固与启动器脚本入库。本机运行一律使用启动器（`C:\Users\Administrator\LimoClip\refresh-and-run.ps1` 或桌面快捷方式），不要直接运行工作区内 bin 下的 exe。
 
 ## V0.5-A 增量（2026-11-23）：剪辑台语音识别（ASR）
 
@@ -158,7 +159,8 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 - 构建：`dotnet build LiveMonitor.sln --no-restore` → **0 错误**；仅既有环境告警（MSB3277 / NU1803 / NU1900 / CS9057 / CS0108 / WFAC010 / AVLN3001 / xUnit2009 等）。
 - 测试：Data 37 / Platforms 120 / Danmaku 98 / Media 147 / Desktop 94 = **496 全绿**（V0.4 基线 471；本增量 +7 Media、+18 Desktop）。
 - 验收：GUI 冒烟脚本 `.cache/v05a-smoke.ps1`（UIAutomation，UTF-8 BOM）通过：剪辑台右侧「🎙 语音识别」面板可见（`尚未识别` / `🎙 识别当前选区`），设置窗新增「语音识别（ASR）」分区（预设/地址/模型/语言/API Key/保存/测试连接）可见；证据 `.cache/v05a-2-clip-studio.png`、`.cache/v05a-3-settings-asr.png`。
-- 未做：V0.5-B（BouncyCastle 验签、PluginLoadContext、providers-manifest、CliUpdater、YouTube 插件、WebView2 登录扩展）、V0.5-C（虎牙/斗鱼/抖音）。
+- 真实 API 验收（2026-11-23 19:30）：用户配置 siliconflow Key 后，剪辑台选中 55s 录制片段点「🎙 识别当前选区」，约 11s 返回（`siliconflow_cn / FunAudioLLM/SenseVoiceSmall`），缓存写入 `%LocalAppData%/LiveMonitor/cache/asr/{sha256}.asr.json`、临时 MP3 已清理；证据 `.cache/v05bug-3-asr-bottom.png`。
+- 未做：V0.5-B（BouncyCastle 验签、PluginLoadContext、providers-manifest、CliUpdater、YouTube 插件、WebView2 登录扩展）、V0.5-C（虎牙/斗鱼/抖音），均已按用户要求暂缓。
 
 ### Core
 
@@ -197,7 +199,7 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 4. `AsrSettingsStore.TestConnectionAsync` 走 `GET {endpoint 基址}/models`；不暴露 `/models` 的第三方服务会显示失败（不影响真实转写）。
 5. 剪辑台面板常显；卡片已有结果时再次点击只展开到面板、不重复请求（与 Provider 缓存叠加）。
 6. 高能卡片摘要截断 60 字符（ToolTip 显示全文）。
-7. 未接入真实云端 API 手测（本机无 API Key），真实链路留待用户配置 Key 后按验收项验证。
+7. 已完成真实云端 API 验证（用户 siliconflow Key，55s 音频约 11s 返回），缓存命中与临时文件清理已核对。
 
 ## 提交记录（V0.5-A）
 
@@ -206,6 +208,8 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 | `feat(asr): 新增 V0.5-A 语音识别领域契约与云端 Provider` | Core 2 模型 + 1 接口 + 5 设置键；`Media/Asr/OpenAiCompatibleAsrProvider`；Media 7 个单测 + `TestHttpMessageHandler` |
 | `feat(desktop): 设置页与剪辑台接入云端语音识别` | `AsrSettingsStore`、AppServices 接线、设置窗 ASR 分区、剪辑台卡片/面板、`AsrTranscriptLineViewModel`、Desktop 18 个测试 |
 | `docs(v0.5-a): 收录 ASR 设计文档并更新 HANDOFF` | `limoclip_v0_5_asr.md`（P0 修订后版）、本文件 |
+
+提交哈希：`d394352` → `4ac079a` → `6cced22`；其后本机运行规避提交 `2d765c8`、波形修复提交 `c32367d`；当前 HEAD 为文档收尾提交（见 `git log -1`）。
 
 ## 本机运行限制：工作区内可执行文件被强制写沙箱（2026-11-23 定位）
 
@@ -238,7 +242,7 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 - ASR：剪辑台选中该场次后「🎙 识别当前选区」，55s 音频约 11s 返回（siliconflow_cn / FunAudioLLM/SenseVoiceSmall），缓存写入 `%LocalAppData%/LiveMonitor/cache/asr/{sha256}.asr.json`，临时 MP3 已清理。截图 `.cache/v05bug-3-asr-bottom.png`。
 - 若在普通用户机器上运行，建议仍记录一条产品侧改进待办：录制前目标目录可写性预检 + `ffmpeg exit -13` 明确提示 + 「打开目录」失败提示（本环境未改代码）。
 
-### 后续修复（2026-11-23 19:4x）
+### 后续修复（2026-11-23 19:4x，提交 `c32367d`）
 
 - 启动器 v3：本机用户环境 `TEMP/TMP=E:\code\Env\Temp`（工作区外），而 `dotnet.exe` 位于工作区内、受同一写沙箱限制，构建时报 `MSB1025 Access to the path 'E:\code\Env\Temp\MSBuildTemp' is denied`，脚本失败后窗口一闪而过。现启动器在构建前把 `DOTNET_ROOT/DOTNET_CLI_HOME/NUGET_PACKAGES/APPDATA/LOCALAPPDATA/TEMP/TMP` 全部指到工作区内（`.cache\temp`、`.appdata`），构建结束在 `finally` 中恢复真实用户环境变量再启动应用；失败时红字报错 + `Read-Host` 暂停，并写 transcript 日志 `.cache/launcher-run.log`。
 - 剪辑台时间轴波形修复：`DrawWaveform` 原先用非闭合、`isFilled:false` 的 `StreamGeometry` 线段填充绘制，实际零面积不可见，用户只能看到波形中心线（一条平直蓝线）。改为按像素采样上下包络、拼成闭合多边形填充 + 描边，无可用音频时显示「（该视频没有可用的音频波形）」；`ClipStudioView.axaml` 给 `ClipTimelineControl` 增加 `ToolTip.Tip` 说明各行含义与操作（点击/拖动定位播放头、拖 IN/OUT、滚轮缩放、双击复位）。截图 `.cache/v05bug-8-waveform-crop.png`。
