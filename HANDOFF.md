@@ -1,13 +1,13 @@
-# LiveMonitor 交接（截至 V0.5-C Step6：虎牙插件；含本机运行规避方案）
+# LiveMonitor 交接（截至 V0.5-C Step7：斗鱼插件；含本机运行规避方案）
 
 ## 状态
 
-- 分支 `main`；**当前 HEAD 为 V0.5-C Step6 收尾提交（登录后可见 `git log` 顶部；虎牙插件提交 `2c2ca42`、清理提交 `1b6d0ac`，其后为本次文档提交）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避、波形修复、产品侧加固、V0.5-B 六次提交、V0.5-C Step6 两次提交，提交清单见文末各节。
+- 分支 `main`；**当前 HEAD 为 V0.5-C Step7 收尾提交（登录后可见 `git log` 顶部；斗鱼插件提交见文末「V0.5-C 增量（Step7 斗鱼）」，其后为本次文档提交）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避、波形修复、产品侧加固、V0.5-B 六次提交、V0.5-C Step6 两次提交、Step7 两次提交，提交清单见文末各节。
 - 构建：`dotnet build LiveMonitor.sln --no-restore` → **0 错误**，8~14 警告（MSB3277 / NU1803 / NU1900 等，均为本机环境既有告警，无新增代码告警）。
-- 测试：Data 37 / Platforms **310** / Danmaku 98 / Media **166** / Desktop 94 = **705 全绿**（V0.4 基线 471；V0.5-A +7 Media、+18 Desktop；产品侧加固 +17 Media；V0.5-B +125 Platforms、+2 Media；V0.5-C Step6 +65 Platforms）。
-- 验收：V0.4 GUI 端到端通过（脚本 `.cache/v04-acceptance2.ps1`，证据 `.cache/v04b-*.png`）；V0.5-A 完成真实 API 验证（55s 音频约 11s 返回，见「V0.5-A 增量」）；本机运行规避后完成真实 GUI 录制/打开目录/ASR 验证；**V0.5-B 阶段验收通过**（YouTube 添加/监控/录制 49.97s（含音频）/剪辑波形/双版导出（含音频）/ASR，见「V0.5-B 增量」）；V0.5-C Step6 虎牙：插件、协议单测与真实探针（拉流状态 + 20s 内 86 条弹幕）通过，但本机为海外出口、虎牙 CDN 对海外网络限流，GUI 播放/录制未能完整验证（见「V0.5-C 增量」）。
-- 实现依据：`limoclip_v0_4.md`（V0.4）、`limoclip_v0_5_asr.md`（V0.5-A/B，已按实现修订 P0 偏差）；`code_artifact.md` 已更新为 v1.9。
-- **V0.5-B 已完成并通过阶段 B 验收；V0.5-C 进行中：Step6 虎牙已完成（插件 + 单测 + 真实探针），Step7 斗鱼 / Step8 抖音 / Step9 联调打包待做**（用户同意按 B→C 串行推进，恢复开发先读本文件「新 session 首条消息」「V0.5-B 增量」「V0.5-C 增量」）。多轨 NLE 只评估、不实现。
+- 测试：Data 37 / Platforms **373** / Danmaku 98 / Media **166** / Desktop 94 = **768 全绿**（V0.4 基线 471；V0.5-A +7 Media、+18 Desktop；产品侧加固 +17 Media；V0.5-B +125 Platforms、+2 Media；V0.5-C Step6 +65 Platforms、Step7 斗鱼 +63 Platforms）。
+- 验收：V0.4 GUI 端到端通过（脚本 `.cache/v04-acceptance2.ps1`，证据 `.cache/v04b-*.png`）；V0.5-A 完成真实 API 验证（55s 音频约 11s 返回，见「V0.5-A 增量」）；本机运行规避后完成真实 GUI 录制/打开目录/ASR 验证；**V0.5-B 阶段验收通过**（YouTube 添加/监控/录制 49.97s（含音频）/剪辑波形/双版导出（含音频）/ASR，见「V0.5-B 增量」）；V0.5-C Step6 虎牙：插件、协议单测与真实探针（拉流状态 + 20s 内 86 条弹幕）通过，但本机为海外出口、虎牙 CDN 对海外网络限流，GUI 播放/录制未能完整验证（见「V0.5-C 增量」）；V0.5-C Step7 斗鱼：插件、协议单测、真实探针与 **GUI 全链路验收通过**（真实录制 56.8s/11.4MB 含音频 + 72 条弹幕、剪辑台波形与混流、双版导出均含音频，见「V0.5-C 增量（Step7 斗鱼）」）。
+- 实现依据：`limoclip_v0_4.md`（V0.4）、`limoclip_v0_5_asr.md`（V0.5-A/B，已按实现修订 P0 偏差）；`code_artifact.md` 已更新为 v2.0。
+- **V0.5-B 已完成并通过阶段 B 验收；V0.5-C 进行中：Step6 虎牙已完成（插件 + 单测 + 真实探针；GUI 受本机海外网络限流未完整验证）、Step7 斗鱼已完成（插件 + 单测 + 真实探针 + GUI 全链路）**，Step8 抖音 / Step9 联调打包待做（用户同意按 B→C 串行推进，恢复开发先读本文件「新 session 首条消息」「V0.5-B 增量」「V0.5-C 增量」）。多轨 NLE 只评估、不实现。
 
 ## V0.4 已实现内容
 
@@ -320,4 +320,24 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 
 ### 新 session 首条消息（V0.5-C 阶段）
 
-- 继续 V0.5-C：Step7 斗鱼（Jint 执行 `ub98484234` 签名 + STT 键值对弹幕 + extraScripts 热更新），然后 Step8 抖音（ttwid + Protobuf PushFrame→Gzip→Response→Ack），Step9 全平台联调 + v0.5.0 打包准备。main 小步提交；GUI 验收从 `E:\LimoClip-v05-run`；注意本机海外网络对国内平台直播 CDN 的限制。
+- 继续 V0.5-C：Step7 斗鱼已完成（`LiveMonitor.Plugins.Douyu`：betard + Jint 执行 `ub98484234` 签名 + getH5Play 拉流 + STT 弹幕），完成真实探针与 GUI 全链路验收。下一步 Step8 抖音（ttwid + Protobuf PushFrame→Gzip→Response→Ack），然后 Step9 全平台联调 + v0.5.0 打包准备。main 小步提交；GUI 验收从 `E:\LimoClip-v05-run`；注意本机海外网络对虎牙 CDN 的限制（斗鱼在本机可用）。
+
+
+## V0.5-C 增量（Step7 斗鱼）：2026-11-23
+
+### 状态
+
+- 完成：斗鱼平台插件（`src/LiveMonitor.Plugins.Douyu/`，7 文件）——betard 房间信息、`homeH5Enc` 下发混淆脚本 + **Jint** 执行 `ub98484234` 签名（注入 `CryptoJS.MD5` shim）、`lapi/live/getH5Play` 拉流、`danmuproxy.douyu.com:8601` STT 弹幕；内置插件注册（`BuiltInPlatformPlugins`）。
+- 校验：解决方案 build 0 错误；五套测试 **768 全绿**（Platforms 310→373，斗鱼新增 63 个用例）。
+- 真实探针（`.cache/douyuprobe2`）：房间 9999（yyfyyf）`LIVE=True`、画质「蓝光4M」（rate=4）、20 秒收到 25 条弹幕、ffmpeg 带 `-ca_file` 录制 8 秒成功（837,725B）。
+- GUI 全链路验收（`E:\LimoClip-v05-run`）：添加 `https://www.douyu.com/9999` → 监控窗格播放正常（蓝光4M/硬解 30fps）→ 录制 56.8s（11,428,006B + 12,472B 弹幕 72 条，DB `Platform=3/Status=3/DanmakuCount=72/ErrorMessage=None`）→ 剪辑台加载（波形正常、无「无可用音频波形」提示）→ 导出 00:00-00:10 双版（clean 1,508,219B / danmaku 3,867,838B，ffprobe 均含 AAC 音轨）。截图：`.cache/v05c-douyu-monitor.png`、`.cache/v05c-douyu-clip.png`、`.cache/v05c-douyu-clip-export.png`。
+- 网络结论：与虎牙不同，斗鱼在本机海外网络可用；但 HTTPS CDN 需随包 CA（`FfmpegLocator.CaBundleRelativePath` 已内置为 `-ca_file`），匿名最高画质 rate=4「蓝光4M」（更高需登录 Cookie）。
+
+### 实现要点
+
+- `DouyuUrlParser`（douyu 链接/数字房间号；纯数字 CanHandle=false 避免与 B 站冲突）；`DouyuSigner`（GET `swf_api/homeH5Enc?rids=` 取混淆 JS 并按房间缓存，Jint 10s 超时 + CryptoJS.MD5 shim（.NET MD5）+ window/document/navigator/location stub，**注意不能让沙箱注入 host eval**）；`DouyuApiClient`（betard 手动 gzip 解压、签名 form `rate=-1` 调 getH5Play、拼 `rtmp_url`+`rtmp_live`、multirates 匹配显示名）；`DouyuStt`（12 字节小端头 689/690、STT 键值转义 `@S`/`@A`、结尾 `\0`）；`DouyuDanmakuClient`（TCP 8601、loginreq/loginres/joingroup/chatmsg/dgb、45s mrkl 心跳、主动断开不触发 Disconnected）；`DouyuProvider`/`DouyuPlugin`。
+- 引用：`LiveMonitor.Plugins.Douyu.csproj` 加 `PackageReference Jint 4.18.1`；`LiveMonitor.Platforms.csproj` 引用斗鱼插件；`BuiltInPlatformPlugins.CreateAll()` 增加 `new DouyuPlugin()`。
+
+### 新 session 首条消息（V0.5-C 阶段，更新）
+
+- V0.5-C Step6 虎牙、Step7 斗鱼均已完成并推送；下一步 Step8 抖音（ttwid + Protobuf PushFrame→Gzip→Response→Ack，风控最强），然后 Step9 全平台联调 + v0.5.0 打包准备。main 小步提交；GUI 验收从 `E:\LimoClip-v05-run`；本机网络：斗鱼可用、虎牙 CDN 限流、抖音需实测。

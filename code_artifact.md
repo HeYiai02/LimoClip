@@ -1,6 +1,6 @@
-# 直播监控与自动切片应用 — 技术架构与接口设计文档（v1.9，2026-11-23）
+# 直播监控与自动切片应用 — 技术架构与接口设计文档（v2.0，2026-11-23）
 
-> 版本说明：v1.9 按 V0.5-C Step6 实施口径修订——虎牙平台插件已落地（`LiveMonitor.Plugins.Huya`：移动端 `mp.huya.com` 拉流接口 + 自实现 Tars/Wup 最小子集 + `wss://wsapi.huya.com` 新版弹幕协议），以内置插件形式接入并完成协议单测与真实探针（状态/画质/20 秒 86 条弹幕）；本机为海外出口，虎牙 CDN 对海外网络限流导致 GUI 播放/录制无法在本机完整验收（国内网络需实测）。v1.8 的 V0.5-B 修订（插件热更新底座 + YouTube）、v1.7 的 V0.5-A、v1.6/v1.5 的 V0.4/V0.3 修订内容保持不变。V0.4/V0.5-A/V0.5-B/V0.5-C 的完整规格与验收记录以 `limoclip_v0_4.md` / `limoclip_v0_5_asr.md` 与 `HANDOFF.md` 为准。**斗鱼/抖音（V0.5-C Step7/8）尚未开始**；多轨 NLE 仅评估不做。
+> 版本说明：v2.0 按 V0.5-C Step7 实施口径修订——斗鱼平台插件已落地（`LiveMonitor.Plugins.Douyu`：`betard` 房间信息 + Jint 执行 `homeH5Enc` 下发的 `ub98484234` 签名 + `getH5Play` 拉流 + `danmuproxy:8601` STT 弹幕），已通过真实探针与 GUI 录制/剪辑导出验收。v1.9 的 V0.5-C Step6 修订——虎牙平台插件已落地（`LiveMonitor.Plugins.Huya`：移动端 `mp.huya.com` 拉流接口 + 自实现 Tars/Wup 最小子集 + `wss://wsapi.huya.com` 新版弹幕协议），以内置插件形式接入并完成协议单测与真实探针（状态/画质/20 秒 86 条弹幕）；本机为海外出口，虎牙 CDN 对海外网络限流导致 GUI 播放/录制无法在本机完整验收（国内网络需实测）。v1.8 的 V0.5-B 修订（插件热更新底座 + YouTube）、v1.7 的 V0.5-A、v1.6/v1.5 的 V0.4/V0.3 修订内容保持不变。V0.4/V0.5-A/V0.5-B/V0.5-C 的完整规格与验收记录以 `limoclip_v0_4.md` / `limoclip_v0_5_asr.md` 与 `HANDOFF.md` 为准。**斗鱼（V0.5-C Step7）已实现；抖音（Step8）与联调打包（Step9）尚未开始**；多轨 NLE 仅评估不做。
 
 
 ## 1. 项目定位与核心架构决策
@@ -66,6 +66,7 @@ LiveMonitor.sln
 │   │                                    # PlatformPluginLoadContext / PlatformPluginLoader / PlatformPluginHost /
 │   │                                    # PluginUpdateService / BuiltInPlatformPlugins
 │   ├── LiveMonitor.Plugins.YouTube/     # V0.5-B YouTube 平台插件（URL 解析 / yt-dlp 状态 / InnerTube 实时弹幕）
+│   ├── LiveMonitor.Plugins.Douyu/       # V0.5-C Step7 斗鱼插件（betard / Jint 签名 / getH5Play / STT 弹幕）
 │   ├── LiveMonitor.Plugins.Huya/        # V0.5-C Step6 虎牙插件（mp.huya.com 拉流 / Tars 编解码 / wsapi 弹幕）
 │   │
 │   ├── LiveMonitor.Danmaku/             # [弹幕管线与分析层] 单例复用、过滤、高能检测
@@ -477,7 +478,7 @@ B站独轮车过滤管线必须前置在 `IHighlightDetector` 与弹幕落盘之
    * **海外 CLI 层**：客户端定期检查 GitHub Releases（支持镜像加速）自动替换 `tools/` 下的 `yt-dlp.exe`（Twitch/YouTube 共用）。
    * **国内插件 DLL 层**：B站/抖音/斗鱼/虎牙独立编译为 30~80 KB 的 `Provider.*.dll`，由 GitHub/Gitee 上的 `providers-manifest.json` 维护版本与 SHA256；客户端下载后先用内置公钥做 **Ed25519 数字签名校验**，通过后经 `AssemblyLoadContext` 热加载替换。
    * **签名脚本层**：针对斗鱼、抖音高频换壳的前端混淆签名，由插件内置 `Jint` 加载热更新的 `.js` 签名脚本。
-   * **当前状态（2026-11-23，V0.5-B 已实现）**：CLI 层 `CliUpdater` 已实现（yt-dlp `--version` 对比 GitHub latest、下载校验 MZ 后原子替换，入口在设置页「组件与插件更新」）；DLL 插件层已实现（`IPlatformPlugin` 契约、`providers-manifest.json` + Ed25519 验签、`PlatformPluginLoadContext` 内存流 + 可回收加载、`PlatformPluginHost` 安装/版本比较/无活跃任务时原子换表、`PluginUpdateService` 同步清单与安装）；YouTube 已作为内置插件平台提供（内置 B站/Twitch 亦通过 `IPlatformPlugin` 注册）。虎牙插件已按该机制以内置插件形式落地（V0.5-C Step6；无需 Jint，协议自实现，因此国内三平台中仅斗鱼/抖音需要签名脚本层）；斗鱼/抖音的“签名脚本层”（Jint + 热更新 .js）随 V0.5-C Step7/8 实现，尚未开始。
+   * **当前状态（2026-11-23，V0.5-B 已实现）**：CLI 层 `CliUpdater` 已实现（yt-dlp `--version` 对比 GitHub latest、下载校验 MZ 后原子替换，入口在设置页「组件与插件更新」）；DLL 插件层已实现（`IPlatformPlugin` 契约、`providers-manifest.json` + Ed25519 验签、`PlatformPluginLoadContext` 内存流 + 可回收加载、`PlatformPluginHost` 安装/版本比较/无活跃任务时原子换表、`PluginUpdateService` 同步清单与安装）；YouTube 已作为内置插件平台提供（内置 B站/Twitch 亦通过 `IPlatformPlugin` 注册）。虎牙插件已按该机制以内置插件形式落地（V0.5-C Step6；无需 Jint，协议自实现，因此国内三平台中仅斗鱼/抖音需要签名脚本层）；斗鱼的签名脚本层（Jint 执行 `ub98484234` + CryptoJS MD5 shim）已在 V0.5-C Step7 落地（`DouyuSigner`，`homeH5Enc` 脚本按房间缓存）；抖音的签名/风控层随 Step8 实现，尚未开始。
 
 ### 6.5 存储安全与高并发账号风控边界
 * **本地落盘与映射盘**：全程录像直接写入目标目录（默认 `%UserProfile%\Videos\LimoClip`，可全局或按直播间覆盖，允许指向 NAS 映射盘）；不做本地→云盘异步归档与 `rclone` 集成。弱网/映射盘抖动由 `-rw_timeout 15s` + 30 秒无进度判卡死兜底；强杀宿主由 Job Object 保证 ffmpeg 无残留。
@@ -496,4 +497,5 @@ B站独轮车过滤管线必须前置在 `IHighlightDetector` 与弹幕落盘之
 | **V0.5-A 云端 ASR（已实现）** | Core `AsrTranscriptSegment/AsrTranscriptResult/IAsrProvider` + 5 个 `Asr*` 设置键；Media `Asr/OpenAiCompatibleAsrProvider`（抽音/multipart/双格式解析/缓存/取消/Job Object）；Desktop `AsrSettingsStore`（4 预设 + DPAPI Key + `/models` 连通性测试）+ 设置页「语音识别（ASR）」分区 + 剪辑台「🎙 识别当前选区 / 高能卡片转写 / 逐句点击跳转 / 复制全文」。 | 已验收：2 分钟以内片段全流程 ≤15s（实测 55s 音频约 11s，siliconflow_cn / FunAudioLLM/SenseVoiceSmall）；缓存重启命中不发网络（单测覆盖）；496 个单元测试全绿；真实 GUI 录制→剪辑→转写链路通过。 |
 | **V0.5-B 平台插件热更新底座 + YouTube（已实现）** | Core `IPlatformPlugin`、`StreamQuality.AudioStreamUrl/AudioHeaders`；Platforms `Plugins/`（PluginTrust / Ed25519Verifier / ProvidersManifest / PluginLoadContext / PlatformPluginLoader / PlatformPluginHost / PluginUpdateService / BuiltInPlatformPlugins）、工厂原子换表、B站/Twitch 内置插件化、Common `ToolLocator/PluginVersionInfo/PluginVersionComparer/CliUpdater`；新工程 `LiveMonitor.Plugins.YouTube`（URL 解析 + yt-dlp 状态 + InnerTube 弹幕）；Desktop 设置页「组件与插件更新」、AppServices 接线、mpv `audio-file` 与 ffmpeg 双输入音频；`scripts/PluginSigner` + 签名/打包脚本、`plugins/` 清单与说明。 | 已验收：篡改 DLL 被拒载/合法插件加载（单测）；真实 YouTube 直播 `4t4AQ15yj1M` 添加/监控 1080P30、录制 49.97s（视频+HE-AAC 音频+77 弹幕）、剪辑波形、双版导出（含音频）、ASR 全部通过；640 个单元测试全绿。插件安装/热生效实机路径待首个签名插件发布后补测。 |
 | **V0.5-C Step6 虎牙（已实现）** | 新工程 `LiveMonitor.Plugins.Huya`：移动端 `mp.huya.com` 拉流接口解析、个性域名→数字房间号缓存解析、Tars/Wup 最小子集编解码、`wss://wsapi.huya.com` RegisterGroupReq 订阅（live/chat）与 cmd7/22 弹幕解析、ClientWebSocket 客户端、单档画质 Provider、`HuyaPlugin`；Platforms 注册为内置插件。 | 已验收：协议单测（编码 golden bytes / 订阅帧 / 推送解析）+ 真实探针（房间 60066 状态 LIVE、画质蓝光20M、20 秒 86 条弹幕）；705 个单元测试全绿。**本机为海外出口，虎牙 CDN 限流导致 GUI 播放/录制无法完整验收，需国内网络实测。** |
-| **V0.5-C Step7/8/9 斗鱼 + 抖音 + 联调打包（未开始）** | 斗鱼（WSS 弹幕 + Jint 执行 ub98484234 签名脚本、extraScripts 热更新）、抖音（Protobuf PushFrame + ttwid 风控）两个平台独立插件；签名脚本层（Jint）随本阶段落地；全平台联调 + v0.5.0 打包准备。 | 待实现后验证：三平台粘贴链接识别/起播/实时弹幕/全程录制，单平台失效不影响其余；前置调研与风险清单（R1~R12）见 `HANDOFF.md` 与 `limoclip_v0_5_asr.md` §4/§5。 |
+| **V0.5-C Step7 斗鱼（已实现）** | 新工程 `LiveMonitor.Plugins.Douyu`：`betard` 房间信息 + `homeH5Enc` 混淆脚本 + Jint 执行 `ub98484234` 签名（CryptoJS MD5 shim）+ `getH5Play` 拉流 + `danmuproxy.douyu.com:8601` STT 弹幕；Platforms 注册为内置插件。 | 已验收：63 个协议/解析单测 + 真实探针（房间 9999 LIVE、蓝光4M、20s 25 条弹幕）+ GUI 全链路（监控/录制 56.8s 含音频 72 弹幕/波形/双版导出含音频）；768 测试全绿。 |
+| **V0.5-C Step8/9 抖音 + 联调打包（未开始）** | 抖音（Protobuf PushFrame→Gzip→Response→Ack、ttwid + Cookie 风控）插件；全平台联调 + v0.5.0 打包准备。 | 待实现后验证：三平台粘贴链接识别/起播/实时弹幕/全程录制，单平台失效不影响其余；前置调研与风险清单（R1~R12）见 `HANDOFF.md` 与 `limoclip_v0_5_asr.md` §4/§5。 |
