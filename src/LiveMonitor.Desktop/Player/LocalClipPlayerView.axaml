@@ -1,0 +1,40 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:player="using:LiveMonitor.Desktop.Player"
+             xmlns:controls="using:LiveMonitor.Desktop.Controls"
+             x:Class="LiveMonitor.Desktop.Player.LocalClipPlayerView"
+             Background="#05070A"
+             HorizontalAlignment="Stretch"
+             VerticalAlignment="Stretch">
+  <Grid ClipToBounds="True">
+    <player:MpvVideoView x:Name="Video" />
+
+    <!-- 回放弹幕层：由 ClipStudioViewModel 按播放时间二分推进后批量入队。 -->
+    <controls:DanmakuOverlay x:Name="DanmakuLayer" IsVisible="False" />
+
+    <!-- 占位层：空态 / 加载中 / 失败。本地播放没有"未开播""重连"概念。 -->
+    <Border x:Name="StateOverlay" Background="#D90B0E13">
+      <StackPanel HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  Spacing="10"
+                  MaxWidth="420">
+        <ProgressBar x:Name="LoadingBar"
+                     Width="140"
+                     Height="3"
+                     IsIndeterminate="True"
+                     Foreground="#4C8DFF" />
+        <TextBlock x:Name="StateTitle"
+                   FontSize="16"
+                   FontWeight="SemiBold"
+                   Foreground="#E6E8EE"
+                   HorizontalAlignment="Center" />
+        <TextBlock x:Name="StateDetail"
+                   FontSize="12"
+                   Foreground="#8A93A6"
+                   TextWrapping="Wrap"
+                   TextAlignment="Center"
+                   HorizontalAlignment="Center" />
+      </StackPanel>
+    </Border>
+  </Grid>
+</UserControl>

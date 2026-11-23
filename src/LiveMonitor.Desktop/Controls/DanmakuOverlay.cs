@@ -67,6 +67,8 @@ public sealed class DanmakuOverlay : Control
     private double _laneHeight = LaneHeight;
     private int _maxConcurrent = 30;
     private bool _blocked;
+    private bool _paused;
+    private double _playbackRate = 1.0;
 
     public DanmakuOverlay()
     {
@@ -79,6 +81,26 @@ public sealed class DanmakuOverlay : Control
     {
         get => _maxConcurrent;
         set => _maxConcurrent = Math.Clamp(value, 1, 200);
+    }
+
+    /// <summary>
+    /// 暂停推进（本地剪辑预览暂停时用）。暂停期间已在屏弹幕冻结、不再从待渲染队列
+    /// 出生；恢复后继续按原速度移动。默认 false，直播路径行为不变。
+    /// </summary>
+    public bool IsPaused
+    {
+        get => _paused;
+        set => _paused = value;
+    }
+
+    /// <summary>
+    /// 弹幕移动倍率。本地剪辑 2 倍速播放时设为 2，让弹幕速度和画面保持一致；
+    /// 允许 0.25~4 以防异常值把速度算飞。默认 1.0，直播路径行为不变。
+    /// </summary>
+    public double PlaybackRate
+    {
+        get => _playbackRate;
+        set => _playbackRate = double.IsFinite(value) ? Math.Clamp(value, 0.25, 4.0) : 1.0;
     }
 
     /// <summary>
@@ -207,6 +229,14 @@ public sealed class DanmakuOverlay : Control
             // 布局还没就绪/被隐藏时保留注册，等下一帧再试。
             return _pending.Count > 0;
         }
+
+        // 暂停时冻结屏上弹幕并暂缓出生，保持注册等恢复后继续。
+        if (_paused)
+        {
+            return _items.Count > 0 || _pending.Count > 0;
+        }
+
+        delta *= PlaybackRate;
 
         var height = Bounds.Height;
         var laneCount = Math.Max(1, (int)((height - LaneTopPadding * 2) / LaneHeight));
