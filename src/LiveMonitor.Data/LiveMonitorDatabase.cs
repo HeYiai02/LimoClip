@@ -63,9 +63,20 @@ public sealed class LiveMonitorDatabase
             UpdatedAt TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS HighlightEvents (
+            Id TEXT PRIMARY KEY,
+            Platform INTEGER NOT NULL,
+            RoomId TEXT NOT NULL,
+            TriggerTime TEXT NOT NULL,
+            CurrentRatePerSec REAL NOT NULL,
+            BaselineRatePerSec REAL NOT NULL,
+            TriggerReason TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS IX_LayoutSlots_ProfileId ON LayoutSlots(LayoutProfileId);
         CREATE INDEX IF NOT EXISTS IX_LayoutSlots_LiveRoomId ON LayoutSlots(LiveRoomId);
         CREATE UNIQUE INDEX IF NOT EXISTS UX_LayoutSlots_ProfileRoom ON LayoutSlots(LayoutProfileId, LiveRoomId);
+        CREATE INDEX IF NOT EXISTS IX_HighlightEvents_TriggerTime ON HighlightEvents(TriggerTime DESC);
         """;
 
     private readonly string _connectionString;
