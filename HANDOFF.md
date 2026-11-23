@@ -206,3 +206,34 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 | `feat(asr): 新增 V0.5-A 语音识别领域契约与云端 Provider` | Core 2 模型 + 1 接口 + 5 设置键；`Media/Asr/OpenAiCompatibleAsrProvider`；Media 7 个单测 + `TestHttpMessageHandler` |
 | `feat(desktop): 设置页与剪辑台接入云端语音识别` | `AsrSettingsStore`、AppServices 接线、设置窗 ASR 分区、剪辑台卡片/面板、`AsrTranscriptLineViewModel`、Desktop 18 个测试 |
 | `docs(v0.5-a): 收录 ASR 设计文档并更新 HANDOFF` | `limoclip_v0_5_asr.md`（P0 修订后版）、本文件 |
+
+## 本机运行限制：工作区内可执行文件被强制写沙箱（2026-11-23 定位）
+
+### 现象
+
+- 直接从 `src/LiveMonitor.Desktop/bin/Debug/net8.0-windows/LiveMonitor.Desktop.exe` 运行时：
+  - 录制立即失败，DB 记录 `ffmpeg 异常退出（exitCode=-13）：Error opening output D:\clipRecord\...mkv: Permission denied`；
+  - 录制中心点「打开目录」弹 Windows 对话框「explorer.exe - 应用程序错误：应用程序无法正常启动(0xc0000142)」；
+  - 默认数据库打不开，回退到 `bin/Debug/net8.0-windows/data/livemonitor.db`（`startup-fallback.log` 记录 `SQLite Error 14: unable to open database file`）。
+
+### 定位结论（证据链）
+
+- 同一份 ffmpeg 字节：在工作区内（`bin/.../tools/ffmpeg/ffmpeg.exe`）只能写工作区内目录，写 `D:\`、`C:\Users`、`E:\` 根等全部 `exit -13 Permission denied`；复制到工作区外（`C:\Users`、`D:\clipNew`、`G:\` 等）即可正常写任意目录。
+- 同一份 cmd.exe：复制到工作区内启动 `explorer.exe "D:\clipRecord"` 返回 `0xC0000142`（精确复现用户报错）；复制到工作区外启动同命令正常。
+- 用 WMI `Win32_Process.Create` 脱离 DSH 进程树启动同样复现 ⇒ 不是 DSH 作业对象/沙箱继承，而是与本机安全软件/过滤驱动相关的机器级限制（本机存在 AlibabaProtect / `AliPaladinEx64.sys` 过滤驱动，`sc stop` 被拒绝 1052，未能进一步验证；Windows 日志 `Application Popup Id 26` 记录了 19:01–19:02 多次 explorer.exe 0xc0000142）。
+- 结论：**属开发机环境限制，不是 LiveMonitor 代码缺陷**；普通用户机器不受影响。
+
+### 规避方案（本项目开发调试规定）
+
+- 一律使用启动器（桌面快捷方式「LiveMonitor（工作区外运行）」或 `C:\Users\Administrator\LimoClip\refresh-and-run.ps1`）：
+  1. `dotnet build LiveMonitor.sln --no-restore`；
+  2. `robocopy` 构建输出到 **`E:\LimoClip-v05-run`**（工作区外），顺带删除陈旧 `startup-fallback.log`；
+  3. 从该目录启动 `LiveMonitor.Desktop.exe`。脚本带「已运行则拒绝」守卫，支持 `-SkipBuild` / `-NoLaunch`。
+- 数据迁移：原工作区回退库（含用户房间 7 条、设置 8 项、ASR Key、17 条高能记录）已 `wal_checkpoint(TRUNCATE)` 后迁移到默认位置 `C:\Users\Administrator\AppData\Local\LiveMonitor\livemonitor.db`；原回退库保留未动。
+
+### 规避后验证（2026-11-23 19:28–19:31，真实 GUI）
+
+- 录制：B 站房间 1882958350 真实录制 55.6s 成功，`D:\clipRecord\20261123_112855_#4_...mkv` 46,193,788B、同名 `.jsonl` 6,008B、弹幕 35 条，停止后 DB 状态 `Completed`、无错误。
+- 打开目录：正常弹出资源管理器，无 0xc0000142。
+- ASR：剪辑台选中该场次后「🎙 识别当前选区」，55s 音频约 11s 返回（siliconflow_cn / FunAudioLLM/SenseVoiceSmall），缓存写入 `%LocalAppData%/LiveMonitor/cache/asr/{sha256}.asr.json`，临时 MP3 已清理。截图 `.cache/v05bug-3-asr-bottom.png`。
+- 若在普通用户机器上运行，建议仍记录一条产品侧改进待办：录制前目标目录可写性预检 + `ffmpeg exit -13` 明确提示 + 「打开目录」失败提示（本环境未改代码）。
