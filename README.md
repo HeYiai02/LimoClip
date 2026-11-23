@@ -1,11 +1,13 @@
 # LiveMonitor
 
-多屏直播监控室。实现依据：
+多屏直播监控 + 弹幕高能录制剪辑。实现依据：
 
 - `livemonitor_v0_1.md`：V0.1 施工契约（v1.7）
 - `limoclip_v0_2.md`：V0.2 弹幕引擎详细设计实施文档（含实施记录）
 - `limoclip_v0_3.md`：V0.3 独立录制中心与全程录制引擎设计实施文档（含实施记录 §8）
-- `code_artifact.md`：长期架构全景（v1.5，已按 V0.3 口径更新）
+- `limoclip_v0_4.md`：V0.4 剪辑台（本地预览 / 波形时间轴 / 双版切片导出）设计实施文档
+- `code_artifact.md`：长期架构全景（v1.6，已按 V0.4 口径更新）
+- `HANDOFF.md`：当前版本交接（实现清单、验收证据、偏差与已知限制）
 - `livemonitor_v0_1.html`：交互 / 视觉基准原型
 
 ## V0.2 进度（弹幕引擎与高能空跑，已实现，待真实直播验收）
@@ -31,6 +33,20 @@
 - [x] Step 6：实机验收（2026-11-23，B站 6650029 / 7734200）：0 路播放时 2 路录制持续写入 mkv + jsonl；停录后 mkv 可播（ffmpeg 解码 exit=0）；强杀宿主后 ffmpeg 0.23s 内全部退出且文件可播；重启后未收尾会话标 Failed 并保留文件大小
 - 测试：Data 35 / Platforms 120 / Danmaku 98 / Media 95 / Desktop 74 = **422 全绿**；构建 0 错误
 - 实机问题修复：静态 ffmpeg 在 Windows 注册证书库失败导致 HTTPS 拉流 `I/O error` → 显式传 `-ca_file tools\cacert.crt`；录制中心实时指标不刷新（`RecordingCenterViewModel.InitializeAsync` 未被调用）；jsonl 中文被 `\uXXXX` 转义
+
+## V0.4 进度（剪辑台：本地预览 / 波形时间轴 / 双版切片导出，已实现并完成验收）
+
+实现依据：`limoclip_v0_4.md`（V0.4 起验收口径以该文档为准）。
+
+- [x] Step 1：Core 剪辑契约（`RecordedDanmakuItem` / `VideoMetadata` / `WaveformData` / `ClipExportRequest` / `ClipExportProgress` + `IWaveformService` / `IDanmakuAssConverter` / `IHardwareEncoderDetector` / `IClipExporter`）；Data 新增按录制会话查询高能事件（`GetByRecordingSessionAsync` + 索引）
+- [x] Step 2：`WaveformService`（`-vn -ac 1 -ar 4000 -f s16le` 流式 PCM、2000 桶音频峰值 + 弹幕密度、SHA256 缓存，无音轨降级全 0）
+- [x] Step 3：`VideoProbeService`（仓库无 ffprobe，解析 `ffmpeg -i` stderr）、`DanmakuAssConverter`（滚动弹幕 + 轨道避让）、`HardwareEncoderDetector`（nvenc→qsv→amf→libx264 实测探测并缓存）、`ClipExporter`（无损 clean + 硬编烧录 danmaku 双版、Job Object、取消/失败清理）
+- [x] Step 4：`LocalClipPlayerView`（独立本地 mpv 上下文：hr-seek / keep-open / 32M 回档、100ms 位置轮询、0.5x~2.0x 倍速）；`DanmakuPlaybackCursor` + `DanmakuOverlay` 暂停/倍速实现弹幕回放同步（seek 1.5s 回看补显）
+- [x] Step 5：`ClipTimelineControl`（自绘双波形时间轴：自适应刻度、音频波形开方压缩、5s 桶弹幕密度热力、高能区间、In/Out 拖拽、播放头拖拽、滚轮锚点缩放 1x~60x、平移/双击复位）
+- [x] Step 6：剪辑台四区视图 + 主窗口第三视图「✂ 剪辑台」+ 录制中心历史卡片「✂ 去剪辑」入口；快捷键 Space / ←→（Shift 1s）/ I / O / Esc
+- 测试：Data 37 / Platforms 120 / Danmaku 98 / Media 140 / Desktop 76 = **471 全绿**；构建 0 错误
+- 验收：GUI 脚本 `.cache/v04-acceptance2.ps1`（证据 `.cache/v04b-*.png`）——场次加载、弹幕回放、选区联动、双版导出 **1.9s** 完成（clean 13.30s / burned 11.20s），烧录帧弹幕清晰；本地文件 picker 已验证可打开并过滤 `*.mkv/*.mp4`，实际加载逻辑由 Desktop 单测覆盖
+- 验收中修复：右侧入点/出点文本不刷新、导出文件名不随选区更新、波形视觉接近平线、旧库迁移索引早于补列、`UseWindowsForms` 下 Avalonia 类型歧义
 
 ## 当前进度
 
@@ -107,7 +123,7 @@
 | --- | --- | --- |
 | `tools/libmpv-2.dll`（约 116 MB） | mpv 播放内核，`LibMpv.Avalonia` 加载 | [shinchiro/mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake/releases) 的 `mpv-dev-x86_64-*.7z`（别选 `-v3-`，那个要 AVX2） |
 | `tools/yt-dlp.exe`（约 22 MB） | Twitch / YouTube 流解析 | [yt-dlp releases](https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe) |
-| `tools/ffmpeg/`（约 100 MB，可选） | 探测 / 兜底，应用当前未直接调用 | [gyan.dev FFmpeg builds](https://www.gyan.dev/ffmpeg/builds/) |
+| `tools/ffmpeg/`（约 100 MB，V0.3 起硬依赖） | 全程录制、视频探测、波形提取、切片导出 | [gyan.dev FFmpeg builds](https://www.gyan.dev/ffmpeg/builds/) |
 
 首次克隆后一条命令补齐（已存在的文件跳过，`-Force` 重新下载）：
 
@@ -116,7 +132,7 @@ powershell -ExecutionPolicy Bypass -File scripts/fetch-tools.ps1             # l
 powershell -ExecutionPolicy Bypass -File scripts/fetch-tools.ps1 -WithFfmpeg # 额外下载 ffmpeg
 ```
 
-脚本会查 GitHub 最新 Release、下载后用 7-Zip 解包（系统没有 7-Zip 时临时下载官方单文件 `7zr.exe`，不安装软件）；`cacert.crt` 为公开 CA 根证书清单，仓库已带，缺失时才从 curl.se 拉取。构建时 `LiveMonitor.Desktop.csproj` 会把 `libmpv-2.dll`、`yt-dlp.exe`、`cacert.crt` 复制到输出目录；缺文件不会让构建失败，但播放/解析会在运行时失败。
+脚本会查 GitHub 最新 Release、下载后用 7-Zip 解包（系统没有 7-Zip 时临时下载官方单文件 `7zr.exe`，不安装软件）；`cacert.crt` 为公开 CA 根证书清单，仓库已带，缺失时才从 curl.se 拉取。构建时 `LiveMonitor.Desktop.csproj` 会把 `libmpv-2.dll`、`yt-dlp.exe`、`cacert.crt`、`tools/ffmpeg/ffmpeg.exe` 复制到输出目录；缺文件不会让构建失败，但播放/解析/录制/剪辑导出会在运行时失败。**ffmpeg 自 V0.3 起为录制、V0.4 起为探测/波形/切片导出的硬依赖，首次搭建建议直接带 `-WithFfmpeg` 下载。**
 
 发 GitHub Releases 时，把 `tools/` 里的二进制连同 `bin/Release/net8.0-windows/` 的输出一起打进 zip 包即可，仓库本身不必包含它们。
 
@@ -125,6 +141,8 @@ dotnet build LiveMonitor.sln
 dotnet run --project src/LiveMonitor.Desktop
 dotnet test tests/LiveMonitor.Data.Tests/LiveMonitor.Data.Tests.csproj
 dotnet test tests/LiveMonitor.Platforms.Tests/LiveMonitor.Platforms.Tests.csproj
+dotnet test tests/LiveMonitor.Danmaku.Tests/LiveMonitor.Danmaku.Tests.csproj
+dotnet test tests/LiveMonitor.Media.Tests/LiveMonitor.Media.Tests.csproj
 dotnet test tests/LiveMonitor.Desktop.Tests/LiveMonitor.Desktop.Tests.csproj
 ```
 
@@ -198,6 +216,8 @@ $env:TEMP='E:\code\liveSurveilance\.cache\temp'; $env:TMP=$env:TEMP
 7. V0.2 已接入实时弹幕流与渲染：连接只跟「房间是否在工作区」绑定，关闭弹幕开关/全局总闸只停渲染，高能统计与独轮车计数继续。
 8. WebView2 用 WinForms 独立登录窗；B站取 `SESSDATA`，Twitch 取 `auth-token`。
 9. mpv 用 `gpu-hwdec-interop=auto`；焦点 1080P 的 2M 缓存是否够用，Step 5 实测后再调。
+10. V0.4 剪辑台作为顶栏第三视图接入，与录制中心一样以 overlay 方式隐藏侧栏/状态栏、保留顶栏；本地预览用独立 `LocalClipPlayerView`（hr-seek / keep-open），不复用直播播放器配置。
+11. 切片导出文件名 `{源文件名}_{mm.ss-mm.ss}` 随选区自动更新、用户手改后锁定；无弹幕版 `-c copy` 存在 1~3s 关键帧对齐误差，UI 已提示。
 
 ## 目录
 
@@ -210,13 +230,15 @@ src/
   LiveMonitor.Platforms.Twitch/     Twitch Provider（独立类库）
   LiveMonitor.Platforms/            PlatformFactory 聚合与默认注册、DanmakuClientFactory
   LiveMonitor.Danmaku/              弹幕会话管理（DanmakuManager）、过滤器、高能检测、参数持久化（V0.2）
-  LiveMonitor.Desktop/              Avalonia UI、Dock、mpv、WebView2
+  LiveMonitor.Media/                录制引擎（Recording/，V0.3）与剪辑后端（Editing/，V0.4：jsonl/探测/波形/ASS/硬编/导出）
+  LiveMonitor.Desktop/              Avalonia UI、Dock、mpv、WebView2、录制中心与剪辑台
 tests/
   LiveMonitor.Data.Tests/           Data 层单元测试（xUnit）
   LiveMonitor.Platforms.Tests/      B站 / Twitch 解析与弹幕客户端单元测试（xUnit）
   LiveMonitor.Danmaku.Tests/        弹幕过滤 / 高能检测 / DanmakuManager 单元测试（xUnit，V0.2）
-  LiveMonitor.Desktop.Tests/        Dock Auto-Fit / 结构克隆单元测试（xUnit）
+  LiveMonitor.Media.Tests/          录制与剪辑后端单元测试（xUnit，V0.3/V0.4）
+  LiveMonitor.Desktop.Tests/        Dock Auto-Fit / 结构克隆 / 弹幕渲染 / 剪辑台 ViewModel 单元测试（xUnit）
 tools/                    运行时二进制目录（默认不入库，用 scripts/fetch-tools.ps1 补齐；cacert.crt 例外）
-scripts/                  fetch-tools.ps1：一键下载 libmpv / yt-dlp / ffmpeg
+scripts/                  fetch-tools.ps1：一键下载 libmpv / yt-dlp / cacert / ffmpeg
 spikes/                   三个技术验证 demo（不参与主解决方案）
 ```
