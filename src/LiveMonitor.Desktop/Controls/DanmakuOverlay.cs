@@ -55,7 +55,6 @@ public sealed class DanmakuOverlay : Control
     private long _lastTickTimestamp;
     private int _laneCount = 1;
     private double _laneHeight = LaneHeight;
-    private int _nextLane;
     private int _maxConcurrent = 30;
     private bool _blocked;
 
@@ -291,34 +290,22 @@ public sealed class DanmakuOverlay : Control
     private int FindFreeLane(double width)
     {
         // 逐条尝试：轨道里最后一条弹幕完全进场后才允许下一条，避免重叠。
-        for (var step = 0; step < _laneCount; step++)
+        // 从最上方开始找第一条空闲轨道，避免轮转分配在弹幕稀疏时只占下半屏。
+        return DanmakuLaneAllocator.FindFreeLane(_laneCount, GetLastItemRightEdge, width, SpawnGap);
+    }
+
+    private double GetLastItemRightEdge(int lane)
+    {
+        for (var i = _items.Count - 1; i >= 0; i--)
         {
-            var lane = (_nextLane + step) % _laneCount;
-            var free = true;
-            for (var i = _items.Count - 1; i >= 0; i--)
+            var item = _items[i];
+            if (item.Lane == lane)
             {
-                var item = _items[i];
-                if (item.Lane != lane)
-                {
-                    continue;
-                }
-
-                if (item.X + item.Width > width - SpawnGap)
-                {
-                    free = false;
-                }
-
-                break;
-            }
-
-            if (free)
-            {
-                _nextLane = (lane + 1) % _laneCount;
-                return lane;
+                return item.X + item.Width;
             }
         }
 
-        return -1;
+        return double.NegativeInfinity;
     }
 
     public override void Render(DrawingContext context)
