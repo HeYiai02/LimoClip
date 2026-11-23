@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>LiveMonitor.Plugins.Huya</AssemblyName>
+    <RootNamespace>LiveMonitor.Plugins.Huya</RootNamespace>
+    <!-- 平台插件：由主程序动态加载，共享 Core/Platforms.Common 类型（不随插件复制）。 -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 单元测试需要直接读取 Tars 编解码与报文解析等 internal 实现。 -->
+    <InternalsVisibleTo Include="LiveMonitor.Platforms.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LiveMonitor.Core\LiveMonitor.Core.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </ProjectReference>
+    <ProjectReference Include="..\LiveMonitor.Platforms.Common\LiveMonitor.Platforms.Common.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+</Project>

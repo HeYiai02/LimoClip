@@ -20,6 +20,7 @@
     <ProjectReference Include="..\..\src\LiveMonitor.Platforms\LiveMonitor.Platforms.csproj" />
     <ProjectReference Include="..\..\src\LiveMonitor.Plugins.YouTube\LiveMonitor.Plugins.YouTube.csproj" />
     <ProjectReference Include="..\LiveMonitor.Platforms.TestPlugin\LiveMonitor.Platforms.TestPlugin.csproj" />
+    <ProjectReference Include="..\..\src\LiveMonitor.Plugins.Huya\LiveMonitor.Plugins.Huya.csproj" />
   </ItemGroup>
 
   <ItemGroup>

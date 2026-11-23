@@ -12,5 +12,6 @@
     <ProjectReference Include="..\LiveMonitor.Platforms.Bilibili\LiveMonitor.Platforms.Bilibili.csproj" />
     <ProjectReference Include="..\LiveMonitor.Platforms.Twitch\LiveMonitor.Platforms.Twitch.csproj" />
     <ProjectReference Include="..\LiveMonitor.Plugins.YouTube\LiveMonitor.Plugins.YouTube.csproj" />
+    <ProjectReference Include="..\LiveMonitor.Plugins.Huya\LiveMonitor.Plugins.Huya.csproj" />
   </ItemGroup>
 </Project>
