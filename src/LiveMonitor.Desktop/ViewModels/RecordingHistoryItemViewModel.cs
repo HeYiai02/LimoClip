@@ -88,9 +88,23 @@ public sealed partial class RecordingHistoryItemViewModel : ObservableObject
         OnPropertyChanged(nameof(Summary));
     }
 
+    /// <summary>V0.4：录制已结束且 .mkv 仍在磁盘上时才能进入剪辑台。</summary>
+    public bool CanClip => !IsActive
+                           && !string.IsNullOrWhiteSpace(Session.VideoFilePath)
+                           && File.Exists(Session.VideoFilePath);
+
+    public string ClipTip => IsActive
+        ? "该录制仍在进行中，请先停止录制再进入剪辑台"
+        : CanClip
+            ? "进入剪辑台，预览/裁剪并导出 MP4"
+            : "录像文件不存在，无法进入剪辑台";
+
     [RelayCommand]
     private Task OpenFolderAsync() => _parent.OpenHistoryFolderAsync(this);
 
     [RelayCommand]
     private Task DeleteAsync() => _parent.RequestDeleteAsync(this);
+
+    [RelayCommand]
+    private Task ClipAsync() => _parent.RequestOpenClipAsync(this);
 }

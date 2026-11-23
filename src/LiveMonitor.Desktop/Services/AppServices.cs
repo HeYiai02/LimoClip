@@ -2,6 +2,7 @@ using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Danmaku;
 using LiveMonitor.Data;
 using LiveMonitor.Data.Repositories;
+using LiveMonitor.Media.Editing;
 using LiveMonitor.Media.Recording;
 using LiveMonitor.Platforms;
 
@@ -25,7 +26,12 @@ public sealed class AppServices
         PlatformFactory platforms,
         IRecordingTargetRepository recordingTargets,
         IRecordingSessionRepository recordingSessions,
-        RecordingManager recordings)
+        RecordingManager recordings,
+        VideoProbeService videoProbe,
+        IWaveformService waveforms,
+        IHardwareEncoderDetector encoders,
+        IClipExporter clips,
+        ProcessJobGuard clipJobGuard)
     {
         Database = database;
         Rooms = rooms;
@@ -40,6 +46,11 @@ public sealed class AppServices
         RecordingTargets = recordingTargets;
         RecordingSessions = recordingSessions;
         Recordings = recordings;
+        VideoProbe = videoProbe;
+        Waveforms = waveforms;
+        Encoders = encoders;
+        Clips = clips;
+        _clipJobGuard = clipJobGuard;
     }
 
     public LiveMonitorDatabase Database { get; }
@@ -73,6 +84,40 @@ public sealed class AppServices
 
     /// <summary>V0.3 录制引擎：后台录制、自动录制轮询与实时进度事件。</summary>
     public RecordingManager Recordings { get; }
+
+    /// <summary>V0.4 本地视频探测（ffmpeg -i 解析时长/宽高/帧率/编码）。</summary>
+    public VideoProbeService VideoProbe { get; }
+
+    /// <summary>V0.4 时间轴双波形（音频峰值 + 弹幕密度）流式提取与缓存。</summary>
+    public IWaveformService Waveforms { get; }
+
+    /// <summary>V0.4 硬件编码器实测探测（nvenc/qsv/amf → libx264 回退）。</summary>
+    public IHardwareEncoderDetector Encoders { get; }
+
+    /// <summary>V0.4 双版切片导出器（无损 copy + ASS 弹幕烧录）。</summary>
+    public IClipExporter Clips { get; }
+
+    private readonly ProcessJobGuard _clipJobGuard;
+    private bool _clipResourcesDisposed;
+
+    /// <summary>窗口关闭时释放导出用的 Job Object（级联结束残留 ffmpeg）。</summary>
+    public void DisposeClipExportResources()
+    {
+        if (_clipResourcesDisposed)
+        {
+            return;
+        }
+
+        _clipResourcesDisposed = true;
+        try
+        {
+            _clipJobGuard.Dispose();
+        }
+        catch
+        {
+            // 退出阶段释放失败不阻塞关闭。
+        }
+    }
 
     private static async Task<LiveMonitorDatabase> CreateDatabaseAsync(CancellationToken ct)
     {
@@ -158,6 +203,21 @@ public sealed class AppServices
             },
             danmaku);
 
+        // V0.4 剪辑台：ffmpeg 定位失败时仅占位，服务在真正调用时抛出带路径的异常，
+        // 不阻塞主界面启动（与录制模块的容错策略一致）。
+        var ffmpegPath = FfmpegLocator.TryLocate(out var located)
+            ? located
+            : Path.Combine(AppContext.BaseDirectory, FfmpegLocator.RelativePath);
+        var videoProbe = new VideoProbeService(ffmpegPath);
+        var waveforms = new WaveformService(ffmpegPath);
+        var encoders = new HardwareEncoderDetector(ffmpegPath);
+        var clipJobGuard = new ProcessJobGuard();
+        var clips = new ClipExporter(
+            ffmpegPath,
+            clipJobGuard,
+            encoders,
+            new DanmakuAssConverter());
+
         return new AppServices(
             database,
             roomRepository,
@@ -171,6 +231,11 @@ public sealed class AppServices
             platforms,
             recordingTargets,
             recordingSessions,
-            recordings);
+            recordings,
+            videoProbe,
+            waveforms,
+            encoders,
+            clips,
+            clipJobGuard);
     }
 }

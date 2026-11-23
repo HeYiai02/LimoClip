@@ -148,7 +148,40 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             ConfirmRecordingDeleteAsync?.Invoke(item) ?? Task.FromResult(false);
         center.PickDirectoryAsync = () =>
             PickRecordingDirectoryAsync?.Invoke() ?? Task.FromResult<string?>(null);
+        center.OpenClipStudioAsync = OpenClipStudioAsync;
         return center;
+    }
+
+    /// <summary>V0.4：true 表示顶栏切到「剪辑台」视图；监控工作区与录制中心保留在视觉树中。</summary>
+    [ObservableProperty]
+    private bool _isClipStudioVisible;
+
+    /// <summary>V0.4 剪辑台 ViewModel（懒创建：首次进入剪辑台时才构造播放器/导出面板）。</summary>
+    public ClipStudioViewModel ClipStudio => _clipStudio ??= CreateClipStudio();
+
+    private ClipStudioViewModel? _clipStudio;
+
+    /// <summary>由 View 注入：剪辑台选择本地视频文件，返回绝对路径；null 表示取消。</summary>
+    public Func<Task<string?>>? PickClipVideoFileAsync { get; set; }
+
+    /// <summary>由 View 注入：剪辑台选择导出目录，返回绝对路径；null 表示取消。</summary>
+    public Func<Task<string?>>? PickClipExportDirectoryAsync { get; set; }
+
+    private ClipStudioViewModel CreateClipStudio()
+    {
+        var studio = new ClipStudioViewModel(
+            _services.RecordingSessions,
+            _services.HighlightEvents,
+            _services.Settings,
+            _services.VideoProbe,
+            _services.Waveforms,
+            _services.Encoders,
+            _services.Clips);
+        studio.PickVideoFileAsync = () =>
+            PickClipVideoFileAsync?.Invoke() ?? Task.FromResult<string?>(null);
+        studio.PickExportDirectoryAsync = () =>
+            PickClipExportDirectoryAsync?.Invoke() ?? Task.FromResult<string?>(null);
+        return studio;
     }
 
     public IRootDock? Layout
@@ -441,12 +474,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     /// <summary>顶栏切换：回到监控工作区；Dock、播放器与后台录制均保持运行。</summary>
     [RelayCommand]
-    private void SwitchToWorkspace() => IsRecordingCenterVisible = false;
+    private void SwitchToWorkspace()
+    {
+        IsRecordingCenterVisible = false;
+        IsClipStudioVisible = false;
+        _clipStudio?.SuspendPlayback();
+    }
 
     /// <summary>顶栏切换：进入录制中心并刷新直播间/历史录像列表。</summary>
     [RelayCommand]
     private async Task SwitchToRecordingCenterAsync()
     {
+        IsClipStudioVisible = false;
+        _clipStudio?.SuspendPlayback();
         IsRecordingCenterVisible = true;
         try
         {
@@ -457,6 +497,43 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             SetStatus($"刷新录制中心失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>顶栏切换：进入剪辑台；首次进入时初始化并刷新录像列表。</summary>
+    [RelayCommand]
+    private async Task SwitchToClipStudioAsync()
+    {
+        IsRecordingCenterVisible = false;
+        IsClipStudioVisible = true;
+        try
+        {
+            var studio = ClipStudio;
+            await studio.InitializeAsync().ConfigureAwait(true);
+            await studio.RefreshSessionsAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"初始化剪辑台失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>V0.4：录制中心「去剪辑」入口，加载指定录像场次并切到剪辑台。</summary>
+    public async Task OpenClipStudioAsync(RecordingSession session)
+    {
+        IsRecordingCenterVisible = false;
+        IsClipStudioVisible = true;
+        try
+        {
+            var studio = ClipStudio;
+            await studio.InitializeAsync().ConfigureAwait(true);
+            await studio.RefreshSessionsAsync().ConfigureAwait(true);
+            await studio.OpenSessionAsync(session).ConfigureAwait(true);
+            SetStatus($"已进入剪辑台：{session.RoomDisplayName}");
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"打开剪辑台失败：{ex.Message}");
         }
     }
 
@@ -1585,6 +1662,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         catch
         {
             // 录制中心释放失败不阻塞窗口关闭。
+        }
+
+        try
+        {
+            // V0.4：剪辑台导出任务与其 Job Object 句柄一并释放（会级联终止残留 ffmpeg）。
+            _clipStudio?.Dispose();
+            _clipStudio = null;
+            _services.DisposeClipExportResources();
+        }
+        catch
+        {
+            // 剪辑台释放失败不阻塞窗口关闭。
         }
 
         try

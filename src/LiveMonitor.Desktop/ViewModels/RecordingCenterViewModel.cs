@@ -53,6 +53,9 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
     /// <summary>由 MainWindow 注入：系统目录选择器，返回绝对路径；null 表示用户取消。</summary>
     public Func<Task<string?>>? PickDirectoryAsync { get; set; }
 
+    /// <summary>V0.4：由 MainWindowViewModel 注入，录制中心请求把指定场次送进剪辑台。</summary>
+    public Func<RecordingSession, Task>? OpenClipStudioAsync { get; set; }
+
     internal RecordingManager Recordings => _recordings;
 
     public string GlobalDirectory
@@ -400,6 +403,37 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         catch (Exception ex)
         {
             StatusText = $"删除录制记录失败：{ex.Message}";
+        }
+    }
+
+    /// <summary>V0.4：把已完成的录像送进剪辑台；在录/文件缺失时只提示不跳转。</summary>
+    internal async Task RequestOpenClipAsync(RecordingHistoryItemViewModel item)
+    {
+        if (item.IsActive)
+        {
+            StatusText = "该录制仍在进行中，请先停止录制再进入剪辑台。";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(item.VideoFilePath) || !File.Exists(item.VideoFilePath))
+        {
+            StatusText = $"录像文件不存在，无法剪辑：{item.VideoFilePath}";
+            return;
+        }
+
+        if (OpenClipStudioAsync is null)
+        {
+            StatusText = "当前界面未接入剪辑台。";
+            return;
+        }
+
+        try
+        {
+            await OpenClipStudioAsync(item.Session).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"打开剪辑台失败：{ex.Message}";
         }
     }
 

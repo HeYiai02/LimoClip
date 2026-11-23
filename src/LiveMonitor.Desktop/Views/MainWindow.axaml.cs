@@ -128,6 +128,31 @@ public partial class MainWindow : Window
                 });
                 return folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
             };
+            _viewModel.PickClipVideoFileAsync = async () =>
+            {
+                var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                {
+                    Title = "选择本地视频文件",
+                    AllowMultiple = false,
+                    FileTypeFilter = new[]
+                    {
+                        new FilePickerFileType("视频文件 (mkv / mp4)")
+                        {
+                            Patterns = new[] { "*.mkv", "*.mp4" }
+                        }
+                    }
+                });
+                return files.Count > 0 ? files[0].TryGetLocalPath() : null;
+            };
+            _viewModel.PickClipExportDirectoryAsync = async () =>
+            {
+                var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+                {
+                    Title = "选择切片导出目录",
+                    AllowMultiple = false
+                });
+                return folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
+            };
             DataContext = _viewModel;
             _viewModel.ProportionsRestored += (_, _) => SyncVisualProportions();
             _viewModel.Groups.CollectionChanged += (_, _) => RefreshGroupPills();
@@ -142,6 +167,10 @@ public partial class MainWindow : Window
                     ApplyShellLayout();
                 }
                 else if (args.PropertyName == nameof(MainWindowViewModel.IsRecordingCenterVisible))
+                {
+                    ApplyShellLayout();
+                }
+                else if (args.PropertyName == nameof(MainWindowViewModel.IsClipStudioVisible))
                 {
                     ApplyShellLayout();
                 }
@@ -187,12 +216,22 @@ public partial class MainWindow : Window
 
     private void OnClosing(object? sender, WindowClosingEventArgs e)
     {
+        // 剪辑台内的 libmpv 上下文不属于窗口视觉树自动释放，先显式停播再销毁。
+        try
+        {
+            ClipStudioViewHost?.Shutdown();
+        }
+        catch
+        {
+            // 关闭阶段播放器收尾失败不阻塞退出。
+        }
+
         _viewModel?.Dispose();
     }
 
     /// <summary>
-    /// 按「焦点模式 / 录制中心 / 普通工作区」三种状态统一布局外壳：
-    /// 录制中心隐藏侧栏与底部状态栏但保留顶栏切换，且不销毁 Dock 与播放器。
+    /// 按「焦点模式 / 录制中心 / 剪辑台 / 普通工作区」统一布局外壳：
+    /// 录制中心与剪辑台隐藏侧栏与底部状态栏但保留顶栏切换，且不销毁 Dock 与播放器。
     /// </summary>
     private void ApplyShellLayout()
     {
@@ -202,20 +241,23 @@ public partial class MainWindow : Window
         }
 
         var recording = _viewModel.IsRecordingCenterVisible;
-        var focused = !recording && _viewModel.IsFocused;
-        var sidebarVisible = !recording && !focused && _sidebarVisible;
+        var clipping = _viewModel.IsClipStudioVisible;
+        var overlay = recording || clipping;
+        var focused = !overlay && _viewModel.IsFocused;
+        var sidebarVisible = !overlay && !focused && _sidebarVisible;
 
         Sidebar.IsVisible = sidebarVisible;
         TopBar.IsVisible = !focused;
-        StatusBar.IsVisible = !recording && !focused;
+        StatusBar.IsVisible = !overlay && !focused;
         RootGrid.ColumnDefinitions[0].Width =
             sidebarVisible ? new GridLength(260) : new GridLength(0);
         RootGrid.RowDefinitions[0].Height = focused ? new GridLength(0) : new GridLength(48);
         RootGrid.RowDefinitions[2].Height =
-            recording || focused ? new GridLength(0) : new GridLength(28);
+            overlay || focused ? new GridLength(0) : new GridLength(28);
 
-        WorkspaceTabButton.Classes.Set("active", !recording);
+        WorkspaceTabButton.Classes.Set("active", !overlay);
         RecordingTabButton.Classes.Set("active", recording);
+        ClipTabButton.Classes.Set("active", clipping);
 
         Dock.InvalidateMeasure();
         Dock.InvalidateArrange();
@@ -230,6 +272,11 @@ public partial class MainWindow : Window
     private void OnSwitchToRecordingCenter(object? sender, RoutedEventArgs e)
     {
         _viewModel?.SwitchToRecordingCenterCommand.Execute(null);
+    }
+
+    private void OnSwitchToClipStudio(object? sender, RoutedEventArgs e)
+    {
+        _viewModel?.SwitchToClipStudioCommand.Execute(null);
     }
 
     private void OnFocusDoubleTapped(object? sender, TappedEventArgs e)
@@ -253,18 +300,65 @@ public partial class MainWindow : Window
 
     private void OnWindowKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
     {
-        if (e.Key == Key.Escape && _viewModel?.IsRecordingCenterVisible == true)
+        var viewModel = _viewModel;
+        if (viewModel is null)
         {
-            _viewModel.SwitchToWorkspaceCommand.Execute(null);
+            return;
+        }
+
+        if (e.Key == Key.Escape
+            && (viewModel.IsRecordingCenterVisible || viewModel.IsClipStudioVisible))
+        {
+            viewModel.SwitchToWorkspaceCommand.Execute(null);
             e.Handled = true;
             return;
         }
 
-        if (e.Key == Key.Escape && _viewModel?.IsFocused == true)
+        if (e.Key == Key.Escape && viewModel.IsFocused)
         {
-            _viewModel.ExitFocus();
+            viewModel.ExitFocus();
             e.Handled = true;
+            return;
         }
+
+        // V0.4 剪辑台快捷键：Space 播放/暂停、←/→ 5 秒（Shift 1 秒）、I/O 设入出点。
+        if (!viewModel.IsClipStudioVisible || IsTextInputFocused())
+        {
+            return;
+        }
+
+        var studio = viewModel.ClipStudio;
+        var fine = (e.KeyModifiers & KeyModifiers.Shift) != 0;
+        switch (e.Key)
+        {
+            case Key.Space:
+                studio.PlayPause();
+                e.Handled = true;
+                break;
+            case Key.Left:
+                studio.SeekRelative(false, fine);
+                e.Handled = true;
+                break;
+            case Key.Right:
+                studio.SeekRelative(true, fine);
+                e.Handled = true;
+                break;
+            case Key.I:
+                studio.SetInFromPosition();
+                e.Handled = true;
+                break;
+            case Key.O:
+                studio.SetOutFromPosition();
+                e.Handled = true;
+                break;
+        }
+    }
+
+    /// <summary>焦点在文本输入/下拉框时，不让剪辑台快捷键抢走按键。</summary>
+    private bool IsTextInputFocused()
+    {
+        var focused = FocusManager?.GetFocusedElement();
+        return focused is Avalonia.Controls.TextBox or Avalonia.Controls.ComboBox;
     }
 
     private async void OnAddRoom(object? sender, RoutedEventArgs e)

@@ -54,6 +54,9 @@
           <Button x:Name="RecordingTabButton" Classes="group-pill" Content="⏺ 录制中心"
                   Click="OnSwitchToRecordingCenter" VerticalAlignment="Center"
                   ToolTip.Tip="管理各直播间的录制与历史录像" />
+          <Button x:Name="ClipTabButton" Classes="group-pill" Content="✂ 剪辑台"
+                  Click="OnSwitchToClipStudio" VerticalAlignment="Center"
+                  ToolTip.Tip="预览录像、裁剪区间并导出 MP4（V0.4）" />
         </StackPanel>
 
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="16,0,0,0">
@@ -255,6 +258,13 @@
             Background="#0F1115"
             IsVisible="{Binding IsRecordingCenterVisible}">
       <views:RecordingCenterView DataContext="{Binding RecordingCenter}" />
+    </Border>
+
+    <!-- V0.4 剪辑台：独立全屏视图，内含本地 libmpv 预览、双波形时间轴与导出面板 -->
+    <Border x:Name="ClipStudioHost" Grid.Row="1" Grid.ColumnSpan="2"
+            Background="#0F1115"
+            IsVisible="{Binding IsClipStudioVisible}">
+      <views:ClipStudioView x:Name="ClipStudioViewHost" DataContext="{Binding ClipStudio}" />
     </Border>
 
     <!-- Status bar -->

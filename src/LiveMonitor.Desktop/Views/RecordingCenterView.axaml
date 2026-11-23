@@ -238,6 +238,10 @@
                                                     <StackPanel DockPanel.Dock="Right"
                                                                 Orientation="Horizontal" Spacing="6"
                                                                 VerticalAlignment="Center">
+                                                        <Button Classes="rc-xs" Content="✂ 去剪辑"
+                                                                IsEnabled="{Binding CanClip}"
+                                                                ToolTip.Tip="{Binding ClipTip}"
+                                                                Command="{Binding ClipCommand}" />
                                                         <Button Classes="rc-xs" Content="打开文件夹"
                                                                 Command="{Binding OpenFolderCommand}" />
                                                         <Button Classes="rc-xs" Content="删除记录"
