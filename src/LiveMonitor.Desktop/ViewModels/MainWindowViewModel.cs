@@ -7,9 +7,11 @@ using Dock.Model.Controls;
 using Dock.Model.Core;
 using Dock.Model.Mvvm.Controls;
 using Dock.Serializer.SystemTextJson;
+using LiveMonitor.Core;
 using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Enums;
 using LiveMonitor.Core.Models;
+using LiveMonitor.Danmaku;
 using LiveMonitor.Desktop.Player;
 using LiveMonitor.Desktop.Services;
 
@@ -67,6 +69,18 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
     private bool _isHealthWarning;
     private DispatcherTimer? _focusHintTimer;
     private bool _isFocusHintVisible;
+    private bool _isHighlightPanelVisible;
+    private int _unicycleBlockedCount;
+    private const int MaxHighlightEvents = 200;
+
+    // V0.2 弹幕：订阅所有权放在 ViewModel（不挂视觉树），每个窗格一条引用计数句柄。
+    // 同一 (平台, 房间) 由 DanmakuManager 去重，焦点浮层不额外订阅。
+    private readonly Dictionary<RoomTileViewModel, DanmakuSubscription> _danmakuHandles =
+        new(ReferenceEqualityComparer.Instance);
+    private bool _danmakuMasterEnabled = true;
+    private bool _danmakuReady;
+
+    private sealed record DanmakuSubscription(DanmakuSessionHandle Handle, PlatformType Platform, string RoomId);
 
     private sealed record TilePlaybackSnapshot(RoomStatus? Status, string StateText, string DetailText);
 
@@ -144,7 +158,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _isHealthWarning, value);
     }
 
-    public string UnicycleBlockedText => "独轮车已拦: 0";
+    /// <summary>V0.2：由 DanmakuManager 推送的累计拦截数（当前会话）。</summary>
+    public string UnicycleBlockedText => $"独轮车已拦: {_unicycleBlockedCount}";
 
     public string StatusText
     {
@@ -229,6 +244,79 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
     public string RoomCountText => $"主库 {Rooms.Count} 路 · 工作区 {GridRows}×{GridColumns}";
 
+    /// <summary>高能事件面板是否展开；只影响主窗口叠加层，不写入方案 / Dock 布局。</summary>
+    public bool IsHighlightPanelVisible
+    {
+        get => _isHighlightPanelVisible;
+        set => SetProperty(ref _isHighlightPanelVisible, value);
+    }
+
+    /// <summary>高能事件流，最新的在最前面；内存里最多保留 200 条，完整历史在数据库。</summary>
+    public ObservableCollection<HighlightEventItem> HighlightEvents { get; } = new();
+
+    public bool IsHighlightEventsEmpty => HighlightEvents.Count == 0;
+
+    /// <summary>更新状态栏「独轮车已拦」计数（UI 线程或后台线程均可调用）。</summary>
+    public void SetUnicycleBlockedCount(int count)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => SetUnicycleBlockedCount(count));
+            return;
+        }
+
+        var clamped = Math.Max(0, count);
+        if (clamped == _unicycleBlockedCount)
+        {
+            return;
+        }
+
+        _unicycleBlockedCount = clamped;
+        OnPropertyChanged(nameof(UnicycleBlockedText));
+    }
+
+    /// <summary>收一条高能事件并插入面板顶部（后台线程安全）。</summary>
+    public void AddHighlightEvent(HighlightEvent highlightEvent)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => AddHighlightEvent(highlightEvent));
+            return;
+        }
+
+        var item = new HighlightEventItem(highlightEvent, ResolveRoomTitle(highlightEvent.RoomId));
+        HighlightEvents.Insert(0, item);
+        while (HighlightEvents.Count > MaxHighlightEvents)
+        {
+            HighlightEvents.RemoveAt(HighlightEvents.Count - 1);
+        }
+
+        OnPropertyChanged(nameof(IsHighlightEventsEmpty));
+    }
+
+    /// <summary>启动时从数据库回填最近的高能事件（调用方保证按时间倒序）。</summary>
+    public void LoadHighlightEvents(IEnumerable<HighlightEvent> highlightEvents)
+    {
+        HighlightEvents.Clear();
+        foreach (var highlightEvent in highlightEvents)
+        {
+            HighlightEvents.Add(new HighlightEventItem(highlightEvent, ResolveRoomTitle(highlightEvent.RoomId)));
+        }
+
+        OnPropertyChanged(nameof(IsHighlightEventsEmpty));
+    }
+
+    public void ClearHighlightEvents()
+    {
+        HighlightEvents.Clear();
+        OnPropertyChanged(nameof(IsHighlightEventsEmpty));
+    }
+
+    private string? ResolveRoomTitle(string roomId) =>
+        _roomById.Values.FirstOrDefault(room =>
+            string.Equals(room.RoomId, roomId, StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(room.Alias))?.Alias;
+
     /// <summary>工作区实际宽高比，用于 Auto-Fit 计算最接近 16:9 的行列数。</summary>
     public void SetWorkspaceAspect(double width, double height)
     {
@@ -270,12 +358,166 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _initialized = true;
+
+        // 先初始化弹幕管理器，再加载方案：LoadProfileAsync 结束时会 SyncDanmakuSubscriptions，
+        // 若管理器尚未 Initialize，Acquire 会抛 "请先 InitializeAsync"（启动报错窗口的根因）。
+        await InitializeDanmakuAsync(ct).ConfigureAwait(true);
+
         _suppressProfileLoad = true;
         SelectedProfile = Profiles[0];
         _suppressProfileLoad = false;
         await LoadProfileAsync(SelectedProfile).ConfigureAwait(true);
         StartHealthMonitor();
         _loadedProfile = SelectedProfile;
+    }
+
+    /// <summary>
+    /// 初始化弹幕管理器：加载屏蔽词/高能参数，回填历史高能事件，并按当前工作区建立订阅。
+    /// </summary>
+    private async Task InitializeDanmakuAsync(CancellationToken ct)
+    {
+        await _services.Danmaku.InitializeAsync(ct).ConfigureAwait(true);
+        _danmakuReady = true;
+        _services.Danmaku.HighlightTriggered += OnDanmakuHighlightTriggered;
+        _services.Danmaku.UnicycleBlockedCountChanged += SetUnicycleBlockedCount;
+
+        var recent = await _services.Danmaku
+            .GetRecentHighlightEventsAsync(MaxHighlightEvents, ct)
+            .ConfigureAwait(true);
+        LoadHighlightEvents(recent);
+        await ApplyDanmakuMasterSettingAsync(ct).ConfigureAwait(true);
+        SyncDanmakuSubscriptions();
+    }
+
+    private void OnDanmakuHighlightTriggered(HighlightEvent highlightEvent) => AddHighlightEvent(highlightEvent);
+
+    /// <summary>读取设置页的全局弹幕渲染总闸并立即应用（连接与高能统计不受影响）。</summary>
+    public async Task ApplyDanmakuMasterSettingAsync(CancellationToken ct = default)
+    {
+        var raw = await _services.Settings
+            .GetAsync(AppSettingKeys.DanmakuPreviewEnabled, ct)
+            .ConfigureAwait(true);
+        _danmakuMasterEnabled = string.IsNullOrWhiteSpace(raw)
+            || !string.Equals(raw.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+        ApplyDanmakuMasterEnabled();
+    }
+
+    private void ApplyDanmakuMasterEnabled()
+    {
+        if (Layout is not null)
+        {
+            foreach (var tile in WorkspaceDockBuilder.EnumerateTiles(Layout))
+            {
+                if (tile.PlayerView is { } player)
+                {
+                    player.DanmakuMasterEnabled = _danmakuMasterEnabled;
+                }
+            }
+        }
+
+        if (_focusPlayer is { } focusPlayer)
+        {
+            focusPlayer.DanmakuMasterEnabled = _danmakuMasterEnabled;
+        }
+    }
+
+    /// <summary>
+    /// 让弹幕连接与工作区中的房间保持一致。订阅只跟「房间是否在工作区」绑定：
+    /// 关弹幕（窗格开关/全局总闸）只停渲染，连接与高能统计继续。
+    /// </summary>
+    private void SyncDanmakuSubscriptions()
+    {
+        // _danmakuReady：DanmakuManager 尚未 InitializeAsync 时不能 Acquire（会抛
+        // "请先 InitializeAsync"）。启动时先初始化管理器再加载方案，这里做双保险。
+        if (!_initialized || !_danmakuReady || _disposed || Layout is null)
+        {
+            return;
+        }
+
+        ApplyDanmakuMasterEnabled();
+
+        var activeTiles = WorkspaceDockBuilder.EnumerateTiles(Layout)
+            .Where(tile => tile.HasRoom && !string.IsNullOrWhiteSpace(tile.RoomId))
+            .ToList();
+        var activeSet = new HashSet<RoomTileViewModel>(activeTiles, ReferenceEqualityComparer.Instance);
+
+        foreach (var pair in _danmakuHandles.ToList())
+        {
+            if (activeSet.Contains(pair.Key)
+                && pair.Value.Platform == pair.Key.Platform
+                && string.Equals(pair.Value.RoomId, pair.Key.RoomId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            pair.Value.Handle.Dispose();
+            _danmakuHandles.Remove(pair.Key);
+        }
+
+        foreach (var tile in activeTiles)
+        {
+            if (_danmakuHandles.ContainsKey(tile))
+            {
+                continue;
+            }
+
+            DanmakuSessionHandle handle;
+            try
+            {
+                handle = _services.Danmaku.Acquire(tile.Platform, tile.RoomId);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+            {
+                // 管理器未初始化/已释放时不让整个方案加载失败：跳过该窗格，等待下次 Sync 重试。
+                StatusText = $"弹幕订阅失败：{ex.Message}";
+                continue;
+            }
+
+            var capturedTile = tile;
+            handle.MessagesReceived += messages => OnDanmakuMessagesReceived(capturedTile, messages);
+            _danmakuHandles[tile] = new DanmakuSubscription(handle, tile.Platform, tile.RoomId);
+        }
+    }
+
+    private void OnDanmakuMessagesReceived(RoomTileViewModel tile, IReadOnlyList<DanmakuMessage> messages)
+    {
+        if (messages.Count == 0)
+        {
+            return;
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            DeliverDanmakuBatch(tile, messages);
+        }
+        else
+        {
+            Dispatcher.UIThread.Post(() => DeliverDanmakuBatch(tile, messages));
+        }
+    }
+
+    private void DeliverDanmakuBatch(RoomTileViewModel tile, IReadOnlyList<DanmakuMessage> messages)
+    {
+        if (_disposed || !_danmakuHandles.ContainsKey(tile))
+        {
+            return;
+        }
+
+        tile.PlayerView?.PushDanmaku(messages);
+        if (ReferenceEquals(tile, _focusedTile))
+        {
+            _focusPlayer?.PushDanmaku(messages);
+        }
+    }
+
+    private void ReleaseDanmakuSubscriptions()
+    {
+        foreach (var subscription in _danmakuHandles.Values)
+        {
+            subscription.Handle.Dispose();
+        }
+
+        _danmakuHandles.Clear();
     }
 
     public async Task<RoomListItemViewModel> AddRoomAsync(string url, string? groupTag = null, CancellationToken ct = default)
@@ -355,6 +597,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
                 .ToList();
             rooms.Add(room);
             await FitRoomsAsync(rooms, $"已添加 {room.Alias}", ct, startPlayback).ConfigureAwait(true);
+            SyncDanmakuSubscriptions();
             return;
         }
 
@@ -369,10 +612,13 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             {
                 await _players.StartAsync(empty, ct).ConfigureAwait(true);
             }
+
+            SyncDanmakuSubscriptions();
             return;
         }
 
         await AppendPaneAsync(room, tiles, ct, startPlayback).ConfigureAwait(true);
+        SyncDanmakuSubscriptions();
     }
 
     /// <summary>一键自适应：按当前活跃房间数重排，并清除“自定义比例”标记。</summary>
@@ -650,6 +896,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
         IsDirty = true;
         StatusText = $"已交换 {source.DisplayTitle} 与 {target.DisplayTitle}";
+        SyncDanmakuSubscriptions();
     }
 
     private void DisposePanePlayer(RoomTileViewModel tile)
@@ -723,7 +970,9 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(FocusedTitle));
         ShowFocusHint();
 
-        var player = new MpvPlayerView { RoomTitle = tile.DisplayTitle };
+        // DataContext 指向原窗格 tile：弹幕开关、标题等绑定在浮层里同样生效。
+        var player = new MpvPlayerView { RoomTitle = tile.DisplayTitle, DataContext = tile };
+        player.DanmakuMasterEnabled = _danmakuMasterEnabled;
         if (IsMasterMuted)
         {
             player.SetMute(true);
@@ -923,6 +1172,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _knownLiveStatus.TryRemove(roomId, out _);
         await ReloadRoomsAsync(ct).ConfigureAwait(true);
         await ReflowAutoAsync(ct).ConfigureAwait(true);
+        SyncDanmakuSubscriptions();
         MarkDirty();
         StatusText = $"已从主库删除 {room.Alias}";
     }
@@ -944,6 +1194,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
 
         tile.ClearRoom();
         await ReflowAutoAsync(CancellationToken.None).ConfigureAwait(true);
+        SyncDanmakuSubscriptions();
         IsDirty = true;
         StatusText = $"已移出 {title}";
         OnPropertyChanged(nameof(RoomCountText));
@@ -1028,6 +1279,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         await Task.WhenAll(starts).ConfigureAwait(true);
+        SyncDanmakuSubscriptions();
     }
 
     private async Task FitRoomsAsync(IReadOnlyList<LiveRoom> rooms, string status, CancellationToken ct, bool startPlayback = true)
@@ -1211,11 +1463,23 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         _healthTimer = null;
         _focusHintTimer?.Stop();
         _focusHintTimer = null;
+        ReleaseDanmakuSubscriptions();
         ExitFocus();
         DetachLayoutTracking();
         DisposePlayers(Layout);
         _players.Dispose();
         _metrics.Dispose();
+
+        try
+        {
+            // 弹幕管理器退出前 flush 高能事件落盘；最多等 2 秒，失败不阻塞窗口关闭。
+            Task.Run(async () => await _services.Danmaku.DisposeAsync().ConfigureAwait(false))
+                .Wait(TimeSpan.FromSeconds(2));
+        }
+        catch
+        {
+            // 退出时落盘失败不阻塞关闭。
+        }
     }
 
     private async Task SelectProfileAsync(LayoutProfile? profile)
@@ -1379,6 +1643,7 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
             GridColumns = oldDimensions.Columns;
             IsDirty = false;
             StatusText = $"已载入方案「{profile.Name}」：窗格结构一致，播放器原地保留。";
+            SyncDanmakuSubscriptions();
             return;
         }
 
@@ -1431,6 +1696,8 @@ public sealed class MainWindowViewModel : ObservableObject, IDisposable
         {
             await _players.StartAsync(tile).ConfigureAwait(true);
         }
+
+        SyncDanmakuSubscriptions();
     }
 
     private async Task ReloadRoomsAsync(CancellationToken ct)

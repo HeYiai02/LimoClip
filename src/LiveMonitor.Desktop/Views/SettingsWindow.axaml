@@ -50,16 +50,23 @@
                 CornerRadius="8" Padding="14">
           <StackPanel Spacing="10">
             <TextBlock Text="弹幕屏蔽词库" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
-            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
               <TextBox Grid.Column="0" x:Name="KeywordBox"
-                       Watermark="输入要屏蔽的关键词 / 短语" FontSize="12" />
-              <Button Grid.Column="1" Content="添加" FontSize="11" Padding="12,4"
+                       Watermark="输入要屏蔽的关键词 / 正则表达式" FontSize="12" />
+              <CheckBox Grid.Column="1" x:Name="KeywordIsRegexCheck" Content="正则"
+                        FontSize="11" VerticalAlignment="Center"
+                        ToolTip.Tip="勾选后按 .NET 正则表达式匹配弹幕内容" />
+              <Button Grid.Column="2" Content="添加" FontSize="11" Padding="12,4"
                       Click="OnAddKeyword" />
             </Grid>
             <ListBox x:Name="KeywordList" Height="150" FontSize="11">
               <ListBox.ItemTemplate>
                 <DataTemplate>
-                  <TextBlock Text="{Binding Keyword}" Foreground="#D5DAE4" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="{Binding Keyword}" Foreground="#D5DAE4" />
+                    <TextBlock Grid.Column="1" Text="正则" IsVisible="{Binding IsRegex}"
+                               FontSize="10" Foreground="#FB7299" VerticalAlignment="Center" />
+                  </Grid>
                 </DataTemplate>
               </ListBox.ItemTemplate>
             </ListBox>
@@ -73,7 +80,47 @@
                       FontSize="11" VerticalAlignment="Center"
                       Checked="OnDanmakuPreviewChanged" Unchecked="OnDanmakuPreviewChanged" />
             <TextBlock FontSize="10" Foreground="#6B7484" TextWrapping="Wrap"
-                       Text="V0.1 只保存词库和开关；实时弹幕过滤在 V0.2 接入。正则标记暂不开放。" />
+                       Text="支持包含匹配与正则（勾选「正则」）。实时过滤已接入 V0.2；独轮车规则仅对 B 站生效。" />
+          </StackPanel>
+        </Border>
+
+        <Border Background="#151923" BorderBrush="#262B36" BorderThickness="1"
+                CornerRadius="8" Padding="14">
+          <StackPanel Spacing="10">
+            <TextBlock Text="高能事件检测" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
+            <Grid ColumnDefinitions="Auto,140" RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                  ColumnSpacing="12" RowSpacing="8">
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="短窗（秒）"
+                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
+              <NumericUpDown Grid.Row="0" Grid.Column="1" x:Name="HighlightShortWindow"
+                             Minimum="1" Maximum="600" Increment="1" FormatString="0" FontSize="11" />
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="基线窗（秒）"
+                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
+              <NumericUpDown Grid.Row="1" Grid.Column="1" x:Name="HighlightBaselineWindow"
+                             Minimum="1" Maximum="3600" Increment="10" FormatString="0" FontSize="11" />
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="密度倍数"
+                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
+              <NumericUpDown Grid.Row="2" Grid.Column="1" x:Name="HighlightDensityMultiplier"
+                             Minimum="0.1" Maximum="1000" Increment="0.5" FormatString="0.0##" FontSize="11" />
+              <TextBlock Grid.Row="3" Grid.Column="0" Text="短窗最少条数"
+                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
+              <NumericUpDown Grid.Row="3" Grid.Column="1" x:Name="HighlightMinShortWindowCount"
+                             Minimum="1" Maximum="1000000" Increment="1" FormatString="0" FontSize="11" />
+              <TextBlock Grid.Row="4" Grid.Column="0" Text="冷却（秒）"
+                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
+              <NumericUpDown Grid.Row="4" Grid.Column="1" x:Name="HighlightCooldownSeconds"
+                             Minimum="0" Maximum="86400" Increment="10" FormatString="0" FontSize="11" />
+            </Grid>
+            <TextBlock Text="加权关键词（一行一个，命中后按 1.5 条计）"
+                       FontSize="11" Foreground="#A9B4C6" />
+            <TextBox x:Name="HighlightBoostKeywordsBox" AcceptsReturn="True" TextWrapping="Wrap"
+                     Height="72" FontSize="11" Watermark="666&#10;草&#10;神回&#10;Pog" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="保存高能参数" FontSize="11" Padding="12,4" Click="OnSaveHighlight" />
+              <Button Content="恢复默认" FontSize="11" Padding="10,4" Click="OnResetHighlight" />
+            </StackPanel>
+            <TextBlock FontSize="10" Foreground="#6B7484" TextWrapping="Wrap"
+                       Text="短窗密度达到基线的倍数、且短窗条数与绝对下限达标时触发；触发后进入冷却。参数保存在本机 AppSettings。" />
           </StackPanel>
         </Border>
 

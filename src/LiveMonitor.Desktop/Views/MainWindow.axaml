@@ -87,6 +87,9 @@
           <Button Content="↶ 恢复比例" Click="OnRestoreCustomLayout" Padding="8,4"
                   IsVisible="{Binding CanRestoreCustomLayout}"
                   ToolTip.Tip="恢复到点一键自适应之前的自定义比例" />
+          <ToggleButton Content="高能事件" FontSize="10" Padding="8,4"
+                        IsChecked="{Binding IsHighlightPanelVisible, Mode=TwoWay}"
+                        ToolTip.Tip="展开/收起高能事件面板（不写入方案布局）" />
           <Button Content="账号与设置" Click="OnSettings" Padding="8,4" />
         </StackPanel>
       </Grid>
@@ -148,6 +151,66 @@
     <Border Grid.Row="1" Grid.Column="1" Background="#121316" Padding="8">
       <Grid>
         <dock:DockControl x:Name="Dock" Layout="{Binding Layout}" />
+
+        <!-- 高能事件面板：叠加在工作区右侧；不塞进 Dock，避免把面板结构写进方案 DockLayoutJson -->
+        <Border x:Name="HighlightPanel"
+                IsVisible="{Binding IsHighlightPanelVisible}"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Stretch"
+                Width="330"
+                Margin="0,6,6,6"
+                Background="#EE15181E"
+                BorderBrush="#2E323C"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="10">
+          <DockPanel LastChildFill="True">
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,6">
+              <TextBlock Text="高能事件" FontSize="12" FontWeight="SemiBold"
+                         Foreground="#E6E8EE" VerticalAlignment="Center" />
+              <Button Grid.Column="1" Content="清空" FontSize="10" Padding="7,3" Margin="0,0,4,0"
+                      Click="OnClearHighlightEvents" />
+              <Button Grid.Column="2" Content="收起" FontSize="10" Padding="7,3"
+                      Click="OnCloseHighlightPanel" />
+            </Grid>
+            <TextBlock DockPanel.Dock="Bottom"
+                       Text="只统计通过过滤链的弹幕密度；阈值在「账号与设置」里调整。"
+                       FontSize="9" Foreground="#6B7484" TextWrapping="Wrap" Margin="0,6,0,0" />
+            <Grid>
+              <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding HighlightEvents}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Background="#1B1F27" BorderBrush="#262B36" BorderThickness="1"
+                              CornerRadius="4" Padding="7,5" Margin="0,0,0,5">
+                        <StackPanel Spacing="2">
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Border Background="{Binding PlatformBadgeBackground}" CornerRadius="3" Padding="4,1"
+                                    VerticalAlignment="Center">
+                              <TextBlock Text="{Binding PlatformBadge}" FontSize="9"
+                                         Foreground="{Binding PlatformBadgeForeground}" />
+                            </Border>
+                            <TextBlock Text="{Binding RoomTitle}" FontSize="10" Foreground="#E6E8EE"
+                                       TextTrimming="CharacterEllipsis" MaxWidth="190" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding TimeText}" FontSize="9" Foreground="#6B7484"
+                                       VerticalAlignment="Center" />
+                          </StackPanel>
+                          <TextBlock Text="{Binding RateText}" FontSize="9" Foreground="#93C5FD" />
+                          <TextBlock Text="{Binding TriggerReason}" FontSize="9" Foreground="#94A3B8"
+                                     TextWrapping="Wrap" />
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+              <TextBlock Text="还没有高能事件。某路弹幕密度超过基线 3 倍时会记录在这里。"
+                         IsVisible="{Binding IsHighlightEventsEmpty}"
+                         FontSize="10" Foreground="#6B7484" TextWrapping="Wrap"
+                         HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Grid>
+          </DockPanel>
+        </Border>
 
         <!-- 全屏浮层：独立播放器，只保留这一路声音 -->
         <Border IsVisible="{Binding IsFocused}"

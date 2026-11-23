@@ -401,7 +401,33 @@ public partial class MainWindow : Window
 
         var window = new SettingsWindow(_services);
         await window.ShowDialog(this);
-        _viewModel.SetStatus("设置已关闭。");
+
+        // 设置页可能改了屏蔽词、独轮车开关、高能参数或全局弹幕总闸：热更新到正在运行的会话。
+        try
+        {
+            await _services.Danmaku.ReloadSettingsAsync();
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetStatus($"弹幕设置热更新失败：{ex.Message}");
+            return;
+        }
+
+        await _viewModel.ApplyDanmakuMasterSettingAsync();
+        _viewModel.SetStatus("设置已应用。");
+    }
+
+    private void OnClearHighlightEvents(object? sender, RoutedEventArgs e)
+    {
+        _viewModel?.ClearHighlightEvents();
+    }
+
+    private void OnCloseHighlightPanel(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is not null)
+        {
+            _viewModel.IsHighlightPanelVisible = false;
+        }
     }
 
     private void OnGroupFilter(object? sender, RoutedEventArgs e)

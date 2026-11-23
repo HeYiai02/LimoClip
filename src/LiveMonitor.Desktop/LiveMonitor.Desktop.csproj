@@ -27,6 +27,7 @@
   <ItemGroup>
     <ProjectReference Include="..\LiveMonitor.Core\LiveMonitor.Core.csproj" />
     <ProjectReference Include="..\LiveMonitor.Data\LiveMonitor.Data.csproj" />
+    <ProjectReference Include="..\LiveMonitor.Danmaku\LiveMonitor.Danmaku.csproj" />
     <ProjectReference Include="..\LiveMonitor.Platforms\LiveMonitor.Platforms.csproj" />
   </ItemGroup>
 

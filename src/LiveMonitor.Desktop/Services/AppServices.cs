@@ -1,4 +1,5 @@
 using LiveMonitor.Core.Interfaces;
+using LiveMonitor.Danmaku;
 using LiveMonitor.Data;
 using LiveMonitor.Data.Repositories;
 using LiveMonitor.Platforms;
@@ -17,6 +18,9 @@ public sealed class AppServices
         ICredentialStore credentials,
         IBlocklistRepository blocklist,
         IAppSettingsRepository settings,
+        IHighlightEventRepository highlightEvents,
+        IDanmakuClientFactory danmakuFactory,
+        DanmakuManager danmaku,
         PlatformFactory platforms)
     {
         Database = database;
@@ -25,6 +29,9 @@ public sealed class AppServices
         Credentials = credentials;
         Blocklist = blocklist;
         Settings = settings;
+        HighlightEvents = highlightEvents;
+        DanmakuFactory = danmakuFactory;
+        Danmaku = danmaku;
         Platforms = platforms;
     }
 
@@ -39,6 +46,15 @@ public sealed class AppServices
     public IBlocklistRepository Blocklist { get; }
 
     public IAppSettingsRepository Settings { get; }
+
+    /// <summary>V0.2 高能事件落盘仓储。</summary>
+    public IHighlightEventRepository HighlightEvents { get; }
+
+    /// <summary>V0.2 弹幕客户端工厂（B 站/Twitch，其余平台返回 null）。</summary>
+    public IDanmakuClientFactory DanmakuFactory { get; }
+
+    /// <summary>V0.2 弹幕会话管理器：按 (Platform, RoomId) 引用计数共享连接与过滤管线。</summary>
+    public DanmakuManager Danmaku { get; }
 
     public PlatformFactory Platforms { get; }
 
@@ -91,13 +107,28 @@ public sealed class AppServices
         var database = await CreateDatabaseAsync(ct).ConfigureAwait(false);
 
         var platforms = PlatformFactory.CreateDefault();
+        var credentials = new CredentialStore(database);
+        var blocklist = new BlocklistRepository(database);
+        var settings = new AppSettingsRepository(database);
+        var highlightEvents = new HighlightEventRepository(database);
+        var danmakuFactory = new DanmakuClientFactory();
+        var danmaku = new DanmakuManager(
+            danmakuFactory,
+            credentials,
+            blocklist,
+            settings,
+            highlightEvents);
+
         return new AppServices(
             database,
             new RoomRepository(database),
             new LayoutProfileRepository(database),
-            new CredentialStore(database),
-            new BlocklistRepository(database),
-            new AppSettingsRepository(database),
+            credentials,
+            blocklist,
+            settings,
+            highlightEvents,
+            danmakuFactory,
+            danmaku,
             platforms);
     }
 }

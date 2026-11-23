@@ -4,6 +4,8 @@ using Avalonia.Interactivity;
 using LiveMonitor.Core;
 using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Enums;
+using LiveMonitor.Core.Models;
+using LiveMonitor.Danmaku;
 using LiveMonitor.Desktop.Services;
 
 namespace LiveMonitor.Desktop.Views;
@@ -39,6 +41,8 @@ public partial class SettingsWindow : Window
 
             var preview = await _services.Settings.GetAsync(AppSettingKeys.DanmakuPreviewEnabled);
             DanmakuPreviewToggle.IsChecked = string.Equals(preview, "true", StringComparison.OrdinalIgnoreCase);
+
+            await LoadHighlightSettingsAsync();
         }
         catch (Exception ex)
         {
@@ -72,6 +76,59 @@ public partial class SettingsWindow : Window
         foreach (var keyword in keywords)
         {
             _keywords.Add(keyword);
+        }
+    }
+
+    private async Task LoadHighlightSettingsAsync()
+    {
+        var options = await HighlightSettingsStore.LoadAsync(_services.Settings);
+        HighlightShortWindow.Value = options.ShortWindowSeconds;
+        HighlightBaselineWindow.Value = options.BaselineWindowSeconds;
+        HighlightDensityMultiplier.Value = (decimal)options.DensityMultiplier;
+        HighlightMinShortWindowCount.Value = options.MinShortWindowCount;
+        HighlightCooldownSeconds.Value = options.CooldownSeconds;
+        HighlightBoostKeywordsBox.Text = HighlightSettingsStore.FormatBoostKeywords(options.BoostKeywords);
+    }
+
+    private HighlightRuleOptions ReadHighlightOptions()
+    {
+        var defaults = HighlightRuleOptions.Default;
+        return new HighlightRuleOptions
+        {
+            ShortWindowSeconds = (int)(HighlightShortWindow.Value ?? defaults.ShortWindowSeconds),
+            BaselineWindowSeconds = (int)(HighlightBaselineWindow.Value ?? defaults.BaselineWindowSeconds),
+            DensityMultiplier = (double)(HighlightDensityMultiplier.Value ?? (decimal)defaults.DensityMultiplier),
+            MinShortWindowCount = (int)(HighlightMinShortWindowCount.Value ?? defaults.MinShortWindowCount),
+            CooldownSeconds = (int)(HighlightCooldownSeconds.Value ?? defaults.CooldownSeconds),
+            BoostKeywords = HighlightSettingsStore.ParseBoostKeywords(HighlightBoostKeywordsBox.Text)
+        };
+    }
+
+    private async void OnSaveHighlight(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await HighlightSettingsStore.SaveAsync(_services.Settings, ReadHighlightOptions());
+            await LoadHighlightSettingsAsync();
+            StatusText.Text = "高能参数已保存（对运行中的会话即时生效）。";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"保存高能参数失败：{ex.Message}";
+        }
+    }
+
+    private async void OnResetHighlight(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await HighlightSettingsStore.SaveAsync(_services.Settings, HighlightRuleOptions.Default);
+            await LoadHighlightSettingsAsync();
+            StatusText.Text = "高能参数已恢复默认值。";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"恢复默认值失败：{ex.Message}";
         }
     }
 
@@ -149,16 +206,18 @@ public partial class SettingsWindow : Window
                 return;
             }
 
+            var isRegex = KeywordIsRegexCheck.IsChecked == true;
             await _services.Blocklist.AddAsync(new DanmakuBlockKeyword
             {
                 Id = Guid.NewGuid(),
                 Keyword = text,
-                IsRegex = false,
+                IsRegex = isRegex,
                 CreatedAt = DateTime.UtcNow
             });
             KeywordBox.Text = string.Empty;
+            KeywordIsRegexCheck.IsChecked = false;
             await ReloadKeywordsAsync();
-            StatusText.Text = "已添加屏蔽词。";
+            StatusText.Text = isRegex ? "已添加正则屏蔽词。" : "已添加屏蔽词。";
         }
         catch (Exception ex)
         {

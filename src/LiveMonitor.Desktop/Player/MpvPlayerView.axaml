@@ -10,6 +10,12 @@
   <Grid ClipToBounds="True">
     <player:MpvVideoView x:Name="Video" />
 
+    <!-- 弹幕渲染层：只渲染已通过过滤链的弹幕，不参与命中测试，避免吃掉窗格双击/拖拽。
+         可见性由 MpvPlayerView 结合「窗格弹幕开关」与「全局渲染总闸」在代码中计算。 -->
+    <controls:DanmakuOverlay x:Name="DanmakuLayer"
+                             IsVisible="False"
+                             Margin="0,0,0,34" />
+
     <!-- 四态占位层：加载中 / 未开播 / 播放中（隐藏） / 失败 -->
     <Border x:Name="StateOverlay" Background="#D90B0E13">
       <StackPanel HorizontalAlignment="Center"

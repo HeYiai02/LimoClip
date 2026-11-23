@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using Avalonia.Controls;
@@ -10,6 +11,7 @@ using LibMpv.Client;
 using LiveMonitor.Core.Enums;
 using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Core.Models;
+using LiveMonitor.Desktop.ViewModels;
 
 namespace LiveMonitor.Desktop.Player;
 
@@ -37,6 +39,8 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
     private double _audioMeterLevel;
     private int _disposed;
     private int _suppressVolumeChange;
+    private RoomTileViewModel? _boundTile;
+    private bool _danmakuMasterEnabled = true;
 
     private PlayerState _state = PlayerState.Offline;
     private PlayerHealthMetrics _metrics = PlayerHealthMetrics.Empty;
@@ -288,7 +292,84 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
     {
         _compact = enabled;
         CompactButton.Content = enabled ? "15fps" : "60fps";
+        DanmakuLayer.MaxConcurrent = enabled ? 15 : 30;
         ApplyVideoFilter();
+    }
+
+    /// <summary>把已通过过滤链的弹幕批量推给渲染层；后台线程也可调用。</summary>
+    public void PushDanmaku(IReadOnlyList<DanmakuMessage> messages) => DanmakuLayer.EnqueueRange(messages);
+
+    /// <summary>清空弹幕渲染层（停播、切房或关弹幕时由上层调用）。</summary>
+    public void ClearDanmaku() => DanmakuLayer.Clear();
+
+    /// <summary>
+    /// 弹幕渲染总闸（设置页全局开关）。关闭时只停渲染，弹幕连接与高能统计不受影响。
+    /// 实际可见性 = 总闸 &amp;&amp; 当前窗格的弹幕开关。
+    /// </summary>
+    public bool DanmakuMasterEnabled
+    {
+        get => _danmakuMasterEnabled;
+        set
+        {
+            if (_danmakuMasterEnabled == value)
+            {
+                return;
+            }
+
+            _danmakuMasterEnabled = value;
+            UpdateDanmakuLayerVisibility();
+        }
+    }
+
+    protected override void OnDataContextChanged(EventArgs e)
+    {
+        base.OnDataContextChanged(e);
+        AttachDanmakuTile(DataContext as RoomTileViewModel);
+    }
+
+    private void AttachDanmakuTile(RoomTileViewModel? tile)
+    {
+        if (ReferenceEquals(_boundTile, tile))
+        {
+            return;
+        }
+
+        if (_boundTile is not null)
+        {
+            _boundTile.PropertyChanged -= OnBoundTilePropertyChanged;
+        }
+
+        _boundTile = tile;
+
+        if (_boundTile is not null)
+        {
+            _boundTile.PropertyChanged += OnBoundTilePropertyChanged;
+        }
+
+        UpdateDanmakuLayerVisibility();
+    }
+
+    private void OnBoundTilePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (string.IsNullOrEmpty(e.PropertyName) || e.PropertyName == nameof(RoomTileViewModel.IsDanmakuVisible))
+        {
+            UpdateDanmakuLayerVisibility();
+        }
+    }
+
+    private void UpdateDanmakuLayerVisibility()
+    {
+        var visible = _danmakuMasterEnabled && _boundTile?.IsDanmakuVisible == true;
+        if (DanmakuLayer.IsVisible == visible)
+        {
+            return;
+        }
+
+        DanmakuLayer.IsVisible = visible;
+        if (!visible)
+        {
+            DanmakuLayer.Clear();
+        }
     }
 
     /// <summary>
@@ -390,6 +471,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
             Dispatcher.UIThread.Post(DetachAndDispose);
         }
 
+        AttachDanmakuTile(null);
         StateChanged = null;
         ReconnectRequested = null;
         GC.SuppressFinalize(this);
