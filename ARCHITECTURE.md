@@ -30,7 +30,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | WebView 登录 | WebView2（临时用户目录，登录后采集 Cookie） |
 | 平台解析 | 各家 HTTP API + Jint（斗鱼签名、抖音 sign.js）；yt-dlp 作为 YouTube/Twitch 兜底 |
 | 插件签名 | Ed25519（BouncyCastle）+ SHA256 清单校验 |
-| 测试 | xUnit（6 个测试工程，当前共 911 个用例） |
+| 测试 | xUnit（6 个测试工程，当前共 912 个用例） |
 
 ### 平台支持矩阵
 
@@ -538,7 +538,7 @@ dotnet build LiveMonitor.sln --no-restore
 - 工程目标框架：除 `Desktop`/`Media` 为 `net8.0-windows` 外均为 `net8.0`；测试工程对应同目标框架。
 - 需要 `tools/` 下的 ffmpeg/mpv 才能运行应用（`scripts/fetch-tools.ps1` 自动下载并校验）。
 
-### 13.2 测试（当前 911 个用例）
+### 13.2 测试（当前 912 个用例）
 
 | 测试工程 | 覆盖范围 | 用例数 |
 | --- | --- | --- |
@@ -546,7 +546,7 @@ dotnet build LiveMonitor.sln --no-restore
 | `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退、自定义清流 Provider | 483 |
 | `tests/LiveMonitor.Danmaku.Tests` | 过滤器、高能检测、会话管理 | 98 |
 | `tests/LiveMonitor.Media.Tests` | 录制状态机、分段合并、剪辑导出、波形、FFmpeg 参数协议分支 | 183 |
-| `tests/LiveMonitor.Desktop.Tests` | ViewModel、Dock 布局、登录配置、播放状态文本 | 109 |
+| `tests/LiveMonitor.Desktop.Tests` | ViewModel、Dock 布局、登录配置、播放状态文本、录制目标状态 | 110 |
 
 运行方式（使用已构建的测试 dll，避免重复构建）：
 
