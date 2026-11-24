@@ -54,35 +54,74 @@ public sealed class ClipTimelineControl : Control
     private const double RulerHeight = 20.0;
     private const double RowGap = 5.0;
 
-    private static readonly IBrush BackgroundBrush = new SolidColorBrush(Color.Parse("#0B0E13"));
-    private static readonly IBrush RulerBackgroundBrush = new SolidColorBrush(Color.Parse("#0E131B"));
-    private static readonly IBrush RowBackgroundBrush = new SolidColorBrush(Color.Parse("#0C1017"));
-    private static readonly IBrush BorderBrush = new SolidColorBrush(Color.Parse("#262B36"));
+    // ---- 暗房调色板：与 Styles/DesignTokens.axaml 的 token 保持一致 ----
+
+    /// <summary>时间轴底色（比卡片更深一档，形成凹陷的暗房监视器质感）。</summary>
+    private static readonly IBrush BackgroundBrush = new SolidColorBrush(Color.Parse("#0A0C10"));
+    private static readonly IBrush RulerBackgroundBrush = new SolidColorBrush(Color.Parse("#0E1117"));
+    private static readonly IBrush RowBackgroundBrush = new SolidColorBrush(Color.Parse("#0C0F15"));
+    private static readonly IBrush BorderBrush = new SolidColorBrush(Color.Parse("#242A37")); // BrushBorderSubtle
     private static readonly IBrush GridBrush = new SolidColorBrush(Color.Parse("#1B2230"));
+
+    /// <summary>刻度数字 / 说明文字（BrushTextMuted）。</summary>
     private static readonly IBrush MutedTextBrush = new SolidColorBrush(Color.Parse("#64748B"));
-    private static readonly IBrush TextBrush = new SolidColorBrush(Color.Parse("#CBD5E1"));
-    private static readonly IBrush WaveBrush = new SolidColorBrush(Color.Parse("#B322D3EE"));
-    private static readonly IBrush WaveOutlineBrush = new SolidColorBrush(Color.Parse("#67E8F9"));
-    private static readonly IBrush DensityBrush = new SolidColorBrush(Color.Parse("#8CFB923C"));
-    private static readonly IBrush DensityOutlineBrush = new SolidColorBrush(Color.Parse("#FDBA74"));
-    private static readonly IBrush HighlightFillBrush = new SolidColorBrush(Color.Parse("#55EF4444"));
-    private static readonly IBrush HighlightBorderBrush = new SolidColorBrush(Color.Parse("#F87171"));
-    private static readonly IBrush SelectionFillBrush = new SolidColorBrush(Color.Parse("#333B82F6"));
+
+    /// <summary>悬停时间码等次级文字（BrushTextSecondary）。</summary>
+    private static readonly IBrush TextBrush = new SolidColorBrush(Color.Parse("#94A3B8"));
+
+    /// <summary>波形主体：非选区 alpha 0.28，选区内 alpha 0.72（聚光灯）。</summary>
+    private static readonly IBrush WaveDimBrush = new SolidColorBrush(Color.FromArgb(0x47, 0x22, 0xD3, 0xEE));
+    private static readonly IBrush WaveBrightBrush = new SolidColorBrush(Color.FromArgb(0xB8, 0x22, 0xD3, 0xEE));
+
+    /// <summary>波形中线（低透明度青色，压在波形柱下方只从柱间缝隙透出）。</summary>
+    private static readonly IBrush WaveTipBrush = new SolidColorBrush(Color.Parse("#55ECFEFF"));
+
+    /// <summary>弹幕密度热力：Fill 顶部 #F59E0B alpha 0.45 → 底部 0；描边固定 BrushWarning。</summary>
+    private static readonly IBrush DensityFillBrush = CreateDensityFillBrush();
+    private static readonly IBrush DensityOutlineBrush = new SolidColorBrush(Color.Parse("#F59E0B"));
+
+    private static readonly IBrush HighlightFillBrush = new SolidColorBrush(Color.Parse("#26EF4444"));
+    private static readonly IBrush HighlightBorderBrush = new SolidColorBrush(Color.Parse("#EF4444"));
+    private static readonly IBrush SelectionFillBrush = new SolidColorBrush(Color.Parse("#2E3B82F6"));
     private static readonly IBrush SelectionBorderBrush = new SolidColorBrush(Color.Parse("#60A5FA"));
-    private static readonly IBrush MaskBrush = new SolidColorBrush(Color.Parse("#59000000"));
-    private static readonly IBrush PlayheadBrush = new SolidColorBrush(Color.Parse("#EF4444"));
-    private static readonly IBrush HoverBrush = new SolidColorBrush(Color.Parse("#99475569"));
+    private static readonly IBrush MaskBrush = new SolidColorBrush(Color.Parse("#3305070A")); // 20% 近黑，抬高选区对比
+    private static readonly IBrush PlayheadBrush = new SolidColorBrush(Color.Parse("#EF4444")); // BrushDanger
+    private static readonly IBrush HoverBrush = new SolidColorBrush(Color.Parse("#665A6B85"));
     private static readonly IBrush HandleLabelBrush = new SolidColorBrush(Color.Parse("#DBEAFE"));
-    private static readonly IBrush ZoomBadgeBrush = new SolidColorBrush(Color.Parse("#0F172A"));
+    private static readonly IBrush ZoomBadgeBrush = new SolidColorBrush(Color.Parse("#CC11141B")); // BrushBgBase 80%
+    private static readonly IBrush PlayheadBubbleTextBrush = new SolidColorBrush(Color.Parse("#FFFFFF"));
     private static readonly IPen BorderPen = new Pen(BorderBrush, 1);
     private static readonly IPen GridPen = new Pen(GridBrush, 1);
-    private static readonly IPen WaveOutlinePen = new Pen(WaveOutlineBrush, 1);
+    private static readonly IPen WaveGuidePen = new Pen(WaveTipBrush, 1);
     private static readonly IPen DensityOutlinePen = new Pen(DensityOutlineBrush, 1);
-    private static readonly IPen SelectionBorderPen = new Pen(SelectionBorderBrush, 1.5);
+    private static readonly IPen SelectionBorderPen = new Pen(SelectionBorderBrush, 1.25);
     private static readonly IPen PlayheadPen = new Pen(PlayheadBrush, 1.5);
     private static readonly IPen HoverPen = new Pen(HoverBrush, 1);
     private static readonly IPen HighlightBorderPen = new Pen(HighlightBorderBrush, 1);
-    private static readonly Typeface DefaultTypeface = Typeface.Default;
+
+    /// <summary>与 FontMono token 一致的等宽字体（自绘文本无法直接解析 DynamicResource）。</summary>
+    private static readonly Avalonia.Media.FontFamily MonoFontFamily =
+        new Avalonia.Media.FontFamily("Cascadia Mono, JetBrains Mono, Consolas, monospace");
+
+    private static readonly Typeface DefaultTypeface = new Typeface(MonoFontFamily);
+
+    // 波形柱几何参数：2px 采样步长、1.5px 柱宽、0.75px 轻微圆角。
+    private const double BarStepPx = 2.0;
+    private const double BarWidthPx = 1.5;
+    private const double BarRadiusPx = 0.75;
+
+    /// <summary>弹幕热力填充：顶部 #F59E0B alpha 0.45，向下线性衰减到 0。</summary>
+    private static IBrush CreateDensityFillBrush()
+    {
+        var brush = new LinearGradientBrush
+        {
+            StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+            EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative)
+        };
+        brush.GradientStops.Add(new GradientStop(Color.FromArgb(0x73, 0xF5, 0x9E, 0x0B), 0));
+        brush.GradientStops.Add(new GradientStop(Color.FromArgb(0x00, 0xF5, 0x9E, 0x0B), 1));
+        return brush;
+    }
 
     private static readonly double[] RulerStepsSeconds =
     {
@@ -578,6 +617,7 @@ public sealed class ClipTimelineControl : Control
         }
 
         var rowsBottom = layout.Highlight.Bottom;
+        Rect? playheadBubble;
 
         using (context.PushClip(new Rect(layout.Plot.Left, layout.Plot.Top, layout.Plot.Width, rowsBottom - layout.Plot.Top)))
         {
@@ -586,11 +626,11 @@ public sealed class ClipTimelineControl : Control
             DrawDensity(context, layout);
             DrawHighlights(context, layout);
             DrawSelection(context, layout);
-            DrawPlayhead(context, layout);
+            playheadBubble = DrawPlayhead(context, layout);
             DrawHover(context, layout);
         }
 
-        DrawZoomBadge(context, layout);
+        DrawZoomBadge(context, layout, playheadBubble);
     }
 
     private void DrawRuler(DrawingContext context, TimelineLayout layout)
@@ -641,15 +681,15 @@ public sealed class ClipTimelineControl : Control
         var centerY = layout.Wave.Top + layout.Wave.Height / 2;
         var halfHeight = Math.Max(2, layout.Wave.Height / 2 - 3);
         var visible = VisibleDuration.TotalSeconds;
-        var width = (int)Math.Ceiling(layout.Wave.Width);
         var stepPx = visible / Math.Max(1, layout.Wave.Width);
 
-        // 先按像素采样上下包络，再拼成闭合多边形填充（旧实现用非闭合线段填充，实际什么也画不出来）。
-        var envelope = new double[Math.Max(2, width)];
+        // 先按像素采样上下包络（开方压缩动态范围），再生成轻微圆角的波形柱。
         var maxPeak = 0.0;
-        for (var i = 0; i < envelope.Length; i++)
+        var barCount = Math.Max(1, (int)Math.Ceiling(layout.Wave.Width / BarStepPx));
+        var heights = new double[barCount];
+        for (var i = 0; i < barCount; i++)
         {
-            var sec = _viewStartSeconds + (i + 0.5) * stepPx;
+            var sec = _viewStartSeconds + (i + 0.5) * BarStepPx * stepPx;
             var peak = Math.Clamp(SampleEnvelope(peaks, sec, bucketSec), 0f, 1f);
             if (peak > maxPeak)
             {
@@ -657,7 +697,7 @@ public sealed class ClipTimelineControl : Control
             }
 
             // 开方压缩动态范围：安静录像（峰值 ~0.01）也能看出起伏，响的段仍接近满幅。
-            envelope[i] = Math.Max(0.6, Math.Sqrt(peak) * halfHeight);
+            heights[i] = Math.Max(1.0, Math.Sqrt(peak) * halfHeight);
         }
 
         if (maxPeak <= 0.001)
@@ -666,26 +706,27 @@ public sealed class ClipTimelineControl : Control
             return;
         }
 
-        var geometry = new StreamGeometry();
-        using (var g = geometry.Open())
+        var geometry = BuildWaveBars(layout, centerY, heights);
+        // 中线先画，波形柱压在其上，只在柱间缝隙里透出一点基线。
+        context.DrawLine(WaveGuidePen, new Point(layout.Plot.Left, centerY - 0.5), new Point(layout.Plot.Right, centerY - 0.5));
+
+        var inX = TimeToX(_inPoint);
+        var outX = TimeToX(_outPoint);
+        var selLeft = Math.Max(layout.Wave.Left, Math.Min(inX, outX));
+        var selRight = Math.Min(layout.Wave.Right, Math.Max(inX, outX));
+
+        if (selRight - selLeft < 0.5)
         {
-            var firstX = layout.Wave.Left + 0.5;
-            g.BeginFigure(new Point(firstX, centerY - envelope[0]), true);
-            for (var i = 1; i < envelope.Length; i++)
-            {
-                g.LineTo(new Point(layout.Wave.Left + i + 0.5, centerY - envelope[i]));
-            }
-
-            for (var i = envelope.Length - 1; i >= 0; i--)
-            {
-                g.LineTo(new Point(layout.Wave.Left + i + 0.5, centerY + envelope[i]));
-            }
-
-            g.EndFigure(true);
+            // 无有效选区：整体保持 0.28 的暗形态。
+            DrawWavePass(context, geometry, layout, layout.Wave.Left, layout.Wave.Right, WaveDimBrush);
         }
-
-        context.DrawGeometry(WaveBrush, WaveOutlinePen, geometry);
-        context.DrawLine(WaveOutlinePen, new Point(layout.Plot.Left, centerY - 0.5), new Point(layout.Plot.Right, centerY - 0.5));
+        else
+        {
+            // 聚光灯：选区外 alpha 0.28，选区内 alpha 0.72。
+            DrawWavePass(context, geometry, layout, layout.Wave.Left, selLeft, WaveDimBrush);
+            DrawWavePass(context, geometry, layout, selLeft, selRight, WaveBrightBrush);
+            DrawWavePass(context, geometry, layout, selRight, layout.Wave.Right, WaveDimBrush);
+        }
     }
 
     private void DrawDensity(DrawingContext context, TimelineLayout layout)
@@ -715,23 +756,45 @@ public sealed class ClipTimelineControl : Control
         var width = (int)Math.Ceiling(layout.Density.Width);
         var stepPx = visible / Math.Max(1, layout.Density.Width);
 
-        var geometry = new StreamGeometry();
-        using (var g = geometry.Open())
+        // 填充：顶部 #F59E0B 45% → 底部 0 的垂直渐变；描边只画顶部轮廓，避免整圈描边太“表格”。
+        var fill = new StreamGeometry();
+        var topProfile = new StreamGeometry();
+        using (var g = fill.Open())
+        using (var p = topProfile.Open())
         {
             g.BeginFigure(new Point(layout.Density.Left, baseline), true);
+            var profileStarted = false;
             for (var i = 0; i < width; i++)
             {
                 var sec = _viewStartSeconds + (i + 0.5) * stepPx;
                 var value = SampleEnvelope(density, sec, bucketSec);
                 var h = Math.Max(0, value * maxHeight);
-                g.LineTo(new Point(layout.Density.Left + i + 0.5, baseline - h));
+                var px = layout.Density.Left + i + 0.5;
+                var py = baseline - h;
+                g.LineTo(new Point(px, py));
+
+                if (!profileStarted)
+                {
+                    p.BeginFigure(new Point(px, py), false);
+                    profileStarted = true;
+                }
+                else
+                {
+                    p.LineTo(new Point(px, py));
+                }
             }
 
             g.LineTo(new Point(layout.Density.Right, baseline));
             g.EndFigure(true);
+
+            if (profileStarted)
+            {
+                p.EndFigure(false);
+            }
         }
 
-        context.DrawGeometry(DensityBrush, DensityOutlinePen, geometry);
+        context.DrawGeometry(DensityFillBrush, null, fill);
+        context.DrawGeometry(null, DensityOutlinePen, topProfile);
     }
 
     private void DrawHighlights(DrawingContext context, TimelineLayout layout)
@@ -763,8 +826,7 @@ public sealed class ClipTimelineControl : Control
 
             var half = Math.Max(3.0, layout.Plot.Width * 0.004);
             var rect = new Rect(x - half, layout.Highlight.Top + 1, half * 2, Math.Max(4, layout.Highlight.Height - 2));
-            context.FillRectangle(HighlightFillBrush, rect);
-            context.DrawRectangle(null, HighlightBorderPen, rect);
+            context.DrawRectangle(HighlightFillBrush, HighlightBorderPen, new RoundedRect(rect, 2));
         }
     }
 
@@ -794,44 +856,63 @@ public sealed class ClipTimelineControl : Control
         if (inX >= layout.Plot.Left - 1 && inX <= layout.Plot.Right + 1)
         {
             context.DrawLine(SelectionBorderPen, new Point(inX, top), new Point(inX, bottom));
-            DrawHandleTriangle(context, inX, top, pointingRight: true);
-            DrawText(context, "IN " + FormatClock(_inPoint), Clamp(inX + 5, layout.Plot.Left + 2, layout.Plot.Right - 60), top + 3, 9, HandleLabelBrush);
+            DrawInOutHandle(context, layout, inX);
+            DrawText(context, "IN " + FormatClock(_inPoint), Clamp(inX + 6, layout.Plot.Left + 2, layout.Plot.Right - 64), top + 3, 9.5, HandleLabelBrush);
         }
 
         if (outX >= layout.Plot.Left - 1 && outX <= layout.Plot.Right + 1)
         {
             context.DrawLine(SelectionBorderPen, new Point(outX, top), new Point(outX, bottom));
-            DrawHandleTriangle(context, outX, top, pointingRight: false);
-            var text = CreateText("OUT " + FormatClock(_outPoint), 9, HandleLabelBrush);
-            var textX = Math.Max(layout.Plot.Left + 2, Math.Min(outX - text.Width - 5, layout.Plot.Right - text.Width - 2));
+            DrawInOutHandle(context, layout, outX);
+            var text = CreateText("OUT " + FormatClock(_outPoint), 9.5, HandleLabelBrush);
+            var textX = Math.Max(layout.Plot.Left + 2, Math.Min(outX - text.Width - 6, layout.Plot.Right - text.Width - 2));
             context.DrawText(text, new Point(textX, top + 3));
         }
     }
 
-    private void DrawPlayhead(DrawingContext context, TimelineLayout layout)
+    /// <summary>绘制播放头与顶部时间码气泡，返回气泡矩形供缩放提示避让。</summary>
+    private Rect? DrawPlayhead(DrawingContext context, TimelineLayout layout)
     {
         if (_position < TimeSpan.Zero)
         {
-            return;
+            return null;
         }
 
         var x = Math.Round(TimeToX(_position)) + 0.5;
         if (x < layout.Plot.Left || x > layout.Plot.Right)
         {
-            return;
+            return null;
         }
 
         context.DrawLine(PlayheadPen, new Point(x, layout.Ruler.Bottom), new Point(x, layout.Highlight.Bottom));
-        var triangle = new StreamGeometry();
-        using (var g = triangle.Open())
+
+        // 播放头顶部的小时间码气泡：水平位置始终夹在时间轴左右边界内。
+        var label = FormatClock(_position);
+        var text = CreateText(label, 9.5, PlayheadBubbleTextBrush);
+        var bubbleWidth = text.Width + 10;
+        var bubbleHeight = 15.0;
+        var bubbleLeft = Clamp(
+            x - bubbleWidth / 2,
+            layout.Plot.Left + 2,
+            Math.Max(layout.Plot.Left + 2, layout.Plot.Right - bubbleWidth - 2));
+        var bubbleTop = layout.Ruler.Top + 1;
+        var bubbleRect = new Rect(bubbleLeft, bubbleTop, bubbleWidth, bubbleHeight);
+        var bubble = new RoundedRect(bubbleRect, 3);
+        context.DrawRectangle(PlayheadBrush, null, bubble);
+        context.DrawText(text, new Point(bubbleLeft + 5, bubbleTop + (bubbleHeight - text.Height) / 2));
+
+        // 气泡与播放头竖线之间的三角指针。
+        var pointer = new StreamGeometry();
+        using (var g = pointer.Open())
         {
-            g.BeginFigure(new Point(x - 5, layout.Ruler.Bottom - 7), true);
-            g.LineTo(new Point(x + 5, layout.Ruler.Bottom - 7));
+            g.BeginFigure(new Point(x - 4, bubbleTop + bubbleHeight), true);
+            g.LineTo(new Point(x + 4, bubbleTop + bubbleHeight));
             g.LineTo(new Point(x, layout.Ruler.Bottom));
             g.EndFigure(true);
         }
 
-        context.DrawGeometry(PlayheadBrush, null, triangle);
+        context.DrawGeometry(PlayheadBrush, null, pointer);
+        return bubbleRect;
     }
 
     private void DrawHover(DrawingContext context, TimelineLayout layout)
@@ -847,44 +928,107 @@ public sealed class ClipTimelineControl : Control
         }
 
         var snapped = Math.Round(x) + 0.5;
-        context.DrawLine(HoverPen, new Point(snapped, layout.Plot.Top + RulerHeight), new Point(snapped, layout.Highlight.Bottom));
+        context.DrawLine(HoverPen, new Point(snapped, layout.Ruler.Bottom), new Point(snapped, layout.Highlight.Bottom));
         var time = XToTime(x);
         var label = FormatClock(time);
-        var text = CreateText(label, 9, TextBrush);
+        var text = CreateText(label, 9.5, TextBrush);
         var textX = Clamp(snapped + 4, layout.Plot.Left + 2, layout.Plot.Right - text.Width - 2);
-        var textY = layout.Highlight.Bottom + 1;
+        // 注意：绘制被裁剪在 Highlight.Bottom 以内，悬停时间码放在高能行底部内侧才可见。
+        var textY = layout.Highlight.Bottom - text.Height - 3;
         context.DrawText(text, new Point(textX, textY));
     }
 
-    private void DrawHandleTriangle(DrawingContext context, double x, double top, bool pointingRight)
+    /// <summary>按列构建轻微圆角的波形柱几何体（一次构建，按选区裁剪分层绘制）。</summary>
+    private static StreamGeometry BuildWaveBars(TimelineLayout layout, double centerY, double[] heights)
     {
         var geometry = new StreamGeometry();
         using (var g = geometry.Open())
         {
-            if (pointingRight)
+            for (var i = 0; i < heights.Length; i++)
             {
-                g.BeginFigure(new Point(x, top), true);
-                g.LineTo(new Point(x + 8, top));
-                g.LineTo(new Point(x, top + 8));
-            }
-            else
-            {
-                g.BeginFigure(new Point(x, top), true);
-                g.LineTo(new Point(x - 8, top));
-                g.LineTo(new Point(x, top + 8));
-            }
+                var x = layout.Wave.Left + i * BarStepPx;
+                var barWidth = Math.Min(BarWidthPx, layout.Wave.Right - x);
+                if (barWidth <= 0.5)
+                {
+                    break;
+                }
 
-            g.EndFigure(true);
+                var h = heights[i];
+                AppendRoundedBar(g, x, centerY - h, barWidth, h * 2, BarRadiusPx);
+            }
         }
 
-        context.DrawGeometry(SelectionBorderBrush, null, geometry);
+        return geometry;
     }
 
-    private void DrawZoomBadge(DrawingContext context, TimelineLayout layout)
+    /// <summary>向几何体追加一根轻微圆角的竖条（上下各 r 圆角）。</summary>
+    private static void AppendRoundedBar(StreamGeometryContext g, double x, double y, double width, double height, double radius)
+    {
+        if (width <= 0.01 || height <= 0.01)
+        {
+            return;
+        }
+
+        var r = Math.Min(radius, Math.Min(width, height) / 2);
+        var x0 = x;
+        var x1 = x + width;
+        var y0 = y;
+        var y1 = y + height;
+        var corner = new Size(r, r);
+
+        g.BeginFigure(new Point(x0 + r, y0), true);
+        g.LineTo(new Point(x1 - r, y0));
+        g.ArcTo(new Point(x1, y0 + r), corner, 0, false, SweepDirection.Clockwise);
+        g.LineTo(new Point(x1, y1 - r));
+        g.ArcTo(new Point(x1 - r, y1), corner, 0, false, SweepDirection.Clockwise);
+        g.LineTo(new Point(x0 + r, y1));
+        g.ArcTo(new Point(x0, y1 - r), corner, 0, false, SweepDirection.Clockwise);
+        g.LineTo(new Point(x0, y0 + r));
+        g.ArcTo(new Point(x0 + r, y0), corner, 0, false, SweepDirection.Clockwise);
+        g.EndFigure(true);
+    }
+
+    /// <summary>在指定 X 区间内绘制一次波形：选区外 alpha 0.28、选区内 alpha 0.72（聚光灯）。</summary>
+    private static void DrawWavePass(DrawingContext context, StreamGeometry geometry, TimelineLayout layout, double left, double right, IBrush brush)
+    {
+        if (right - left < 0.5)
+        {
+            return;
+        }
+
+        using (context.PushClip(new Rect(left, layout.Wave.Top - 1, right - left, layout.Wave.Height + 2)))
+        {
+            context.DrawGeometry(brush, null, geometry);
+        }
+    }
+
+    /// <summary>入点/出点手柄：圆角竖条 + 顶部小横杠 + 中心高光（替代旧三角）。</summary>
+    private static void DrawInOutHandle(DrawingContext context, TimelineLayout layout, double x)
+    {
+        var top = layout.Wave.Top;
+        var bottom = layout.Highlight.Bottom;
+
+        // 圆角竖条：3px 宽、半径 1.5。
+        context.DrawRectangle(SelectionBorderBrush, null, new RoundedRect(new Rect(x - 1.5, top, 3.0, bottom - top), 1.5));
+
+        // 顶部小横杠：11px 宽、3px 高。
+        context.DrawRectangle(SelectionBorderBrush, null, new RoundedRect(new Rect(x - 5.5, top - 3.0, 11.0, 3.0), 1.5));
+
+        // 手柄中心高光，让手柄在暗背景上更有立体感。
+        context.DrawRectangle(HandleLabelBrush, null, new RoundedRect(new Rect(x - 0.75, top + 2, 1.5, 5), 0.75));
+    }
+
+    private void DrawZoomBadge(DrawingContext context, TimelineLayout layout, Rect? playheadBubble)
     {
         var label = _zoom <= MinZoom + 0.001 ? "1.0x · 滚轮缩放，双击复位" : $"{_zoom:0.0}x · 右键拖动平移";
-        var text = CreateText(label, 9, MutedTextBrush);
+        var text = CreateText(label, 9.5, MutedTextBrush);
         var rect = new Rect(layout.Plot.Right - text.Width - 8, layout.Ruler.Top + 1, text.Width + 6, text.Height + 2);
+        // 播放头气泡滑到右端时，把缩放提示临时挪到左端，避免两段文字叠在一起。
+        if (playheadBubble is { } bubble && bubble.Intersects(rect))
+        {
+            rect = rect.WithX(layout.Plot.Left + 6);
+        }
+
         context.FillRectangle(ZoomBadgeBrush, rect);
         context.DrawText(text, new Point(rect.X + 3, rect.Y + 1));
     }

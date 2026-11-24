@@ -4,160 +4,289 @@
              xmlns:player="using:LiveMonitor.Desktop.Player"
              xmlns:controls="using:LiveMonitor.Desktop.Controls"
              x:Class="LiveMonitor.Desktop.Views.ClipStudioView"
-             Background="#0F1115">
+             Background="{DynamicResource BrushBgCanvas}">
+
+    <!-- 剪辑台私有样式：全部复用 DesignTokens 画刷 / 圆角 / 等宽字体，禁止内联旧色板。 -->
     <UserControl.Styles>
-        <Style Selector="TextBlock.clip-title">
+        <Style Selector="TextBlock.studio-title">
             <Setter Property="FontSize" Value="13" />
             <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="#E5E7EB" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
         </Style>
-        <Style Selector="TextBlock.clip-section">
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="Foreground" Value="#94A3B8" />
-            <Setter Property="Margin" Value="0,6,0,0" />
+        <Style Selector="TextBlock.studio-section">
+            <Setter Property="FontSize" Value="10.5" />
+            <Setter Property="FontWeight" Value="Medium" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextMuted}" />
         </Style>
-        <Style Selector="TextBlock.clip-caption">
+        <Style Selector="TextBlock.studio-caption">
             <Setter Property="FontSize" Value="10" />
-            <Setter Property="Foreground" Value="#64748B" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextMuted}" />
         </Style>
-        <Style Selector="TextBlock.clip-value">
-            <Setter Property="FontSize" Value="13" />
-            <Setter Property="Foreground" Value="#E2E8F0" />
+        <Style Selector="TextBlock.studio-value">
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="FontFamily" Value="{DynamicResource FontMono}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
         </Style>
-        <Style Selector="Button.clip-action">
-            <Setter Property="Background" Value="#1E293B" />
-            <Setter Property="BorderBrush" Value="#334155" />
+
+        <!-- 左侧主操作按钮（更像工具条里的实心按钮） -->
+        <Style Selector="Button.studio-action">
+            <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSubtle}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Foreground" Value="#E5E7EB" />
-            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusControl}" />
             <Setter Property="Padding" Value="10,6" />
-            <Setter Property="FontSize" Value="12" />
-        </Style>
-        <Style Selector="Button.clip-primary">
-            <Setter Property="Background" Value="#2563EB" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="Padding" Value="10,8" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
         </Style>
-        <Style Selector="Button.clip-icon">
-            <Setter Property="Background" Value="#1E293B" />
-            <Setter Property="BorderBrush" Value="#334155" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Foreground" Value="#E5E7EB" />
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="Padding" Value="10,6" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="MinWidth" Value="54" />
+        <Style Selector="Button.studio-action:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushBgHover}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushBorderStrong}" />
         </Style>
-        <Style Selector="Button.clip-xs">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="#334155" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Foreground" Value="#CBD5E1" />
-            <Setter Property="CornerRadius" Value="5" />
-            <Setter Property="Padding" Value="7,4" />
-            <Setter Property="FontSize" Value="10" />
-        </Style>
-        <Style Selector="Button.clip-highlight">
+
+        <!-- 高能卡片整行点击热区 -->
+        <Style Selector="Button.studio-hit">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="6,4" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusControl}" />
+            <Setter Property="Padding" Value="7,6" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
         </Style>
-        <Style Selector="Button.clip-highlight:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#1E293B" />
+        <Style Selector="Button.studio-hit:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
         </Style>
-        <Style Selector="TextBox.clip-field">
-            <Setter Property="Background" Value="#0B0E13" />
-            <Setter Property="BorderBrush" Value="#262B36" />
-            <Setter Property="Foreground" Value="#E5E7EB" />
-            <Setter Property="CornerRadius" Value="6" />
+
+        <!-- 高能卡片内的紧凑描边按钮（转写 / 复制 / 浏览） -->
+        <Style Selector="Button.studio-mini">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSubtle}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="5" />
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="FontSize" Value="9.5" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextSecondary}" />
+        </Style>
+        <Style Selector="Button.studio-mini:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushBorderStrong}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
+        </Style>
+        <Style Selector="Button.studio-mini:disabled">
+            <Setter Property="Opacity" Value="0.4" />
+        </Style>
+
+        <!-- ASR 摘要行：低调、可点击 -->
+        <Style Selector="Button.studio-asr">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+        </Style>
+        <Style Selector="Button.studio-asr:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
+        </Style>
+
+        <!-- ASR 分句跳转行 -->
+        <Style Selector="Button.studio-line">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="6,3" />
+            <Setter Property="Margin" Value="0,1,0,0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+        </Style>
+        <Style Selector="Button.studio-line:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
+        </Style>
+
+        <!-- 输入控件：比卡片更深一层的凹陷感 -->
+        <Style Selector="TextBox.studio-field">
+            <Setter Property="Background" Value="{DynamicResource BrushBgBase}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSubtle}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusControl}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource BrushTextPrimary}" />
             <Setter Property="Padding" Value="8,5" />
-            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="MinHeight" Value="28" />
         </Style>
-        <Style Selector="ComboBox.clip-field">
-            <Setter Property="Background" Value="#0B0E13" />
-            <Setter Property="BorderBrush" Value="#262B36" />
-            <Setter Property="Foreground" Value="#E5E7EB" />
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="FontSize" Value="12" />
+        <Style Selector="ComboBox.studio-field">
+            <Setter Property="Background" Value="{DynamicResource BrushBgBase}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSubtle}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusControl}" />
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="MinHeight" Value="28" />
         </Style>
-        <Style Selector="RadioButton.clip-mode">
-            <Setter Property="Foreground" Value="#E5E7EB" />
-            <Setter Property="FontSize" Value="12" />
+        <Style Selector="RadioButton.studio-mode">
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextSecondary}" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="Margin" Value="0,1,0,1" />
         </Style>
-        <Style Selector="CheckBox.clip-check">
-            <Setter Property="Foreground" Value="#E5E7EB" />
-            <Setter Property="FontSize" Value="12" />
+        <Style Selector="RadioButton.studio-mode:checked">
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
+        </Style>
+        <Style Selector="CheckBox.studio-check">
+            <Setter Property="Foreground" Value="{DynamicResource BrushTextSecondary}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <!-- 速率胶囊 -->
+        <Style Selector="Border.rate-pill">
+            <Setter Property="Background" Value="{DynamicResource BrushWarningSoft}" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusPill}" />
+            <Setter Property="Padding" Value="6,1" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <!-- 播放器控制条右侧的静态度量胶囊 -->
+        <Style Selector="Border.chip">
+            <Setter Property="Background" Value="{DynamicResource BrushBgBase}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSubtle}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{DynamicResource RadiusControl}" />
+            <Setter Property="Padding" Value="6,3" />
+            <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
     </UserControl.Styles>
 
-    <Grid Margin="14" RowDefinitions="*,180" ColumnDefinitions="260,*,280">
-        <!-- 左：场次与高能导航 -->
-        <Border Grid.Row="0" Grid.Column="0" Background="#11151D" BorderBrush="#262B36"
-                BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,10,10">
-            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*">
-                <TextBlock Classes="clip-title" Text="剪辑台" />
-                <TextBlock Grid.Row="1" Classes="clip-section" Text="切换录像场次" />
-                <ComboBox Grid.Row="2" Classes="clip-field" Margin="0,4,0,0"
+    <Grid Margin="12" RowDefinitions="*,176" ColumnDefinitions="248,*,284">
+        <!-- ==================== 左：场次与高能导航 ==================== -->
+        <Border Grid.Row="0" Grid.Column="0" Classes="card" Padding="12" Margin="0,0,10,10">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*">
+                <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                        <Border Width="22" Height="22" CornerRadius="6"
+                                Background="{DynamicResource BrushAccentSoft}">
+                            <PathIcon Data="{DynamicResource IconScissors}" Width="12" Height="12"
+                                      Foreground="{DynamicResource BrushAccent}" />
+                        </Border>
+                        <TextBlock Classes="studio-title" Text="剪辑台" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <Border Grid.Column="1" Background="{DynamicResource BrushBgBase}"
+                            BorderBrush="{DynamicResource BrushBorderSubtle}" BorderThickness="1"
+                            CornerRadius="4" Padding="5,1" VerticalAlignment="Center">
+                        <TextBlock Text="本地剪辑" FontSize="9"
+                                   Foreground="{DynamicResource BrushTextMuted}" />
+                    </Border>
+                </Grid>
+
+                <TextBlock Grid.Row="1" Classes="studio-section" Text="录像场次" Margin="0,12,0,4" />
+                <ComboBox Grid.Row="2" Classes="studio-field"
                           ItemsSource="{Binding Sessions}"
                           SelectedItem="{Binding SelectedSession}"
                           PlaceholderText="选择录制场次…">
                     <ComboBox.ItemTemplate>
                         <DataTemplate>
                             <StackPanel Spacing="1">
-                                <TextBlock Text="{Binding DisplayText}" FontSize="12" Foreground="#E5E7EB" />
-                                <TextBlock Text="{Binding DetailText}" FontSize="10" Foreground="#94A3B8"
+                                <TextBlock Text="{Binding DisplayText}" FontSize="11.5"
+                                           Foreground="{DynamicResource BrushTextPrimary}"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding DetailText}" FontSize="9.5" Classes="mono"
+                                           Foreground="{DynamicResource BrushTextMuted}"
                                            TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                         </DataTemplate>
                     </ComboBox.ItemTemplate>
                 </ComboBox>
-                <Button Grid.Row="3" Classes="clip-action" Margin="0,6,0,0"
+
+                <Button Grid.Row="3" Classes="studio-action" Margin="0,8,0,0"
                         Content="打开本地文件…"
                         Command="{Binding OpenLocalFileCommand}" />
-                <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
-                    <TextBlock Classes="clip-caption" Text="{Binding DanmakuInfoText}" />
+
+                <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="6" Margin="0,9,0,0"
+                            VerticalAlignment="Center">
+                    <Border Width="5" Height="5" CornerRadius="3" VerticalAlignment="Center"
+                            Background="{DynamicResource BrushAccent}" />
+                    <TextBlock Classes="studio-caption" Text="{Binding DanmakuInfoText}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
-                <TextBlock Grid.Row="5" Classes="clip-section" Text="── 高能推荐 ──" Margin="0,10,0,2" />
-                <ScrollViewer Grid.Row="5" Margin="0,28,0,0" VerticalScrollBarVisibility="Auto">
+
+                <!-- 高能推荐标题行 -->
+                <Grid Grid.Row="5" ColumnDefinitions="Auto,*,Auto" Margin="0,14,0,6">
+                    <PathIcon Data="{DynamicResource IconSpark}" Width="11" Height="11"
+                              Foreground="{DynamicResource BrushWarning}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Classes="studio-section" Text="高能推荐"
+                               Margin="5,0,0,0" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Classes="studio-caption" Text="点击跳转"
+                               VerticalAlignment="Center" />
+                </Grid>
+
+                <ScrollViewer Grid.Row="6" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
                     <ItemsControl ItemsSource="{Binding Highlights}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <!-- 卡片根节点改为 StackPanel：上层「跳转」与下层「转写」是两个并列 Button，避免嵌套 Button 冒泡冲突。 -->
-                                <StackPanel Margin="0,0,0,4">
-                                    <Button Classes="clip-highlight" Click="OnHighlightClick">
-                                        <Grid ColumnDefinitions="Auto,*,Auto">
-                                            <PathIcon Data="{DynamicResource IconSpark}" Width="11" Height="11"
-                                                      Foreground="#F59E0B" VerticalAlignment="Center" />
-                                            <StackPanel Grid.Column="1" Margin="6,0,0,0">
-                                                <TextBlock Text="{Binding TimeText}" FontSize="11" Foreground="#E5E7EB" />
-                                                <TextBlock Text="{Binding RateText}" FontSize="9" Foreground="#F87171" />
-                                            </StackPanel>
-                                            <TextBlock Grid.Column="2" Text="推荐区间" FontSize="9"
-                                                       Foreground="#64748B" VerticalAlignment="Center" />
-                                        </Grid>
-                                    </Button>
-                                    <Grid ColumnDefinitions="Auto,*" Margin="6,2,4,0">
-                                        <Button Classes="clip-xs" Content="{Binding TranscribeButtonText}"
-                                                IsEnabled="{Binding CanTranscribe}"
-                                                Click="OnTranscribeHighlightClick"
-                                                ToolTip.Tip="识别该高能片段（前后约 10/20 秒）的语音" />
-                                        <Button Grid.Column="1" Classes="clip-highlight" Margin="6,0,0,0"
-                                                Padding="4,2" IsVisible="{Binding HasAsrResult}"
-                                                Click="OnHighlightAsrSummaryClick"
-                                                ToolTip.Tip="{Binding AsrSummaryToolTip}">
-                                            <TextBlock Text="{Binding AsrSummary}" FontSize="9"
-                                                       Foreground="#A5B4FC" TextTrimming="CharacterEllipsis" />
+                                <!-- 卡片根节点为 StackPanel：上层「跳转」与下层「转写」是两个并列 Button，避免嵌套 Button 冒泡冲突。 -->
+                                <Border Background="{DynamicResource BrushBgBase}"
+                                        BorderBrush="{DynamicResource BrushBorderSubtle}"
+                                        BorderThickness="1"
+                                        CornerRadius="{DynamicResource RadiusControl}"
+                                        Margin="0,0,0,5">
+                                    <StackPanel>
+                                        <Button Classes="studio-hit" Click="OnHighlightClick"
+                                                ToolTip.Tip="跳转到该高能时间点">
+                                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                                <Border Width="20" Height="20" CornerRadius="5"
+                                                        Background="{DynamicResource BrushWarningSoft}"
+                                                        VerticalAlignment="Center">
+                                                    <PathIcon Data="{DynamicResource IconSpark}" Width="10" Height="10"
+                                                              Foreground="{DynamicResource BrushWarning}" />
+                                                </Border>
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal"
+                                                            Spacing="7" Margin="7,0,0,0"
+                                                            VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding TimeText}" Classes="mono"
+                                                               FontSize="11"
+                                                               Foreground="{DynamicResource BrushTextPrimary}"
+                                                               VerticalAlignment="Center" />
+                                                    <Border Classes="rate-pill">
+                                                        <TextBlock Text="{Binding RateText}" Classes="mono"
+                                                                   FontSize="9"
+                                                                   Foreground="{DynamicResource BrushWarning}" />
+                                                    </Border>
+                                                </StackPanel>
+                                                <PathIcon Grid.Column="2" Data="{DynamicResource IconBrandPlay}"
+                                                          Width="9" Height="9" Opacity="0.55"
+                                                          Foreground="{DynamicResource BrushTextMuted}"
+                                                          VerticalAlignment="Center" />
+                                            </Grid>
                                         </Button>
-                                    </Grid>
-                                    <TextBlock Text="{Binding AsrError}" FontSize="9" Foreground="#F87171"
-                                               TextWrapping="Wrap" IsVisible="{Binding HasAsrError}"
-                                               Margin="6,2,4,0" />
-                                </StackPanel>
+                                        <Grid ColumnDefinitions="Auto,*" Margin="7,0,7,6">
+                                            <Button Classes="studio-mini" Content="{Binding TranscribeButtonText}"
+                                                    IsEnabled="{Binding CanTranscribe}"
+                                                    Click="OnTranscribeHighlightClick"
+                                                    ToolTip.Tip="识别该高能片段（前后约 10/20 秒）的语音" />
+                                            <Button Grid.Column="1" Classes="studio-asr" Margin="6,0,0,0"
+                                                    IsVisible="{Binding HasAsrResult}"
+                                                    Click="OnHighlightAsrSummaryClick"
+                                                    ToolTip.Tip="{Binding AsrSummaryToolTip}">
+                                                <Grid ColumnDefinitions="Auto,*">
+                                                    <TextBlock Text="ASR" Classes="mono" FontSize="8.5"
+                                                               Foreground="{DynamicResource BrushTextMuted}"
+                                                               Margin="0,0,5,0" VerticalAlignment="Center" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding AsrSummary}"
+                                                               FontSize="9"
+                                                               Foreground="{DynamicResource BrushTextSecondary}"
+                                                               TextTrimming="CharacterEllipsis" />
+                                                </Grid>
+                                            </Button>
+                                        </Grid>
+                                        <TextBlock Text="{Binding AsrError}" FontSize="9"
+                                                   Foreground="{DynamicResource BrushDanger}"
+                                                   TextWrapping="Wrap" IsVisible="{Binding HasAsrError}"
+                                                   Margin="8,0,8,6" />
+                                    </StackPanel>
+                                </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -165,172 +294,279 @@
             </Grid>
         </Border>
 
-        <!-- 中：本地预览播放器 -->
-        <Border Grid.Row="0" Grid.Column="1" Background="#11151D" BorderBrush="#262B36"
-                BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,10,10">
+        <!-- ==================== 中：本地预览播放器 ==================== -->
+        <Border Grid.Row="0" Grid.Column="1" Classes="card" Padding="12" Margin="0,0,10,10">
             <Grid RowDefinitions="Auto,*,Auto">
-                <StackPanel Spacing="1">
-                    <TextBlock Text="{Binding VideoTitle}" FontSize="13" FontWeight="SemiBold" Foreground="#E5E7EB" />
-                    <TextBlock Text="{Binding VideoSubtitle}" FontSize="10" Foreground="#94A3B8"
-                               TextTrimming="CharacterEllipsis" />
-                </StackPanel>
-                <Border Grid.Row="1" Margin="0,8,0,0" Background="#05070A" CornerRadius="8"
-                        BorderBrush="#1E293B" BorderThickness="1" ClipToBounds="True">
+                <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="{Binding VideoTitle}" FontSize="13.5" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource BrushTextPrimary}"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding VideoSubtitle}" FontSize="10" Classes="mono"
+                                   Foreground="{DynamicResource BrushTextMuted}"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <Border Grid.Column="1" Classes="chip" Margin="10,0,0,0">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <Border Width="6" Height="6" CornerRadius="3" VerticalAlignment="Center"
+                                    Background="{DynamicResource BrushAccent}" />
+                            <TextBlock Text="本地预览" FontSize="9.5" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource BrushTextSecondary}" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <!-- 暗房播放器：外围 #0A0C10，画面由 LocalClipPlayerView 自适应居中 -->
+                <Border Grid.Row="1" Margin="0,10,0,0" Background="#0A0C10"
+                        CornerRadius="8"
+                        BorderBrush="{DynamicResource BrushBorderSubtle}" BorderThickness="1"
+                        ClipToBounds="True">
                     <player:LocalClipPlayerView x:Name="Player" />
                 </Border>
-                <Grid Grid.Row="2" Margin="0,8,0,0" ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto">
-                    <Button Classes="clip-icon" Content="-5s" Click="OnSeekBackClick" />
-                    <Button Grid.Column="1" Classes="clip-icon" Margin="6,0,0,0"
-                            Content="{Binding PlayPauseGlyph}" Click="OnPlayPauseClick" FontSize="14" />
-                    <Button Grid.Column="2" Classes="clip-icon" Margin="6,0,0,0"
-                            Content="+5s" Click="OnSeekForwardClick" />
-                    <TextBlock Grid.Column="3" Text="{Binding PositionText}" FontSize="12"
-                               Foreground="#CBD5E1" VerticalAlignment="Center" Margin="12,0" />
-                    <ComboBox Grid.Column="4" Classes="clip-field" Width="92" VerticalAlignment="Center"
-                              ItemsSource="{Binding SpeedOptions}"
-                              SelectedItem="{Binding SelectedSpeedOption}">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding DisplayText}" FontSize="11" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                    <CheckBox Grid.Column="5" Classes="clip-check" Margin="10,0,0,0"
-                              Content="弹幕回放" IsChecked="{Binding DanmakuPlaybackEnabled}" />
+
+                <!-- 播控条：左簇（-5s / 播放暂停 / +5s），中心时间码，右簇（倍速 / 音量 / 弹幕回放） -->
+                <Grid Grid.Row="2" Margin="0,10,0,0" ColumnDefinitions="Auto,*,Auto">
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <Button Classes="ghost-btn" Width="34" Height="28" Padding="0"
+                                FontFamily="{DynamicResource FontMono}" FontSize="11"
+                                Content="-5s" Click="OnSeekBackClick" ToolTip.Tip="后退 5 秒" />
+                        <Button Classes="ghost-btn" Width="38" Height="30" Padding="0"
+                                Content="{Binding PlayPauseGlyph}" Click="OnPlayPauseClick"
+                                FontSize="15" Foreground="{DynamicResource BrushTextPrimary}"
+                                ToolTip.Tip="播放 / 暂停" />
+                        <Button Classes="ghost-btn" Width="34" Height="28" Padding="0"
+                                FontFamily="{DynamicResource FontMono}" FontSize="11"
+                                Content="+5s" Click="OnSeekForwardClick" ToolTip.Tip="前进 5 秒" />
+                    </StackPanel>
+
+                    <TextBlock Grid.Column="1" Classes="studio-value" Text="{Binding PositionText}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               FontSize="11.5" Margin="10,0" />
+
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <ComboBox Classes="studio-field" Width="78" Height="28" VerticalAlignment="Center"
+                                  ItemsSource="{Binding SpeedOptions}"
+                                  SelectedItem="{Binding SelectedSpeedOption}"
+                                  ToolTip.Tip="播放倍速">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding DisplayText}" FontSize="11" Classes="mono" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <!-- 本地预览播放器当前固定 100% 音量，无独立音量属性：此处仅作状态提示，不做假交互。 -->
+                        <Border Classes="chip" Padding="7,4"
+                                ToolTip.Tip="本地预览固定音量 100%（剪辑预览不单独调节）">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <PathIcon Width="11" Height="11" VerticalAlignment="Center"
+                                          Foreground="{DynamicResource BrushTextMuted}"
+                                          Data="M4 9v6h4l5 4V5L8 9H4z" />
+                                <TextBlock Text="100" Classes="mono" FontSize="9.5"
+                                           Foreground="{DynamicResource BrushTextMuted}" />
+                            </StackPanel>
+                        </Border>
+                        <CheckBox Classes="studio-check" Content="弹幕回放" Margin="2,0,0,0"
+                                  IsChecked="{Binding DanmakuPlaybackEnabled}" />
+                    </StackPanel>
                 </Grid>
             </Grid>
         </Border>
 
-        <!-- 右：切片导出面板 -->
-        <Border Grid.Row="0" Grid.Column="2" Background="#11151D" BorderBrush="#262B36"
-                BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,10">
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel Spacing="6">
-                    <TextBlock Classes="clip-title" Text="切片导出面板" />
-                    <TextBlock Classes="clip-section" Text="当前区间" />
-                    <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-                        <StackPanel>
-                            <TextBlock Classes="clip-caption" Text="入点" />
-                            <TextBlock Classes="clip-value" Text="{Binding InText}" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="1">
-                            <TextBlock Classes="clip-caption" Text="出点" />
-                            <TextBlock Classes="clip-value" Text="{Binding OutText}" />
-                        </StackPanel>
-                    </Grid>
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Button Classes="clip-xs" Content="设入点 (I)" Click="OnSetInClick" />
-                        <Button Classes="clip-xs" Content="设出点 (O)" Click="OnSetOutClick" />
-                        <TextBlock Classes="clip-caption" VerticalAlignment="Center"
-                                   Text="选区时长" />
-                        <TextBlock Classes="clip-caption" VerticalAlignment="Center" Foreground="#E5E7EB"
-                                   Text="{Binding SelectionText}" />
-                    </StackPanel>
-                    <TextBlock Classes="clip-section" Text="导出模式" />
-                    <RadioButton Classes="clip-mode" GroupName="clipMode" Content="仅无弹幕（秒切）"
-                                 IsChecked="{Binding IsCleanOnlyExport}" />
-                    <RadioButton Classes="clip-mode" GroupName="clipMode" Content="仅有弹幕（硬编烧录）"
-                                 IsChecked="{Binding IsDanmakuOnlyExport}" />
-                    <RadioButton Classes="clip-mode" GroupName="clipMode" Content="同时导出两版"
-                                 IsChecked="{Binding IsBothExport}" />
-                    <TextBlock Classes="clip-section" Text="编码器" />
-                    <TextBlock Text="{Binding EncoderText}" FontSize="11" Foreground="#A5B4FC" />
-                    <TextBlock Classes="clip-section" Text="输出目录" />
+        <!-- ==================== 右：切片导出面板 ==================== -->
+        <Border Grid.Row="0" Grid.Column="2" Classes="card" Padding="12" Margin="0,0,0,10">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          Padding="0,0,6,0">
+                <StackPanel>
                     <Grid ColumnDefinitions="*,Auto">
-                        <TextBox Classes="clip-field" Text="{Binding OutputDirectory}" />
-                        <Button Grid.Column="1" Classes="clip-xs" Margin="6,0,0,0" Content="浏览…"
+                        <TextBlock Classes="studio-title" Text="切片导出面板" />
+                        <Border Grid.Column="1" Classes="chip" Padding="6,1">
+                            <TextBlock Text="MP4" Classes="mono" FontSize="9"
+                                       Foreground="{DynamicResource BrushTextMuted}" />
+                        </Border>
+                    </Grid>
+
+                    <!-- 当前区间 -->
+                    <TextBlock Classes="studio-section" Text="当前区间" Margin="0,12,0,5" />
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                        <Border Background="{DynamicResource BrushBgBase}"
+                                BorderBrush="{DynamicResource BrushBorderSubtle}" BorderThickness="1"
+                                CornerRadius="{DynamicResource RadiusControl}" Padding="9,6">
+                            <StackPanel Spacing="1">
+                                <TextBlock Classes="studio-caption" Text="入点" />
+                                <TextBlock Classes="studio-value" Text="{Binding InText}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Column="1" Background="{DynamicResource BrushBgBase}"
+                                BorderBrush="{DynamicResource BrushBorderSubtle}" BorderThickness="1"
+                                CornerRadius="{DynamicResource RadiusControl}" Padding="9,6">
+                            <StackPanel Spacing="1">
+                                <TextBlock Classes="studio-caption" Text="出点" />
+                                <TextBlock Classes="studio-value" Text="{Binding OutText}" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,Auto,*,Auto" Margin="0,8,0,0">
+                        <Button Classes="studio-mini" Content="设入点 (I)" Click="OnSetInClick" />
+                        <Button Grid.Column="1" Classes="studio-mini" Content="设出点 (O)"
+                                Click="OnSetOutClick" Margin="6,0,0,0" />
+                        <TextBlock Grid.Column="2" Classes="studio-caption" Text="选区时长"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center"
+                                   Margin="8,0,0,0" />
+                        <TextBlock Grid.Column="3" Classes="studio-value" Text="{Binding SelectionText}"
+                                   FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0" />
+                    </Grid>
+
+                    <!-- 导出模式 -->
+                    <TextBlock Classes="studio-section" Text="导出模式" Margin="0,14,0,5" />
+                    <StackPanel Spacing="1">
+                        <RadioButton Classes="studio-mode" GroupName="clipMode" Content="仅无弹幕（秒切）"
+                                     IsChecked="{Binding IsCleanOnlyExport}" />
+                        <RadioButton Classes="studio-mode" GroupName="clipMode" Content="仅有弹幕（硬编烧录）"
+                                     IsChecked="{Binding IsDanmakuOnlyExport}" />
+                        <RadioButton Classes="studio-mode" GroupName="clipMode" Content="同时导出两版"
+                                     IsChecked="{Binding IsBothExport}" />
+                    </StackPanel>
+
+                    <!-- 编码器 -->
+                    <TextBlock Classes="studio-section" Text="编码器" Margin="0,12,0,5" />
+                    <Border Background="{DynamicResource BrushBgBase}"
+                            BorderBrush="{DynamicResource BrushBorderSubtle}" BorderThickness="1"
+                            CornerRadius="{DynamicResource RadiusControl}" Padding="8,5">
+                        <TextBlock Text="{Binding EncoderText}" FontSize="10.5" Classes="mono"
+                                   Foreground="{DynamicResource BrushTextSecondary}"
+                                   TextTrimming="CharacterEllipsis" />
+                    </Border>
+
+                    <!-- 输出设置 -->
+                    <TextBlock Classes="studio-section" Text="输出设置" Margin="0,12,0,5" />
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBox Classes="studio-field" Text="{Binding OutputDirectory}"
+                                 Watermark="输出目录" />
+                        <Button Grid.Column="1" Classes="studio-mini" Content="浏览…" Margin="6,0,0,0"
+                                VerticalAlignment="Stretch"
                                 Command="{Binding PickOutputDirectoryAsyncCommand}" />
                     </Grid>
-                    <TextBlock Classes="clip-section" Text="文件名（不含扩展名）" />
-                    <TextBox Classes="clip-field" Text="{Binding OutputFileName}" />
-                    <TextBlock Classes="clip-caption" Text="{Binding KeyframeTip}" TextWrapping="Wrap"
-                               Margin="0,4,0,0" />
-                    <Button Classes="clip-primary" Margin="0,6,0,0" HorizontalAlignment="Stretch"
+                    <TextBlock Classes="studio-caption" Text="文件名（不含扩展名）" Margin="0,8,0,3" />
+                    <TextBox Classes="studio-field" Text="{Binding OutputFileName}" />
+                    <TextBlock Classes="studio-caption" Text="{Binding KeyframeTip}"
+                               TextWrapping="Wrap" Margin="0,6,0,0" />
+
+                    <!-- 主操作 -->
+                    <Button Classes="primary-btn" Height="32" Margin="0,12,0,0" FontSize="12"
                             Content="{Binding ExportButtonText}"
                             Command="{Binding ExportCommand}"
                             IsEnabled="{Binding CanExport}" />
-                    <Button Classes="clip-xs" Margin="0,2,0,0" HorizontalAlignment="Stretch"
+                    <Button Classes="subtle-btn" Height="26" Margin="0,6,0,0" FontSize="10.5"
                             Content="取消当前导出"
                             Command="{Binding CancelExportCommand}"
                             IsVisible="{Binding IsExporting}" />
-                    <TextBlock Classes="clip-section" Text="导出进度" />
+
+                    <!-- 导出队列 -->
+                    <TextBlock Classes="studio-section" Text="导出队列" Margin="0,14,0,5" />
                     <ItemsControl ItemsSource="{Binding ExportTasks}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Background="#0B0E13" BorderBrush="#262B36" BorderThickness="1"
-                                        CornerRadius="6" Padding="8" Margin="0,0,0,6">
-                                    <StackPanel Spacing="3">
+                                <Border Background="{DynamicResource BrushBgBase}"
+                                        BorderBrush="{DynamicResource BrushBorderSubtle}"
+                                        BorderThickness="1"
+                                        CornerRadius="{DynamicResource RadiusControl}"
+                                        Padding="9" Margin="0,0,0,6">
+                                    <StackPanel Spacing="4">
                                         <Grid ColumnDefinitions="*,Auto">
-                                            <TextBlock Text="{Binding FileName}" FontSize="11" Foreground="#E5E7EB"
+                                            <TextBlock Text="{Binding FileName}" FontSize="10.5"
+                                                       Foreground="{DynamicResource BrushTextPrimary}"
                                                        TextTrimming="CharacterEllipsis" />
                                             <TextBlock Grid.Column="1" Text="{Binding ModeText}" FontSize="9"
-                                                       Foreground="#94A3B8" />
+                                                       Foreground="{DynamicResource BrushTextMuted}"
+                                                       Margin="6,0,0,0" />
                                         </Grid>
                                         <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress}"
-                                                     Height="4" />
+                                                     Height="4"
+                                                     Background="{DynamicResource BrushBgElevated}"
+                                                     Foreground="{DynamicResource BrushAccent}" />
                                         <Grid ColumnDefinitions="*,Auto">
-                                            <TextBlock Text="{Binding StateText}" FontSize="10"
-                                                       Foreground="#A5B4FC" />
-                                            <TextBlock Grid.Column="1" Text="{Binding SpeedText}" FontSize="10"
-                                                       Foreground="#94A3B8" />
+                                            <TextBlock Text="{Binding StateText}" FontSize="9.5"
+                                                       Foreground="{DynamicResource BrushTextSecondary}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="1" Text="{Binding SpeedText}" FontSize="9.5"
+                                                       Classes="mono"
+                                                       Foreground="{DynamicResource BrushTextMuted}"
+                                                       Margin="6,0,0,0" />
                                         </Grid>
-                                        <TextBlock Text="{Binding OutputText}" FontSize="9" Foreground="#4ADE80"
+                                        <TextBlock Text="{Binding OutputText}" FontSize="9"
+                                                   Foreground="{DynamicResource BrushSuccess}"
                                                    TextWrapping="Wrap" IsVisible="{Binding HasOutput}" />
-                                        <TextBlock Text="{Binding RangeText}" FontSize="9" Foreground="#64748B" />
+                                        <TextBlock Text="{Binding RangeText}" FontSize="9" Classes="mono"
+                                                   Foreground="{DynamicResource BrushTextMuted}" />
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="#94A3B8"
-                               TextWrapping="Wrap" Margin="0,6,0,4" />
+                    <TextBlock Text="{Binding StatusText}" FontSize="10.5"
+                               Foreground="{DynamicResource BrushTextSecondary}"
+                               TextWrapping="Wrap" Margin="0,8,0,0" />
 
                     <!-- V0.5-A 语音识别：识别当前时间轴选区，展示分段结果并可点击单句跳转。 -->
-                    <Border Background="#0B0E13" BorderBrush="#262B36" BorderThickness="1"
-                            CornerRadius="6" Padding="8" Margin="0,6,0,0"
+                    <Border Background="{DynamicResource BrushBgBase}"
+                            BorderBrush="{DynamicResource BrushBorderSubtle}" BorderThickness="1"
+                            CornerRadius="{DynamicResource RadiusCard}" Padding="10" Margin="0,12,0,0"
                             IsVisible="{Binding IsAsrPanelVisible}">
-                        <StackPanel Spacing="5">
-                            <TextBlock Classes="clip-title" Text="语音识别" />
-                            <Button Classes="clip-primary" HorizontalAlignment="Stretch"
+                        <StackPanel Spacing="6">
+                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                <PathIcon Data="{DynamicResource IconMic}" Width="12" Height="12"
+                                          Foreground="{DynamicResource BrushAccent}"
+                                          VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Classes="studio-title" FontSize="12"
+                                           Text="语音识别" Margin="6,0,0,0" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="2" Text="{Binding AsrRangeText}" FontSize="9"
+                                           Classes="mono"
+                                           Foreground="{DynamicResource BrushTextMuted}"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+                            <Button Classes="primary-btn" Height="28" FontSize="11"
                                     Content="识别当前选区"
                                     Command="{Binding TranscribeSelectionCommand}" />
-                            <Button Classes="clip-xs" HorizontalAlignment="Stretch"
+                            <Button Classes="subtle-btn" Height="26" FontSize="10.5"
                                     Content="取消识别"
                                     Command="{Binding CancelAsrCommand}"
                                     IsVisible="{Binding IsAsrRunning}" />
                             <ProgressBar IsIndeterminate="True" Height="3"
+                                         Background="{DynamicResource BrushBgElevated}"
+                                         Foreground="{DynamicResource BrushAccent}"
                                          IsVisible="{Binding IsAsrRunning}" />
-                            <Grid ColumnDefinitions="*,Auto">
-                                <TextBlock Text="{Binding AsrStatusText}" FontSize="11"
-                                           Foreground="#A5B4FC" TextWrapping="Wrap"
-                                           VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="1" Text="{Binding AsrRangeText}" FontSize="9"
-                                           Foreground="#64748B" VerticalAlignment="Center" />
-                            </Grid>
-                            <TextBlock Text="{Binding AsrErrorText}" FontSize="10" Foreground="#F87171"
+                            <TextBlock Text="{Binding AsrStatusText}" FontSize="10.5"
+                                       Foreground="{DynamicResource BrushTextSecondary}"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding AsrErrorText}" FontSize="10"
+                                       Foreground="{DynamicResource BrushDanger}"
                                        TextWrapping="Wrap" IsVisible="{Binding HasAsrError}" />
                             <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding HasAsrResult}">
                                 <TextBlock Text="{Binding AsrProviderLabel}" FontSize="9"
-                                           Foreground="#64748B" TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource BrushTextMuted}"
+                                           TextTrimming="CharacterEllipsis"
                                            VerticalAlignment="Center" />
-                                <Button Grid.Column="1" Classes="clip-xs" Content="复制文本"
+                                <Button Grid.Column="1" Classes="studio-mini" Content="复制文本"
                                         Click="OnCopyAsrTextClick" />
                             </Grid>
-                            <TextBlock Text="{Binding AsrFullText}" FontSize="10" Foreground="#94A3B8"
-                                       TextWrapping="Wrap" MaxHeight="120"
+                            <TextBlock Text="{Binding AsrFullText}" FontSize="10"
+                                       Foreground="{DynamicResource BrushTextSecondary}"
+                                       TextWrapping="Wrap" MaxHeight="100"
                                        IsVisible="{Binding HasAsrResult}" />
                             <ItemsControl ItemsSource="{Binding AsrLines}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Button Classes="clip-xs" HorizontalAlignment="Stretch"
-                                                HorizontalContentAlignment="Left" Margin="0,1,0,0"
-                                                Padding="6,4" Click="OnAsrLineClick"
+                                        <Button Classes="studio-line"
+                                                Click="OnAsrLineClick"
                                                 ToolTip.Tip="点击跳转到该句对应的画面">
                                             <Grid ColumnDefinitions="Auto,*">
                                                 <TextBlock Text="{Binding TimeText}" FontSize="9"
-                                                           Foreground="#64748B" Margin="0,1,6,0" />
+                                                           Classes="mono"
+                                                           Foreground="{DynamicResource BrushTextMuted}"
+                                                           Margin="0,1,6,0" />
                                                 <TextBlock Grid.Column="1" Text="{Binding Text}" FontSize="10"
-                                                           Foreground="#E5E7EB" TextWrapping="Wrap" />
+                                                           Foreground="{DynamicResource BrushTextPrimary}"
+                                                           TextWrapping="Wrap" />
                                             </Grid>
                                         </Button>
                                     </DataTemplate>
@@ -342,11 +578,10 @@
             </ScrollViewer>
         </Border>
 
-        <!-- 底：双波形时间轴 -->
-        <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Background="#11151D"
-                BorderBrush="#262B36" BorderThickness="1" CornerRadius="8" Padding="8">
+        <!-- ==================== 底：双波形时间轴 ==================== -->
+        <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3" Classes="card" Padding="8">
             <controls:ClipTimelineControl x:Name="Timeline" Height="156"
-                                          ToolTip.Tip="双波形时间轴：蓝色=音频波形，橙色=弹幕密度，红色竖线=播放头，左/右蓝色竖线=入点/出点，蓝色区域=剪辑选区。点击或拖动上方三角定位播放头；拖动 IN/OUT 手柄调整选区；滚轮缩放，双击复位。" />
+                                          ToolTip.Tip="双波形时间轴：蓝色=音频波形，橙色=弹幕密度，红色竖线=播放头，左/右蓝色竖条=入点/出点，蓝色区域=剪辑选区。点击或拖动播放头定位；拖动 IN/OUT 手柄调整选区；滚轮缩放，双击复位。" />
         </Border>
     </Grid>
 </UserControl>
