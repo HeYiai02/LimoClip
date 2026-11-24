@@ -680,6 +680,21 @@
           <h3>纯本地优先，凭证系统级加密</h3>
           <p>所有数据存于本地 SQLite，平台 Cookie 与 ASR API Key 均经 Windows DPAPI 加密保护，不经过任何第三方中转服务器。</p>
         </div>
+        <div class="card">
+          <div class="card-icon">🧩</div>
+          <h3>六平台插件与热更新（V0.5-B/C）</h3>
+          <p>B站 / Twitch / YouTube / 虎牙 / 斗鱼 / 抖音 全部内置；平台插件经 Ed25519 验签后热加载，接口变动无需重装主程序。</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🖥</div>
+          <h3>主副屏布局与桌面级全屏（V0.5-G/H）</h3>
+          <p>一路主画面 + 右侧副屏纵向排列的非对称布局，支持保存与拖拽比例；F11 桌面全屏进入沉浸模式，鼠标空闲自动隐藏控制条。</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">📺</div>
+          <h3>Twitch 原生通道去广告（V0.5-G/H）</h3>
+          <p>原生 GQL + Usher 通道固定 embed 播放参数规避流内插播广告，另有去广告 M3U8 代理模板与 yt-dlp 兜底三层降级。</p>
+        </div>
       </div>
     </div>
   </section>
@@ -742,40 +757,40 @@
   <section id="platforms">
     <div class="container">
       <div class="section-head">
-        <h2>平台支持与演进路线</h2>
-        <p>后续版本将引入 Ed25519 验签的独立平台插件热更新，单个平台接口变动无需重装主程序</p>
+        <h2>平台支持</h2>
+        <p>六平台全部内置：拉流 + 实时弹幕 + WebView2 账号登录；平台插件支持 Ed25519 验签热更新，单个平台接口变动无需重装主程序</p>
       </div>
 
       <div class="plat-grid">
         <div class="plat-card ready">
           <span class="mock-badge" style="background:var(--pink);">B站</span>
           <div class="plat-name">Bilibili</div>
-          <div class="plat-status">✓ 已支持</div>
+          <div class="plat-status">✓ 已支持 · 原生直连</div>
         </div>
         <div class="plat-card ready">
           <span class="mock-badge" style="background:var(--purple);">Twitch</span>
           <div class="plat-name">Twitch</div>
-          <div class="plat-status">✓ 已支持</div>
+          <div class="plat-status">✓ 已支持 · 原生通道已去广告</div>
         </div>
-        <div class="plat-card">
+        <div class="plat-card ready">
           <span class="mock-badge" style="background:#dc2626;">YT</span>
           <div class="plat-name">YouTube</div>
-          <div class="plat-status">V0.5-B 规划中</div>
+          <div class="plat-status">✓ 已支持 · V0.5-B</div>
         </div>
-        <div class="plat-card">
+        <div class="plat-card ready">
           <span class="mock-badge" style="background:#f59e0b;">虎牙</span>
           <div class="plat-name">虎牙直播</div>
-          <div class="plat-status">V0.5-C 规划中</div>
+          <div class="plat-status">✓ 已支持 · V0.5-C</div>
         </div>
-        <div class="plat-card">
+        <div class="plat-card ready">
           <span class="mock-badge" style="background:#ea580c;">斗鱼</span>
           <div class="plat-name">斗鱼直播</div>
-          <div class="plat-status">V0.5-C 规划中</div>
+          <div class="plat-status">✓ 已支持 · V0.5-C</div>
         </div>
-        <div class="plat-card">
+        <div class="plat-card ready">
           <span class="mock-badge" style="background:#334155;">抖音</span>
           <div class="plat-name">抖音直播</div>
-          <div class="plat-status">V0.5-C 规划中</div>
+          <div class="plat-status">✓ 已支持 · V0.5-C</div>
         </div>
       </div>
     </div>

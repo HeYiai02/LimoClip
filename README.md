@@ -38,14 +38,25 @@ LimoClip 是一款面向 Windows 桌面端的开源直播工具（基于 .NET + 
 | 平台 | 视频拉流 | 实时弹幕 | 账号登录 (WebView2) | 状态 |
 | :--- | :---: | :---: | :---: | :--- |
 | **Bilibili（B站）** | ✅ 原生直连 | ✅ WebSocket + 独轮车过滤 | ✅ 解锁原画与真实 UID | **已支持** |
-| **Twitch** | ✅ `yt-dlp` 解析 | ✅ IRC WebSocket | ✅ 可选绑定 | **已支持** |
-| **YouTube** | ✅ `yt-dlp` 解析（含分离音轨合并） | ✅ InnerTube 实时弹幕 | ✅ 内置插件 | **已支持**（V0.5-B） |
+| **Twitch** | ✅ 原生 GQL + Usher（去广告 embed）／`yt-dlp` 兜底 | ✅ IRC WebSocket | ✅ 可选绑定 | **已支持** |
+| **YouTube** | ✅ `yt-dlp` 解析（含分离音轨合并） | ✅ InnerTube 实时弹幕 | ✅ 内置插件 + Cookie 注入 | **已支持**（V0.5-B） |
+| **虎牙（Huya）** | ✅ 移动端接口 FLV + Cookie 注入（HS 优先线路、多档 ratio） | ✅ wsapi Tars 弹幕协议 | ✅ 登录 Cookie 参与拉流与弹幕 | **已支持**（V0.5-C／V0.5-D） |
+| **斗鱼** | ✅ getH5Play 签名拉流（Jint 执行 `ub98484234`）+ Cookie 注入 | ✅ STT 弹幕（`danmuproxy:8601`） | ✅ 登录 Cookie 参与拉流 | **已支持**（V0.5-C／V0.5-D） |
+| **抖音** | ✅ enter API 拉流（ttwid + Cookie） | ✅ Protobuf PushFrame 弹幕（`sign.js` 签名 + 自动 ack） | ✅ 登录 Cookie 参与拉流与弹幕 | **已支持**（V0.5-C／V0.5-D） |
 
-| **虎牙（Huya）** | ✅ 移动端接口 FLV | ✅ wsapi Tars 弹幕协议 | ⏳ 暂未实现（匿名可用） | **已支持**（V0.5-C Step6） |
-| **斗鱼** | ✅ getH5Play 签名拉流（Jint 执行 `ub98484234`） | ✅ STT 弹幕（`danmuproxy:8601`） | ⏳ 暂未实现（匿名可用） | **已支持**（V0.5-C Step7） |
-| **抖音** | ✅ enter API 拉流（ttwid + Cookie） | ✅ Protobuf PushFrame 弹幕（`sign.js` 签名 + 自动 ack） | ⏳ 暂未实现（匿名可用，签名脚本运行时下载） | **已支持**（V0.5-C Step8） |
+> 注：虎牙 CDN 对海外 / 非大陆网络有拉流限制（实测窗口约 0.5~5 秒即被服务端断开），国内网络下可正常播放/录制。斗鱼与抖音不受此限制。斗鱼 CDN 的 HTTPS 需要随包 CA（应用已内置，仅对 https 输入生效）；抖音匿名拉流地址为 http，不需要 CA。抖音弹幕签名依赖第三方 `sign.js`（AGPL-3.0，不随仓库分发）：插件会在首次使用时自动下载并缓存到 `%LocalAppData%/LiveMonitor/cache/douyin/sign.js`，也可用环境变量 `LIMOCLIP_DOUYIN_SIGN_JS` 指定本地文件。
 
-> 注：虎牙 CDN 对海外 / 非大陆网络有拉流限制（实测窗口约 0.5~5 秒即被服务端断开），国内网络下可正常播放/录制；本机当前为海外出口，虎牙的监控画面与录制未能在本机完整验证。斗鱼与抖音不受此限制（本机均已实测录制与剪辑导出）。斗鱼 CDN 的 HTTPS 需要随包 CA（应用已内置，仅对 https 输入生效）；抖音匿名拉流地址为 http，不需要 CA。抖音弹幕签名依赖第三方 `sign.js`（AGPL-3.0，不随仓库分发）：插件会在首次使用时自动下载并缓存到 `%LocalAppData%/LiveMonitor/cache/douyin/sign.js`，也可用环境变量 `LIMOCLIP_DOUYIN_SIGN_JS` 指定本地文件。
+---
+
+## 近期版本亮点（V0.5 系列）
+
+* **V0.5-A · 云端语音转写**：剪辑台接入 OpenAI 兼容 ASR 接口，内置硅基流动 / SiliconFlow / Groq / 自定义四套预设，API Key 本地 DPAPI 加密、结果自动缓存。
+* **V0.5-B · 平台插件底座 + YouTube**：`IPlatformPlugin` + Ed25519 验签插件热更新；YouTube 支持 yt-dlp 拉流（含分离音轨）与 InnerTube 实时弹幕。
+* **V0.5-C · 虎牙 / 斗鱼 / 抖音**：三平台原生拉流与弹幕协议全部内置，六平台同屏监控。
+* **V0.5-D · 六平台账号登录**：B站 / Twitch / YouTube / 虎牙 / 斗鱼 / 抖音 均可在「账号与设置」内通过 WebView2 登录，Cookie 加密保存并注入拉流/弹幕请求。
+* **V0.5-E/F · 虎牙断流修复**：拉流改走 HS 稳定线路 + 多档 `ratio` 画质；录制改为**分段录制 + 停止时合并去重**，解决 CDN 单连接 3~17 秒断开导致的录制损坏。
+* **V0.5-G · 界面与布局**：左侧分组自动换行滚动、桌面级全屏（F11 / Esc）、「主副屏」非对称布局；Twitch 去广告三层降级（代理模板 → 原生 GQL+Usher → yt-dlp 兜底）。
+* **V0.5-H · 沉浸模式 + Twitch embed**：桌面全屏/焦点模式下鼠标空闲 2.5 秒自动隐藏顶部提示与窗格控制条；Twitch 原生通道固定 `embed` 播放参数，规避直播流内插播广告。
 
 ---
 
@@ -68,7 +79,7 @@ LimoClip 是一款面向 Windows 桌面端的开源直播工具（基于 .NET + 
 
 ### 2. 三步上手工作流
 
-1. **添加直播间**：在左侧主库点击 `+ 添加`，粘贴 B站、Twitch、YouTube、虎牙、斗鱼或抖音直播间链接；建议在右上角「账号与设置」中通过内置窗口登录 B站账号，解锁原画画质并启用完整的独轮车单用户识别。
+1. **添加直播间**：在左侧主库点击 `+ 添加`，粘贴 B站、Twitch、YouTube、虎牙、斗鱼或抖音直播间链接；建议在右上角「账号与设置」中通过内置窗口登录平台账号——B站登录可解锁原画画质并启用完整的独轮车单用户识别，其余平台登录后 Cookie 会参与拉流与弹幕请求。
 2. **开启录制**：切到顶部 **「录制中心」**，设置保存目录（支持本地硬盘或已映射的 NAS 盘符），勾选需要自动录制的主播或手动开录。
 3. **快速出片**：录播完成后点击 **「去剪辑」** 进入剪辑台，沿着弹幕热力波峰与高能打点定位片段，点击「转写」看文字确认内容，一键导出无弹幕版（秒切无损）或有弹幕版 `.mp4`。
 
@@ -105,7 +116,7 @@ dotnet test LiveMonitor.sln
 dotnet run --project src/LiveMonitor.Desktop/LiveMonitor.Desktop.csproj
 
 # 4. 打包免环境绿色版 Release ZIP（输出至 artifacts/）
-powershell -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Version v0.5.0-beta.1
+powershell -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Version v0.5.0
 ```
 
 > 历史架构与各阶段设计文档已整理归档，详见仓库中的 `code_artifact.md`、`limoclip_v0_*.md` 与 `HANDOFF.md`。
