@@ -112,6 +112,12 @@ public sealed class ProvidersManifest
                 errors.Add($"{label}.downloadUrl 必须是 https 绝对地址。");
             }
 
+            if (!string.IsNullOrWhiteSpace(entry.MirrorDownloadUrl) &&
+                !IsAbsoluteHttpsUrl(entry.MirrorDownloadUrl))
+            {
+                errors.Add($"{label}.mirrorDownloadUrl 必须是 https 绝对地址。");
+            }
+
             if (!IsSha256Hex(entry.Sha256))
             {
                 errors.Add($"{label}.sha256 必须是 64 位十六进制哈希。");
@@ -203,6 +209,13 @@ public sealed class ProviderPluginEntry
     public string DllName { get; init; } = string.Empty;
 
     public string DownloadUrl { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 插件 DLL 镜像地址（可选，方案 B）。主地址下载失败时自动回退到此地址；
+    /// SHA256 与 Ed25519 验签始终使用本条目上的 sha256/ed25519Signature，镜像内容必须与主地址完全一致。
+    /// 留空或 null 表示该插件未配置镜像。
+    /// </summary>
+    public string? MirrorDownloadUrl { get; init; }
 
     public string Sha256 { get; init; } = string.Empty;
 

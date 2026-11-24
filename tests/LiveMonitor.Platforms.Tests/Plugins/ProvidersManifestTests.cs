@@ -151,6 +151,57 @@ public sealed class ProvidersManifestTests
     }
 
     [Fact]
+    public void Validate_InvalidMirrorDownloadUrl_ReportsError()
+    {
+        var entry = new ProviderPluginEntry
+        {
+            PluginId = "mirror-broken",
+            Platform = PlatformType.Twitch,
+            Version = "1.0.0",
+            MinAppVersion = "0.5.0",
+            DllName = "LiveMonitor.Platforms.Twitch.dll",
+            DownloadUrl = "https://example.com/twitch.zip",
+            MirrorDownloadUrl = "http://mirror.example.com/twitch.zip",
+            Sha256 = ValidSha,
+            Ed25519Signature = ValidSignature,
+        };
+        var manifest = new ProvidersManifest { ManifestVersion = 1, Plugins = new[] { entry } };
+
+        var errors = manifest.Validate();
+
+        Assert.Contains(errors, e => e.Contains("mirrorDownloadUrl"));
+    }
+
+    [Fact]
+    public void Parse_MirrorDownloadUrl_IsExposed()
+    {
+        var pluginsJson = $$"""
+        [
+          {
+            "pluginId": "mirror-plugin",
+            "platform": 5,
+            "version": "1.0.0",
+            "minAppVersion": "0.5.0",
+            "dllName": "LiveMonitor.Platforms.Mirror.dll",
+            "downloadUrl": "https://example.com/plugins/mirror.dll",
+            "mirrorDownloadUrl": "https://gitee.com/HeYiai/limoclip-plugins/raw/master/plugins/mirror.dll",
+            "sha256": "{{ValidSha}}",
+            "ed25519Signature": "{{ValidSignature}}",
+            "extraScripts": []
+          }
+        ]
+        """;
+
+        var manifest = ProvidersManifest.Parse(BuildManifestJson(pluginsJson: pluginsJson));
+
+        var entry = Assert.Single(manifest.Plugins);
+        Assert.Equal(
+            "https://gitee.com/HeYiai/limoclip-plugins/raw/master/plugins/mirror.dll",
+            entry.MirrorDownloadUrl);
+        Assert.Empty(manifest.Validate());
+    }
+
+    [Fact]
     public void Validate_DuplicatePluginId_ReportsError()
     {
         var entry = new ProviderPluginEntry

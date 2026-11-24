@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$ProjectPath,
@@ -13,6 +13,7 @@ param(
     [string]$MinAppVersion = '0.0.0',
     [string]$ManifestPath = 'plugins\providers-manifest.json',
     [string]$DownloadUrl,
+    [string]$MirrorDownloadUrl,
     [string]$PrivateKeyPath,
     [string]$PrivateKeyBase64,
     [string]$Configuration = 'Release',
@@ -106,6 +107,7 @@ if (-not [System.IO.Path]::IsPathRooted($ManifestPath)) {
     -ManifestPath $ManifestPath `
     -DllFileName $DllFileName `
     -DownloadUrl $DownloadUrl `
+    -MirrorDownloadUrl $MirrorDownloadUrl `
     -PrivateKeyPath $PrivateKeyPath `
     -PrivateKeyBase64 $PrivateKeyBase64
 if ($LASTEXITCODE -ne 0) {
@@ -127,4 +129,7 @@ Write-Host "清单文件：$ManifestPath" -ForegroundColor Green
 Write-Host ''
 Write-Host '下一步：' -ForegroundColor Yellow
 Write-Host "  1. 把 $artifactDll 上传到 GitHub Release 资产（下载地址与清单 downloadUrl 一致）。"
-Write-Host '  2. 提交 plugins\providers-manifest.json，客户端「检查平台插件更新」即可发现新版本。'
+Write-Host '  2. 如需国内镜像（方案 B）：把同一个 DLL 上传到 Gitee 镜像仓库，用 -MirrorDownloadUrl 重新生成清单，'
+Write-Host '     或手工在清单条目补 mirrorDownloadUrl（GitHub 下载失败时客户端自动回退，SHA256/签名不变）。'
+Write-Host '  3. 同步 Gitee 镜像里的 plugins/providers-manifest.json，提交 plugins\providers-manifest.json，'
+Write-Host '     客户端「检查平台插件更新」即可发现新版本。'

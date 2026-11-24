@@ -24,6 +24,7 @@
       "minAppVersion": "0.5.0",
       "dllName": "plugin.dll",
       "downloadUrl": "https://github.com/heyiai02/LimoClip/releases/download/plugin-youtube-dlp-1.0.0/plugin.dll",
+      "mirrorDownloadUrl": "https://gitee.com/HeYiai/limoclip-plugins/raw/master/plugins/plugin.dll",
       "sha256": "小写十六进制 SHA256（64 位）",
       "ed25519Signature": "对 DLL 原始字节的 Ed25519 签名（Base64，64 字节）",
       "extraScripts": []
@@ -34,8 +35,19 @@
 
 - `platform` 使用 `LiveMonitor.Core.Enums.PlatformType` 的数字值：Bilibili=1、Douyin=2、Douyu=3、Huya=4、Twitch=5、YouTube=6。
 - `downloadUrl` 必须是 HTTPS 绝对地址；`dllName` 必须是单个 `.dll` 文件名。
+- `mirrorDownloadUrl`（可选，方案 B）：国内镜像地址（Gitee Raw）。客户端下载 DLL 时先请求 `downloadUrl`，失败（网络异常/超时/非 2xx）才回退该地址；镜像内容必须与主地址完全一致，客户端仍用同一份 `sha256`/`ed25519Signature` 校验，不降低安全要求。留空表示该插件不配置镜像。
 - `minAppVersion` 高于当前客户端版本时，客户端会跳过该插件（不降级应用）。
 - 签名对象是 **DLL 原始字节**；校验时先比 SHA256，再用内置公钥做 Ed25519 验签，任一失败即拒绝加载。
+
+## 大陆镜像（方案 B）
+
+- 客户端拉取清单时按顺序尝试：GitHub Raw 主地址 → Gitee Raw 镜像（`PluginTrust.ManifestMirrorUrl`，默认 `https://gitee.com/HeYiai/limoclip-plugins/raw/master/providers-manifest.json`）。任一地址可用即可检查更新。
+- 插件 DLL 下载同样支持回退：清单条目的 `mirrorDownloadUrl` 指向 Gitee 上的同字节 DLL；主地址失败时自动使用镜像。
+- 发布方需要做的事：
+  1. 在 Gitee 建公开仓库 `HeYiai/limoclip-plugins`，保持与 GitHub 相同的目录结构（`providers-manifest.json`、插件 DLL 放 `plugins/` 下）。
+  2. 每次发布插件后，把**同一份** `plugins/providers-manifest.json` 与 DLL 推送到 Gitee 仓库（Gitee 的 `/blob/` 是网页地址，清单必须用 `/raw/` 地址访问）。
+  3. 清单条目加 `mirrorDownloadUrl`：可用 `build-plugins.ps1 -MirrorDownloadUrl <地址>` / `sign-plugin.ps1 -MirrorDownloadUrl <地址>` 自动写入，或手工编辑。
+- 安全边界：镜像只承担「分发通道」，不承担信任；清单与插件仍由 Ed25519 验签，镜像被篡改会导致校验失败而不是被加载。
 
 ## 签名私钥（重要）
 

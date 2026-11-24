@@ -14,6 +14,7 @@ public sealed class PluginUpdateServiceTests
     private const string TestPluginDllName = "LiveMonitor.Platforms.TestPlugin.dll";
     private const string ManifestUrl = "https://example.com/providers-manifest.json";
     private const string PluginDllUrl = "https://example.com/plugins/plugin.dll";
+    private const string MirrorPluginDllUrl = "https://mirror.example.com/plugins/plugin.dll";
     private const string AppVersion = "1.0.0";
 
     [Fact]
@@ -201,6 +202,74 @@ public sealed class PluginUpdateServiceTests
         Assert.False(fixture.Host.RegisteredPluginVersions.ContainsKey(PlatformType.YouTube));
     }
 
+    [Fact]
+    public async Task InstallAsync_PrimaryDownloadFails_FallsBackToMirror()
+    {
+        var dllBytes = ReadTestPluginBytes();
+        if (dllBytes is null)
+        {
+            return;
+        }
+
+        var (seed, entry) = CreateSignedEntry(dllBytes, mirrorDownloadUrl: MirrorPluginDllUrl);
+        using var fixture = new HostFixture(seed, dllBytes);
+        var handler = new TestHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri!.ToString();
+            if (uri == ManifestUrl)
+            {
+                return TestHttpMessageHandler.Json(Manifest(entry));
+            }
+
+            if (uri == MirrorPluginDllUrl)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(dllBytes) };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.BadGateway);
+        });
+        var service = new PluginUpdateService(
+            new HttpClient(handler), fixture.Host, AppVersion, new[] { ManifestUrl });
+        var check = await service.CheckAsync();
+        Assert.Single(check.Updates);
+
+        var result = await service.InstallAsync(check.Updates);
+
+        Assert.True(result.Succeeded, result.ErrorMessage);
+        Assert.Contains("test-plugin", result.Installed);
+        Assert.Contains("test-plugin", result.Applied);
+        Assert.Empty(result.Failures);
+        Assert.Equal("1.2.3", fixture.Host.RegisteredPluginVersions[PlatformType.YouTube]);
+    }
+
+    [Fact]
+    public async Task InstallAsync_PrimaryAndMirrorDownloadFail_RecordsFailure()
+    {
+        var dllBytes = ReadTestPluginBytes();
+        if (dllBytes is null)
+        {
+            return;
+        }
+
+        var (seed, entry) = CreateSignedEntry(dllBytes, mirrorDownloadUrl: MirrorPluginDllUrl);
+        using var fixture = new HostFixture(seed, dllBytes);
+        var handler = new TestHttpMessageHandler(request =>
+            request.RequestUri!.ToString() == ManifestUrl
+                ? TestHttpMessageHandler.Json(Manifest(entry))
+                : new HttpResponseMessage(HttpStatusCode.BadGateway));
+        var service = new PluginUpdateService(
+            new HttpClient(handler), fixture.Host, AppVersion, new[] { ManifestUrl });
+        var check = await service.CheckAsync();
+        Assert.Single(check.Updates);
+
+        var result = await service.InstallAsync(check.Updates);
+
+        Assert.False(result.Succeeded);
+        Assert.Empty(result.Installed);
+        var failure = Assert.Single(result.Failures);
+        Assert.Contains("下载插件失败", failure.ErrorMessage);
+    }
+
     private static string Manifest(ProviderPluginEntry entry)
         => $$"""
         {
@@ -214,6 +283,7 @@ public sealed class PluginUpdateServiceTests
               "minAppVersion": "{{entry.MinAppVersion}}",
               "dllName": "{{entry.DllName}}",
               "downloadUrl": "{{entry.DownloadUrl}}",
+              "mirrorDownloadUrl": "{{entry.MirrorDownloadUrl}}",
               "sha256": "{{entry.Sha256}}",
               "ed25519Signature": "{{entry.Ed25519Signature}}",
               "extraScripts": []
@@ -224,7 +294,8 @@ public sealed class PluginUpdateServiceTests
 
     private static (byte[] Seed, ProviderPluginEntry Entry) CreateSignedEntry(
         byte[] dllBytes,
-        string minAppVersion = "1.0.0")
+        string minAppVersion = "1.0.0",
+        string? mirrorDownloadUrl = null)
     {
         var seed = PluginTestKeys.NewSeed();
         var entry = new ProviderPluginEntry
@@ -235,6 +306,7 @@ public sealed class PluginUpdateServiceTests
             MinAppVersion = minAppVersion,
             DllName = PlatformPluginHost.PluginDllFileName,
             DownloadUrl = PluginDllUrl,
+            MirrorDownloadUrl = mirrorDownloadUrl,
             Sha256 = Convert.ToHexString(SHA256.HashData(dllBytes)).ToLowerInvariant(),
             Ed25519Signature = PluginTestKeys.Sign(dllBytes, seed),
         };

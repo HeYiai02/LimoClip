@@ -13,8 +13,14 @@ public static class PluginTrust
     public const string ManifestPrimaryUrl =
         "https://raw.githubusercontent.com/heyiai02/LimoClip/main/plugins/providers-manifest.json";
 
-    /// <summary>providers-manifest.json 镜像地址（国内网络不通 GitHub 时使用，留空表示未配置）。</summary>
-    public const string ManifestMirrorUrl = "";
+    /// <summary>
+    /// providers-manifest.json 镜像地址（国内网络不通 GitHub 时使用，留空表示未配置）。
+    /// 方案 B：清单主地址（GitHub Raw）失败时自动回退该镜像；插件 DLL 是否走镜像由清单里的
+    /// <c>mirrorDownloadUrl</c> 字段决定，验签与 SHA256 校验仍使用清单中的同一组值。
+    /// 注意 Gitee 的 <c>/blob/</c> 是 HTML 页面地址，必须用 <c>/raw/</c> 才能拿到 JSON 原文。
+    /// </summary>
+    public const string ManifestMirrorUrl =
+        "https://gitee.com/HeYiai/limoclip-plugins/raw/master/providers-manifest.json";
 
     /// <summary>插件本机落地根目录。</summary>
     public static string PluginsDirectory => LiveMonitor.Platforms.ToolLocator.PluginsRootDirectory;

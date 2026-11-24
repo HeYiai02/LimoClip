@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$DllPath,
@@ -15,6 +15,7 @@ param(
     [string]$MinAppVersion = '0.0.0',
     [string]$DllFileName,
     [string]$DownloadUrl,
+    [string]$MirrorDownloadUrl,
     [string]$PrivateKeyBase64,
     [string]$PrivateKeyPath,
     [string]$ManifestPath,
@@ -86,6 +87,10 @@ if (-not [string]::IsNullOrWhiteSpace($DllFileName)) {
 
 if (-not [string]::IsNullOrWhiteSpace($DownloadUrl)) {
     $signArgs += @('--download-url', $DownloadUrl)
+}
+
+if (-not [string]::IsNullOrWhiteSpace($MirrorDownloadUrl)) {
+    $signArgs += @('--mirror-download-url', $MirrorDownloadUrl)
 }
 
 if (-not [string]::IsNullOrWhiteSpace($ManifestPath)) {

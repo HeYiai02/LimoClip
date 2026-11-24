@@ -86,6 +86,9 @@ internal static class Program
             downloadUrl = $"https://github.com/heyiai02/LimoClip/releases/download/plugin-{pluginId}-{version}/{dllName}";
         }
 
+        // 方案 B：可选 Gitee 镜像下载地址；客户端主地址失败时回退该地址，SHA256/签名仍用同一份值。
+        var mirrorDownloadUrl = Get(options, "mirror-download-url")?.Trim();
+
         var dllBytes = File.ReadAllBytes(dllPath);
         var sha256 = Convert.ToHexString(SHA256.HashData(dllBytes)).ToLowerInvariant();
         var keyBase64 = ResolveKeyBase64(options);
@@ -102,6 +105,11 @@ internal static class Program
             ["sha256"] = sha256,
             ["ed25519Signature"] = signatureBase64,
         };
+
+        if (!string.IsNullOrEmpty(mirrorDownloadUrl))
+        {
+            entry["mirrorDownloadUrl"] = mirrorDownloadUrl;
+        }
 
         Console.Error.WriteLine($"[plugin-signer] 已签名 {dllName}（{dllBytes.Length} 字节）");
         Console.Error.WriteLine($"[plugin-signer] pluginId={pluginId} platform={platform} version={version} minAppVersion={minAppVersion}");
@@ -339,6 +347,7 @@ internal static class Program
                 [--min-app-version <最低应用版本，默认 0.0.0>] \
                 [--dll-name <清单内文件名，默认 DLL 文件名>] \
                 [--download-url <下载地址，默认 GitHub Release 模板>] \
+                [--mirror-download-url <镜像下载地址，可选；主地址失败时客户端回退>] \
                 [--key-base64 <私钥 Base64> | --key-path <私钥文件>] \
                 [--manifest <要合并更新的 providers-manifest.json>] \
                 [--out <输出文件>]
@@ -351,6 +360,8 @@ internal static class Program
               * 私钥是 32 字节 Ed25519 seed 的 Base64，可通过 --key-base64、--key-path 或
                 环境变量 LIVEMONITOR_PLUGIN_KEY 提供；私钥绝不能提交到仓库。
               * 未配置 --download-url 时生成 GitHub Release 资产模板地址，可用 --download-url 覆盖。
+              * 配置 --mirror-download-url 时清单会写入 mirrorDownloadUrl（方案 B：客户端主地址下载失败时
+                回退镜像；镜像内容必须与主地址完全一致，客户端仍用同一份 SHA256/Ed25519 签名校验）。
             """);
     }
 }

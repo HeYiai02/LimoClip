@@ -37,6 +37,12 @@ public sealed class PluginUpdateService
 {
     private const string UserAgent = "LimoClip-PluginUpdater/1.0.0";
 
+    /// <summary>单个 manifest 地址的请求超时；主地址超时后尽快回退镜像，避免国内网络下长时间等待。</summary>
+    private static readonly TimeSpan ManifestAttemptTimeout = TimeSpan.FromSeconds(12);
+
+    /// <summary>单次插件 DLL 下载超时；主地址失败/超时后回退镜像。</summary>
+    private static readonly TimeSpan PluginDownloadAttemptTimeout = TimeSpan.FromSeconds(30);
+
     private readonly HttpClient _httpClient;
     private readonly PlatformPluginHost _host;
     private readonly string _currentAppVersion;
@@ -66,18 +72,20 @@ public sealed class PluginUpdateService
 
         foreach (var url in _manifestUrls)
         {
+            using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            attemptCts.CancelAfter(ManifestAttemptTimeout);
             try
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, url);
                 request.Headers.UserAgent.ParseAdd(UserAgent);
-                using var response = await _httpClient.SendAsync(request, ct);
+                using var response = await _httpClient.SendAsync(request, attemptCts.Token);
                 if (!response.IsSuccessStatusCode)
                 {
                     failures.Add($"{url} → HTTP {(int)response.StatusCode}");
                     continue;
                 }
 
-                var json = await response.Content.ReadAsStringAsync(ct);
+                var json = await response.Content.ReadAsStringAsync(attemptCts.Token);
                 var parsed = ProvidersManifest.Parse(json);
                 var errors = parsed.Validate();
                 if (errors.Count > 0)
@@ -93,6 +101,11 @@ public sealed class PluginUpdateService
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException
                                            or InvalidDataException or JsonException)
             {
+                if (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+
                 failures.Add($"{url} → {ex.Message}");
             }
         }
@@ -147,9 +160,10 @@ public sealed class PluginUpdateService
             byte[] payload;
             try
             {
-                payload = await _httpClient.GetByteArrayAsync(entry.DownloadUrl, ct);
+                payload = await DownloadPluginPayloadAsync(entry, ct);
             }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException
+                                           or InvalidOperationException)
             {
                 failures.Add(new PluginUpdateFailure(entry.PluginId, $"下载插件失败：{ex.Message}"));
                 continue;
@@ -180,5 +194,44 @@ public sealed class PluginUpdateService
         var succeeded = failures.Count == 0;
         string? error = succeeded ? null : $"有 {failures.Count} 个插件更新失败。";
         return new PluginUpdateResult(succeeded, installed, applied, deferred, failures, error);
+    }
+
+    /// <summary>
+    /// 下载插件 DLL（方案 B：主地址失败自动回退镜像）。
+    /// 先请求清单里的 <c>downloadUrl</c>；失败（网络异常/超时/非 2xx）时，若条目配置了
+    /// <c>mirrorDownloadUrl</c> 则再请求镜像地址。返回的字节仍需由 <see cref="PlatformPluginHost"/>
+    /// 使用同一份 sha256 与 Ed25519 签名校验，镜像内容不可信。
+    /// </summary>
+    private async Task<byte[]> DownloadPluginPayloadAsync(ProviderPluginEntry entry, CancellationToken ct)
+    {
+        var urls = new List<string> { entry.DownloadUrl };
+        var mirror = entry.MirrorDownloadUrl?.Trim();
+        if (!string.IsNullOrWhiteSpace(mirror) &&
+            !string.Equals(mirror, entry.DownloadUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            urls.Add(mirror);
+        }
+
+        var errors = new List<string>();
+        foreach (var url in urls)
+        {
+            using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            attemptCts.CancelAfter(PluginDownloadAttemptTimeout);
+            try
+            {
+                return await _httpClient.GetByteArrayAsync(url, attemptCts.Token);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+            {
+                if (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+
+                errors.Add($"{url} → {ex.Message}");
+            }
+        }
+
+        throw new InvalidOperationException(string.Join("；", errors));
     }
 }
