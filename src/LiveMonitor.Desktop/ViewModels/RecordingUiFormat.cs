@@ -15,6 +15,7 @@ internal static class RecordingUiFormat
         PlatformType.Huya => "虎牙",
         PlatformType.Twitch => "Twitch",
         PlatformType.YouTube => "YouTube",
+        PlatformType.CustomStream => "清流",
         _ => "—"
     };
 
@@ -26,6 +27,7 @@ internal static class RecordingUiFormat
         PlatformType.Douyu => "#FF6A00",
         PlatformType.Huya => "#FFB300",
         PlatformType.YouTube => "#FF0033",
+        PlatformType.CustomStream => "#0EA5E9",
         _ => "#2A3140"
     };
 
@@ -43,6 +45,7 @@ internal static class RecordingUiFormat
         PlatformType.Huya => "虎牙",
         PlatformType.Twitch => "Twitch",
         PlatformType.YouTube => "YouTube",
+        PlatformType.CustomStream => "自定义清流",
         _ => "其他平台"
     };
 

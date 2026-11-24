@@ -555,7 +555,10 @@ public sealed class RecordingManager : IAsyncDisposable
             var startedAtUtc = _clock();
             var baseName = RecordingFileNaming.BuildBaseName(room, startedAtUtc);
             var videoPath = Path.Combine(outputDirectory, baseName + ".mkv");
-            var danmakuPath = Path.Combine(outputDirectory, baseName + ".jsonl");
+            // V0.6-A 自定义清流没有弹幕服务：不创建 .jsonl 伴随文件，剪辑台按空路径自动跳过弹幕轨。
+            var danmakuPath = room.Platform == PlatformType.CustomStream
+                ? string.Empty
+                : Path.Combine(outputDirectory, baseName + ".jsonl");
 
             Directory.CreateDirectory(outputDirectory);
 
@@ -588,12 +591,15 @@ public sealed class RecordingManager : IAsyncDisposable
 
                 try
                 {
-                    active.Jsonl = new DanmakuJsonlRecorder(
-                        danmakuPath,
-                        session.Id,
-                        room.Platform,
-                        session.RoomId,
-                        _log);
+                    if (!string.IsNullOrWhiteSpace(danmakuPath))
+                    {
+                        active.Jsonl = new DanmakuJsonlRecorder(
+                            danmakuPath,
+                            session.Id,
+                            room.Platform,
+                            session.RoomId,
+                            _log);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -1609,6 +1615,13 @@ public sealed class RecordingManager : IAsyncDisposable
             if (provider is null)
             {
                 _log($"未注册平台 {room.Platform} 的 Provider，跳过自动录制检查。");
+                return;
+            }
+
+            // 自定义清流没有开播查询接口（GetRoomStatusAsync 恒返回 live），自动录制会导致
+            // 程序启动即开录、失败后无限重试；清流只支持手动开录。
+            if (room.Platform == PlatformType.CustomStream)
+            {
                 return;
             }
 

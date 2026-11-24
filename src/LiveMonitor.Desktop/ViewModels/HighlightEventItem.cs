@@ -61,6 +61,7 @@ public sealed class HighlightEventItem
         PlatformType.Huya => ("虎牙", "#31230F", "#FACC15"),
         PlatformType.Twitch => ("Twitch", "#2A1B3D", "#C4A7FF"),
         PlatformType.YouTube => ("YouTube", "#3A1B1B", "#F87171"),
+        PlatformType.CustomStream => ("清流", "#0B2933", "#22D3EE"),
         _ => ("其他", "#23262E", "#94A3B8")
     };
 }

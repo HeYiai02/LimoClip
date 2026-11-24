@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LiveMonitor.Core.Entities;
+using LiveMonitor.Core.Enums;
 using LiveMonitor.Core.Models;
 using LiveMonitor.Media.Recording;
 
@@ -67,11 +68,19 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
 
     public string DirectoryTip => HasCustomDirectory ? _customSaveDirectory! : _parent.GlobalDirectory;
 
+    /// <summary>自定义清流没有开播查询接口，自动录制开关不适用（只支持手动开录）。</summary>
+    public bool SupportsAutoRecord => Room.Platform != PlatformType.CustomStream;
+
     public bool AutoRecordEnabled
     {
         get => _autoRecordEnabled;
         set
         {
+            if (value && !SupportsAutoRecord)
+            {
+                return;
+            }
+
             if (!SetProperty(ref _autoRecordEnabled, value) || _suppressAutoRecordSave || _disposed)
             {
                 return;

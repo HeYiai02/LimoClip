@@ -1142,6 +1142,14 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
         HealthBadge.IsVisible = visible && _state == PlayerState.Playing;
     }
 
+    /// <summary>
+    /// 无弹幕平台（自定义清流）隐藏窗格内的弹幕开关，避免误导；不影响其他控制条元素。
+    /// </summary>
+    public void SetDanmakuEnabled(bool enabled)
+    {
+        DanmakuButton.IsVisible = enabled;
+    }
+
     private void ThrowIfDisposed()
     {
         if (Volatile.Read(ref _disposed) != 0)

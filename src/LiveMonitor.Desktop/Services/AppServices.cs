@@ -7,6 +7,7 @@ using LiveMonitor.Media.Asr;
 using LiveMonitor.Media.Editing;
 using LiveMonitor.Media.Recording;
 using LiveMonitor.Platforms;
+using LiveMonitor.Platforms.CustomStream;
 using LiveMonitor.Platforms.Plugins;
 
 namespace LiveMonitor.Desktop.Services;
@@ -261,6 +262,10 @@ public sealed class AppServices
             highlightEvents);
 
         var roomRepository = new RoomRepository(database);
+
+        // V0.6-A 自定义清流：直链由内置 Provider 直接交给 libmpv / FFmpeg，需要按 RoomId 回查
+        // LiveRooms.RawUrl 与 CustomHeadersJson，因此在仓储创建后追加注册（不破坏既有平台顺序）。
+        platforms.ReplaceProvider(new CustomStreamProvider(roomRepository));
         var recordingTargets = new RecordingTargetRepository(database);
         var recordingSessions = new RecordingSessionRepository(database);
         var recordings = new RecordingManager(

@@ -46,17 +46,27 @@ public static class FfmpegArgumentBuilder
         };
 
         var userAgent = GetUserAgent(sourceQuality.RequiredHeaders);
-        if (!string.IsNullOrWhiteSpace(userAgent))
+        var httpInput = IsHttpUrl(sourceQuality.StreamUrl);
+        var rtspInput = IsRtspUrl(sourceQuality.StreamUrl);
+
+        if (httpInput && !string.IsNullOrWhiteSpace(userAgent))
         {
             arguments.Add("-user_agent");
             arguments.Add(SanitizeHeaderValue(userAgent));
         }
 
-        var headerBlock = BuildHeaderBlock(sourceQuality.RequiredHeaders);
+        var headerBlock = httpInput ? BuildHeaderBlock(sourceQuality.RequiredHeaders) : string.Empty;
         if (headerBlock.Length > 0)
         {
             arguments.Add("-headers");
             arguments.Add(headerBlock);
+        }
+
+        if (rtspInput)
+        {
+            // RTSP 默认走 UDP，丢包会表现为花屏/断流；强制 TCP 更稳。
+            arguments.Add("-rtsp_transport");
+            arguments.Add("tcp");
         }
 
         AppendCaBundle(arguments, caBundlePath, sourceQuality.StreamUrl);
@@ -73,13 +83,14 @@ public static class FfmpegArgumentBuilder
 
             var audioHeaders = sourceQuality.AudioHeaders ?? sourceQuality.RequiredHeaders;
             var audioUserAgent = GetUserAgent(audioHeaders);
-            if (!string.IsNullOrWhiteSpace(audioUserAgent))
+            var audioHttpInput = IsHttpUrl(sourceQuality.AudioStreamUrl);
+            if (audioHttpInput && !string.IsNullOrWhiteSpace(audioUserAgent))
             {
                 arguments.Add("-user_agent");
                 arguments.Add(SanitizeHeaderValue(audioUserAgent));
             }
 
-            var audioHeaderBlock = BuildHeaderBlock(audioHeaders);
+            var audioHeaderBlock = audioHttpInput ? BuildHeaderBlock(audioHeaders) : string.Empty;
             if (audioHeaderBlock.Length > 0)
             {
                 arguments.Add("-headers");
@@ -87,6 +98,13 @@ public static class FfmpegArgumentBuilder
             }
 
             AppendCaBundle(arguments, caBundlePath, sourceQuality.AudioStreamUrl);
+
+            if (IsRtspUrl(sourceQuality.AudioStreamUrl))
+            {
+                arguments.Add("-rtsp_transport");
+                arguments.Add("tcp");
+            }
+
             arguments.Add("-i");
             arguments.Add(sourceQuality.AudioStreamUrl!.Trim());
 
@@ -109,6 +127,22 @@ public static class FfmpegArgumentBuilder
         });
 
         return arguments;
+    }
+
+    // 自定义清流支持 RTMP/RTSP/SRT 等非 HTTP 协议；ffmpeg 对这类输入传 -headers / -user_agent
+    // 会直接报 “Option ... not found”，因此只有 http(s) 输入才允许附加 HTTP 头。
+    private static bool IsHttpUrl(string? streamUrl)
+    {
+        return Uri.TryCreate(streamUrl?.Trim(), UriKind.Absolute, out var uri)
+               && (uri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase)
+                   || uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsRtspUrl(string? streamUrl)
+    {
+        return Uri.TryCreate(streamUrl?.Trim(), UriKind.Absolute, out var uri)
+               && (uri.Scheme.Equals("rtsp", StringComparison.OrdinalIgnoreCase)
+                   || uri.Scheme.Equals("rtsps", StringComparison.OrdinalIgnoreCase));
     }
 
     // -ca_file 只对 TLS 输入有效：给 http:// 输入传该参数时 ffmpeg 会直接报

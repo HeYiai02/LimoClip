@@ -1,5 +1,8 @@
+using System;
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 using LiveMonitor.Desktop.ViewModels;
+using LiveMonitor.Platforms.CustomStream;
 
 namespace LiveMonitor.Desktop.Views;
 
@@ -11,11 +14,26 @@ public partial class AddRoomWindow : Window
     {
         _viewModel = viewModel;
         InitializeComponent();
+        CustomStreamCheck.IsCheckedChanged += (_, _) =>
+        {
+            CustomHeadersPanel.IsVisible = CustomStreamCheck.IsChecked == true;
+        };
+        UrlBox.TextChanged += OnUrlChanged;
     }
 
-    private void OnCancel(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => Close(false);
+    private void OnUrlChanged(object? sender, TextChangedEventArgs e)
+    {
+        // 自动勾选：识别到 .m3u8/.flv/.ts/rtmp:// 等清流特征时默认按清流添加；
+        // 无后缀 CDN Token 链接由用户手动勾选兜底。
+        if (CustomStreamCheck.IsChecked != true && CustomStreamProvider.LooksLikeStreamUrl(UrlBox.Text))
+        {
+            CustomStreamCheck.IsChecked = true;
+        }
+    }
 
-    private async void OnAdd(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void OnCancel(object? sender, RoutedEventArgs e) => Close(false);
+
+    private async void OnAdd(object? sender, RoutedEventArgs e)
     {
         AddButton.IsEnabled = false;
         ErrorText.Text = string.Empty;
@@ -23,7 +41,21 @@ public partial class AddRoomWindow : Window
         try
         {
             var group = GroupBox.Text?.Trim();
-            await _viewModel.AddRoomAsync(UrlBox.Text ?? string.Empty, group);
+            var customStream = CustomStreamCheck.IsChecked == true;
+            if (customStream)
+            {
+                await _viewModel.AddRoomAsync(
+                    UrlBox.Text ?? string.Empty,
+                    group,
+                    customStream: true,
+                    referer: RefererBox.Text,
+                    userAgent: UserAgentBox.Text);
+            }
+            else
+            {
+                await _viewModel.AddRoomAsync(UrlBox.Text ?? string.Empty, group);
+            }
+
             Close(true);
         }
         catch (Exception ex)

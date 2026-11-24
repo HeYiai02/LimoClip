@@ -29,6 +29,7 @@ public sealed class RoomListItemViewModel : ObservableObject
         PlatformType.Douyu => "斗鱼",
         PlatformType.Huya => "虎牙",
         PlatformType.YouTube => "YouTube",
+        PlatformType.CustomStream => "清流",
         _ => "—"
     };
 
@@ -40,6 +41,7 @@ public sealed class RoomListItemViewModel : ObservableObject
         PlatformType.Douyu => "#FF6A00",
         PlatformType.Huya => "#FFB300",
         PlatformType.YouTube => "#FF0033",
+        PlatformType.CustomStream => "#0EA5E9",
         _ => "#2A3140"
     };
 

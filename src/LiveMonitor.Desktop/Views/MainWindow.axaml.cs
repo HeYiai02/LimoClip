@@ -580,7 +580,21 @@ public partial class MainWindow : Window
         {
             try
             {
-                await _viewModel.UpdateRoomAsync(item.Id, dialog.AliasText, dialog.GroupText, dialog.DisplayNumber);
+                if (dialog.IsCustomStream)
+                {
+                    await _viewModel.UpdateRoomAsync(
+                        item.Id,
+                        dialog.AliasText,
+                        dialog.GroupText,
+                        dialog.DisplayNumber,
+                        dialog.RawUrl,
+                        dialog.RefererText,
+                        dialog.UserAgentText);
+                }
+                else
+                {
+                    await _viewModel.UpdateRoomAsync(item.Id, dialog.AliasText, dialog.GroupText, dialog.DisplayNumber);
+                }
             }
             catch (Exception ex)
             {

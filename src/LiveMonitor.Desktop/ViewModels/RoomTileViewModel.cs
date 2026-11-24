@@ -185,6 +185,7 @@ public sealed class RoomTileViewModel : ObservableObject
         PlatformType.Douyu => "斗鱼",
         PlatformType.Huya => "虎牙",
         PlatformType.YouTube => "YouTube",
+        PlatformType.CustomStream => "清流",
         _ => "—"
     };
 }

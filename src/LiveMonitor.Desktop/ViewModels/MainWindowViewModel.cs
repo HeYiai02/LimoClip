@@ -11,10 +11,12 @@ using Dock.Serializer.SystemTextJson;
 using LiveMonitor.Core;
 using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Enums;
+using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Core.Models;
 using LiveMonitor.Danmaku;
 using LiveMonitor.Desktop.Player;
 using LiveMonitor.Desktop.Services;
+using LiveMonitor.Platforms.CustomStream;
 
 namespace LiveMonitor.Desktop.ViewModels;
 
@@ -622,7 +624,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ApplyDanmakuMasterEnabled();
 
         var activeTiles = WorkspaceDockBuilder.EnumerateTiles(Layout)
-            .Where(tile => tile.HasRoom && !string.IsNullOrWhiteSpace(tile.RoomId))
+            .Where(tile => tile.HasRoom
+                           && tile.Platform != PlatformType.CustomStream
+                           && !string.IsNullOrWhiteSpace(tile.RoomId))
             .ToList();
         var activeSet = new HashSet<RoomTileViewModel>(activeTiles, ReferenceEqualityComparer.Instance);
 
@@ -705,18 +709,79 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _danmakuHandles.Clear();
     }
 
-    public async Task<RoomListItemViewModel> AddRoomAsync(string url, string? groupTag = null, CancellationToken ct = default)
+    public Task<RoomListItemViewModel> AddRoomAsync(string url, string? groupTag = null, CancellationToken ct = default)
+    {
+        return AddRoomCoreAsync(url, groupTag, customStream: false, referer: null, userAgent: null, ct);
+    }
+
+    /// <summary>
+    /// 添加房间（V0.6-A：<paramref name="customStream"/> 为 true 时跳过平台识别，按自定义清流直链保存）。
+    /// 清流使用 <c>cs_xxxxxxxx</c> 固定短 ID 作为 RoomId，真实地址存 RawUrl，换 Token 时只改 RawUrl 保留槽位。
+    /// </summary>
+    public Task<RoomListItemViewModel> AddRoomAsync(
+        string url,
+        string? groupTag,
+        bool customStream,
+        string? referer,
+        string? userAgent,
+        CancellationToken ct = default)
+    {
+        return AddRoomCoreAsync(url, groupTag, customStream, referer, userAgent, ct);
+    }
+
+    private async Task<RoomListItemViewModel> AddRoomCoreAsync(
+        string url,
+        string? groupTag,
+        bool customStream,
+        string? referer,
+        string? userAgent,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(url))
         {
             throw new ArgumentException("请粘贴直播间链接或房间号。", nameof(url));
         }
 
-        var provider = _services.Platforms.GetProvider(url.Trim());
-        var parsedRoomId = provider.ExtractRoomId(url.Trim());
-        var cookie = await _services.Credentials.GetCookieAsync(provider.Platform, ct).ConfigureAwait(true);
-        var status = await provider.GetRoomStatusAsync(parsedRoomId, cookie, ct).ConfigureAwait(true);
-        var canonicalRoomId = string.IsNullOrWhiteSpace(status.RoomId) ? parsedRoomId : status.RoomId;
+        IPlatformProvider provider;
+        string parsedRoomId;
+        string? cookie;
+        RoomStatus status;
+        string? customHeadersJson = null;
+        var trimmedUrl = url.Trim();
+
+        if (customStream || _services.Platforms.GetProvider(trimmedUrl) is CustomStreamProvider)
+        {
+            // 识别为直链/清流时一律按自定义清流处理（UI 自动勾选之外的第二道防线），
+            // 因为清流没有房间号概念，走平台房间查询会得到不存在的 roomId。
+            if (!CustomStreamProvider.IsSupportedDirectUrl(trimmedUrl))
+            {
+                throw new ArgumentException("自定义清流需要 http(s) / rtmp(s) / rtsp(s) / srt 或 mms 绝对地址。", nameof(url));
+            }
+
+            provider = _services.Platforms.GetProvider(PlatformType.CustomStream);
+            if (provider is not CustomStreamProvider customProvider)
+            {
+                throw new InvalidOperationException("自定义清流 Provider 未注册，无法添加。");
+            }
+
+            parsedRoomId = customProvider.ExtractRoomId(trimmedUrl);
+            cookie = null;
+            // 直接把完整 URL 作为 roomId 传进去可绕过数据库查询，添加阶段无需先落库。
+            status = await customProvider.GetRoomStatusAsync(trimmedUrl, null, ct).ConfigureAwait(true);
+            customHeadersJson = CustomStreamProvider.BuildHeadersJson(referer, userAgent);
+            customStream = true;
+        }
+        else
+        {
+            provider = _services.Platforms.GetProvider(trimmedUrl);
+            parsedRoomId = provider.ExtractRoomId(trimmedUrl);
+            cookie = await _services.Credentials.GetCookieAsync(provider.Platform, ct).ConfigureAwait(true);
+            status = await provider.GetRoomStatusAsync(parsedRoomId, cookie, ct).ConfigureAwait(true);
+        }
+
+        var canonicalRoomId = customStream
+            ? parsedRoomId
+            : string.IsNullOrWhiteSpace(status.RoomId) ? parsedRoomId : status.RoomId;
 
         if (await _services.Rooms.ExistsAsync(provider.Platform, canonicalRoomId, ct).ConfigureAwait(true))
         {
@@ -728,11 +793,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             DisplayNumber = await _services.Rooms.GetNextDisplayNumberAsync(ct).ConfigureAwait(true),
             Platform = provider.Platform,
             RoomId = canonicalRoomId,
-            RawUrl = url.Trim(),
+            RawUrl = trimmedUrl,
             Alias = string.IsNullOrWhiteSpace(status.AnchorName)
                 ? $"{provider.Platform}_{canonicalRoomId}"
                 : status.AnchorName,
             GroupTag = string.IsNullOrWhiteSpace(groupTag) ? null : groupTag.Trim(),
+            CustomHeadersJson = customHeadersJson,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -1289,12 +1355,42 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>把房间移出工作区：停止播放并清空窗格，主库记录保留。</summary>
-    public async Task UpdateRoomAsync(
+    public Task UpdateRoomAsync(
         Guid roomId,
         string alias,
         string? groupTag,
         int displayNumber,
         CancellationToken ct = default)
+    {
+        return UpdateRoomCoreAsync(roomId, alias, groupTag, displayNumber, rawUrl: null, referer: null, userAgent: null, ct);
+    }
+
+    /// <summary>
+    /// 更新房间信息；<paramref name="rawUrl"/> 仅对自定义清流生效（替换带新 Token 的地址），
+    /// 同时可更新 Referer / User-Agent 请求头并重新拉起播放以应用新地址。
+    /// </summary>
+    public Task UpdateRoomAsync(
+        Guid roomId,
+        string alias,
+        string? groupTag,
+        int displayNumber,
+        string? rawUrl,
+        string? referer,
+        string? userAgent,
+        CancellationToken ct = default)
+    {
+        return UpdateRoomCoreAsync(roomId, alias, groupTag, displayNumber, rawUrl, referer, userAgent, ct);
+    }
+
+    private async Task UpdateRoomCoreAsync(
+        Guid roomId,
+        string alias,
+        string? groupTag,
+        int displayNumber,
+        string? rawUrl,
+        string? referer,
+        string? userAgent,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(alias))
         {
@@ -1311,6 +1407,21 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         room.Alias = alias.Trim();
         room.GroupTag = string.IsNullOrWhiteSpace(groupTag) ? null : groupTag.Trim();
         room.DisplayNumber = displayNumber;
+
+        var streamUrlChanged = false;
+        if (room.Platform == PlatformType.CustomStream && rawUrl is not null)
+        {
+            var trimmedUrl = rawUrl.Trim();
+            if (!CustomStreamProvider.IsSupportedDirectUrl(trimmedUrl))
+            {
+                throw new ArgumentException("清流地址必须是 http(s) / rtmp(s) / rtsp(s) / srt 或 mms 绝对地址。", nameof(rawUrl));
+            }
+
+            streamUrlChanged = !string.Equals(room.RawUrl, trimmedUrl, StringComparison.Ordinal);
+            room.RawUrl = trimmedUrl;
+            room.CustomHeadersJson = CustomStreamProvider.BuildHeadersJson(referer, userAgent);
+        }
+
         await _services.Rooms.UpdateAsync(room, ct).ConfigureAwait(true);
 
         if (Layout is not null)
@@ -1321,6 +1432,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 if (tile.PlayerView is { } player)
                 {
                     player.RoomTitle = tile.DisplayTitle;
+                }
+
+                // 清流换成新地址后需要重新解析并拉起播放，否则会继续拉旧 URL。
+                if (streamUrlChanged && tile.HasRoom && tile.PlayerView is not null)
+                {
+                    await _players.StartAsync(tile, ct).ConfigureAwait(true);
                 }
             }
         }

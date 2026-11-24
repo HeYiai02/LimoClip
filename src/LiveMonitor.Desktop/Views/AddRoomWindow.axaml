@@ -2,23 +2,31 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="LiveMonitor.Desktop.Views.AddRoomWindow"
         Title="添加直播间"
-        Width="480" Height="270"
+        Width="520" Height="400"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
         Background="#0F1115">
-  <Grid Margin="18" RowDefinitions="Auto,Auto,Auto,*,Auto">
-    <TextBlock Grid.Row="0" Text="粘贴 B站 / Twitch / YouTube / 虎牙 / 斗鱼 / 抖音 直播间链接" FontSize="13"
-               Foreground="#E6E8EE" Margin="0,0,0,10" />
-    <TextBox Grid.Row="1" x:Name="UrlBox" Watermark="例如 https://live.bilibili.com/7734200、twitch.tv/eslcs、youtube.com/watch?v=…、huya.com/…、douyu.com/…、live.douyin.com/…"
+  <Grid Margin="18" RowDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto">
+    <TextBlock Grid.Row="0" Text="粘贴 B站 / Twitch / YouTube / 虎牙 / 斗鱼 / 抖音 直播间链接，或直接粘贴清流直链" FontSize="13"
+               Foreground="#E6E8EE" Margin="0,0,0,10" TextWrapping="Wrap" />
+    <TextBox Grid.Row="1" x:Name="UrlBox" Watermark="例如 https://live.bilibili.com/7734200、twitch.tv/eslcs、https://cdn.example.com/live/stream.m3u8、rtmp://host/live/stream"
              FontSize="12" />
-    <Grid Grid.Row="2" ColumnDefinitions="Auto,*" Margin="0,10,0,0">
+    <CheckBox Grid.Row="2" x:Name="CustomStreamCheck" Margin="0,10,0,0" FontSize="11" Foreground="#E6E8EE"
+              Content="作为自定义清流添加（直链 / HLS / FLV / RTMP / RTSP / SRT，无弹幕）"
+              ToolTip.Tip="勾选后跳过平台识别，直接按清流直链播放与录制；无后缀的 CDN Token 链接也请勾选。" />
+    <StackPanel Grid.Row="3" x:Name="CustomHeadersPanel" IsVisible="False" Margin="0,8,0,0" Spacing="6">
+      <TextBlock Text="防盗链请求头（可选，仅 http/https 生效）" FontSize="11" Foreground="#94A3B8" />
+      <TextBox x:Name="RefererBox" Height="28" FontSize="11" Watermark="Referer，例如 https://live.example.com/" />
+      <TextBox x:Name="UserAgentBox" Height="28" FontSize="11" Watermark="User-Agent（留空使用内置浏览器 UA）" />
+    </StackPanel>
+    <Grid Grid.Row="4" ColumnDefinitions="Auto,*" Margin="0,10,0,0">
       <TextBlock Text="分组" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" Margin="0,0,10,0" />
       <TextBox Grid.Column="1" x:Name="GroupBox" Height="28" HorizontalAlignment="Stretch"
                Watermark="可选，例如 游戏 / VTB / 赛事" />
     </Grid>
-    <TextBlock Grid.Row="3" x:Name="ErrorText" Foreground="#F87171" FontSize="11"
+    <TextBlock Grid.Row="5" x:Name="ErrorText" Foreground="#F87171" FontSize="11"
                TextWrapping="Wrap" Margin="0,8,0,0" />
-    <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+    <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
       <Button Content="取消" Click="OnCancel" />
       <Button x:Name="AddButton" Content="添加" Click="OnAdd" Classes="accent" />
     </StackPanel>

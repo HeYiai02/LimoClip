@@ -125,7 +125,8 @@
                                                         </Border>
                                                     </StackPanel>
                                                     <StackPanel Orientation="Horizontal" Spacing="6"
-                                                                HorizontalAlignment="Right" VerticalAlignment="Center">
+                                                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                                IsVisible="{Binding SupportsAutoRecord}">
                                                         <TextBlock Text="自动录制" FontSize="11"
                                                                    Foreground="#A9B4C6" VerticalAlignment="Center" />
                                                         <ToggleSwitch IsChecked="{Binding AutoRecordEnabled, Mode=TwoWay}"

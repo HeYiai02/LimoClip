@@ -136,6 +136,8 @@ public sealed class WorkspacePlayerManager : IDisposable
             tile.Platform = room.Platform;
             tile.RoomId = room.RoomId;
             player.RoomTitle = tile.DisplayTitle;
+            // 自定义清流没有弹幕服务：隐藏窗格内的弹幕开关，避免误导为「有弹幕但没显示」。
+            player.SetDanmakuEnabled(room.Platform != PlatformType.CustomStream);
 
             var provider = _services.Platforms.GetProvider(room.Platform);
             var cookie = await _services.Credentials.GetCookieAsync(room.Platform, cts.Token);

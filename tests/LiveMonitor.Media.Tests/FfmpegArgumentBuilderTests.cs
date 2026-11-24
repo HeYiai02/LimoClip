@@ -237,4 +237,42 @@ public sealed class FfmpegArgumentBuilderTests
         Assert.Throws<ArgumentNullException>(() =>
             FfmpegArgumentBuilder.Build(Quality(), null!));
     }
+
+    [Theory]
+    [InlineData("rtmp://live.example.com/live/stream")]
+    [InlineData("rtmps://live.example.com/live/stream")]
+    [InlineData("srt://live.example.com:9000?mode=caller")]
+    public void Build_NonHttpInput_DoesNotPassHttpHeadersOrUserAgent(string url)
+    {
+        var quality = Quality(url: url, headers: new Dictionary<string, string>
+        {
+            ["User-Agent"] = "UA-1",
+            ["Referer"] = "https://live.example.com/",
+        });
+
+        var arguments = FfmpegArgumentBuilder.Build(quality, "out.mkv", @"E:\tools\cacert.crt").ToList();
+
+        Assert.DoesNotContain("-headers", arguments);
+        Assert.DoesNotContain("-user_agent", arguments);
+        Assert.DoesNotContain("-ca_file", arguments);
+    }
+
+    [Theory]
+    [InlineData("rtsp://192.168.1.10/live")]
+    [InlineData("rtsps://192.168.1.10/live")]
+    public void Build_RtspInput_ForcesTcpTransport(string url)
+    {
+        var quality = Quality(url: url, headers: new Dictionary<string, string>
+        {
+            ["Referer"] = "https://live.example.com/",
+        });
+
+        var arguments = FfmpegArgumentBuilder.Build(quality, "out.mkv").ToList();
+
+        var transportIndex = arguments.IndexOf("-rtsp_transport");
+        var inputIndex = arguments.IndexOf("-i");
+        Assert.InRange(transportIndex, 0, inputIndex - 1);
+        Assert.Equal("tcp", arguments[transportIndex + 1]);
+        Assert.DoesNotContain("-headers", arguments);
+    }
 }
