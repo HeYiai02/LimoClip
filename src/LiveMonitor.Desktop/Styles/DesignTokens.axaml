@@ -1,0 +1,63 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- 3 级深色导播台背景阶梯 -->
+  <Color x:Key="ColorBgCanvas">#0B0D12</Color>
+  <Color x:Key="ColorBgBase">#11141B</Color>
+  <Color x:Key="ColorBgSurface">#161A23</Color>
+  <Color x:Key="ColorBgElevated">#1E2430</Color>
+  <Color x:Key="ColorBgHover">#272E3D</Color>
+  <Color x:Key="ColorBgOverlay">#EE141821</Color>
+
+  <!-- 边框与分割线 -->
+  <Color x:Key="ColorBorderSubtle">#242A37</Color>
+  <Color x:Key="ColorBorderStrong">#353E52</Color>
+
+  <!-- 文本层级 -->
+  <Color x:Key="ColorTextPrimary">#F1F5F9</Color>
+  <Color x:Key="ColorTextSecondary">#94A3B8</Color>
+  <Color x:Key="ColorTextMuted">#64748B</Color>
+
+  <!-- 品牌与语义色 -->
+  <Color x:Key="ColorAccent">#3B82F6</Color>
+  <Color x:Key="ColorAccentHover">#2563EB</Color>
+  <Color x:Key="ColorAccentSoft">#223B82F6</Color>
+  <Color x:Key="ColorSuccess">#22C55E</Color>
+  <Color x:Key="ColorSuccessSoft">#1F22C55E</Color>
+  <Color x:Key="ColorWarning">#F59E0B</Color>
+  <Color x:Key="ColorWarningSoft">#24F59E0B</Color>
+  <Color x:Key="ColorDanger">#EF4444</Color>
+  <Color x:Key="ColorDangerSoft">#24EF4444</Color>
+
+  <!-- 画刷映射 -->
+  <SolidColorBrush x:Key="BrushBgCanvas" Color="{StaticResource ColorBgCanvas}" />
+  <SolidColorBrush x:Key="BrushBgBase" Color="{StaticResource ColorBgBase}" />
+  <SolidColorBrush x:Key="BrushBgSurface" Color="{StaticResource ColorBgSurface}" />
+  <SolidColorBrush x:Key="BrushBgElevated" Color="{StaticResource ColorBgElevated}" />
+  <SolidColorBrush x:Key="BrushBgHover" Color="{StaticResource ColorBgHover}" />
+  <SolidColorBrush x:Key="BrushBgOverlay" Color="{StaticResource ColorBgOverlay}" />
+
+  <SolidColorBrush x:Key="BrushBorderSubtle" Color="{StaticResource ColorBorderSubtle}" />
+  <SolidColorBrush x:Key="BrushBorderStrong" Color="{StaticResource ColorBorderStrong}" />
+
+  <SolidColorBrush x:Key="BrushTextPrimary" Color="{StaticResource ColorTextPrimary}" />
+  <SolidColorBrush x:Key="BrushTextSecondary" Color="{StaticResource ColorTextSecondary}" />
+  <SolidColorBrush x:Key="BrushTextMuted" Color="{StaticResource ColorTextMuted}" />
+
+  <SolidColorBrush x:Key="BrushAccent" Color="{StaticResource ColorAccent}" />
+  <SolidColorBrush x:Key="BrushAccentHover" Color="{StaticResource ColorAccentHover}" />
+  <SolidColorBrush x:Key="BrushAccentSoft" Color="{StaticResource ColorAccentSoft}" />
+  <SolidColorBrush x:Key="BrushSuccess" Color="{StaticResource ColorSuccess}" />
+  <SolidColorBrush x:Key="BrushSuccessSoft" Color="{StaticResource ColorSuccessSoft}" />
+  <SolidColorBrush x:Key="BrushWarning" Color="{StaticResource ColorWarning}" />
+  <SolidColorBrush x:Key="BrushWarningSoft" Color="{StaticResource ColorWarningSoft}" />
+  <SolidColorBrush x:Key="BrushDanger" Color="{StaticResource ColorDanger}" />
+  <SolidColorBrush x:Key="BrushDangerSoft" Color="{StaticResource ColorDangerSoft}" />
+
+  <!-- 圆角与字体 -->
+  <CornerRadius x:Key="RadiusControl">6</CornerRadius>
+  <CornerRadius x:Key="RadiusCard">10</CornerRadius>
+  <CornerRadius x:Key="RadiusPill">999</CornerRadius>
+  <FontFamily x:Key="FontMono">Cascadia Mono, JetBrains Mono, Consolas, monospace</FontFamily>
+
+</ResourceDictionary>

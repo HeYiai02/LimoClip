@@ -1,7 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="LiveMonitor.Desktop.Views.RoomTileView">
-  <Grid Background="#0B0E14"
+  <Grid Background="{DynamicResource BrushBgBase}"
         HorizontalAlignment="Stretch"
         VerticalAlignment="Stretch">
     <ContentControl Content="{Binding PlayerView}"
@@ -12,17 +12,17 @@
 
     <!-- 空窗格占位 -->
     <Border IsVisible="{Binding IsPlaceholder}"
-            Background="#10141C">
+            Background="{DynamicResource BrushBgSurface}">
       <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
         <TextBlock Text="空窗格" FontSize="15" FontWeight="SemiBold"
-                   Foreground="#596273" HorizontalAlignment="Center" />
+                   Foreground="{DynamicResource BrushTextSecondary}" HorizontalAlignment="Center" />
         <TextBlock Text="{Binding DetailText}" FontSize="11"
-                   Foreground="#4B5361" HorizontalAlignment="Center" />
+                   Foreground="{DynamicResource BrushTextMuted}" HorizontalAlignment="Center" />
       </StackPanel>
     </Border>
 
     <!-- 左上角窗格标识与状态 -->
-    <Border Background="#CC0B0E14"
+    <Border Background="#40070A10"
             CornerRadius="4"
             Padding="6,3"
             Margin="6"
@@ -30,9 +30,10 @@
             VerticalAlignment="Top"
             IsVisible="{Binding HasRoom}">
       <StackPanel Spacing="1">
-        <TextBlock Text="{Binding DisplayTitle}" FontSize="10" FontWeight="SemiBold"
-                   Foreground="#E6E8EE" />
-        <TextBlock Text="{Binding StateText}" FontSize="9" Foreground="#7C8596" />
+        <TextBlock Text="{Binding DisplayTitle}" FontSize="10.5" FontWeight="SemiBold"
+                   Foreground="{DynamicResource BrushTextPrimary}" />
+        <TextBlock Text="{Binding StateText}" FontSize="9"
+                   Foreground="{DynamicResource BrushTextMuted}" />
       </StackPanel>
     </Border>
 
@@ -48,33 +49,42 @@
             IsVisible="{Binding HasRoom}"
             PointerPressed="OnDragHandlePressed"
             PointerReleased="OnDragHandleReleased">
-      <TextBlock Text="⣿" FontSize="11" Foreground="#7C8596"
-                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+      <Border Width="30" Height="3"
+              CornerRadius="2"
+              Background="#4DFFFFFF"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center" />
     </Border>
 
     <!-- 右上角全屏 / 移出工作区；只从工作区移除，主库记录保留 -->
     <StackPanel Orientation="Horizontal"
-                Spacing="4"
+                Spacing="2"
                 Margin="6"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Top"
                 IsVisible="{Binding HasRoom}">
       <Button x:Name="FocusButton"
-              Content="⛶"
-              FontSize="12"
-              Width="24" Height="24"
+              Classes="ghost-btn"
+              Width="26" Height="26"
               Padding="0"
-              Opacity="0.55"
+              Opacity="0.8"
               ToolTip.Tip="全屏（双击窗格）"
-              Click="OnFocusClick" />
+              Click="OnFocusClick">
+        <PathIcon Width="12" Height="12"
+                  Data="{DynamicResource IconFullscreen}"
+                  Foreground="{DynamicResource BrushTextSecondary}" />
+      </Button>
       <Button x:Name="RemoveButton"
-              Content="✕"
-              FontSize="11"
-              Width="24" Height="24"
+              Classes="ghost-btn"
+              Width="26" Height="26"
               Padding="0"
-              Opacity="0.55"
+              Opacity="0.8"
               ToolTip.Tip="移出工作区"
-              Click="OnRemoveClick" />
+              Click="OnRemoveClick">
+        <PathIcon Width="12" Height="12"
+                  Data="{DynamicResource IconClose}"
+                  Foreground="{DynamicResource BrushTextSecondary}" />
+      </Button>
     </StackPanel>
   </Grid>
 </UserControl>

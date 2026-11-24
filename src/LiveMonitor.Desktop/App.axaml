@@ -3,51 +3,52 @@
              xmlns:semi="using:Semi.Avalonia"
              xmlns:dock="using:Dock.Avalonia.Themes.Fluent"
              xmlns:dockCtl="using:Dock.Avalonia.Controls"
-             xmlns:psp="using:Dock.Controls.ProportionalStackPanel"
-             xmlns:mvvm="using:Dock.Model.Mvvm.Controls"
              xmlns:vm="using:LiveMonitor.Desktop.ViewModels"
              xmlns:views="using:LiveMonitor.Desktop.Views"
              x:Class="LiveMonitor.Desktop.App"
              RequestedThemeVariant="Dark">
   <Application.Resources>
-    <ControlTheme x:Key="{x:Type dockCtl:ToolChromeControl}" TargetType="dockCtl:ToolChromeControl">
-      <Setter Property="Template">
-        <ControlTemplate>
-          <!-- 无边框外观；换位由 RoomTileView 顶部手动拖动条完成。 -->
-          <ContentPresenter Content="{TemplateBinding Content}"
-                            ContentTemplate="{TemplateBinding ContentTemplate}"
-                            HorizontalContentAlignment="Stretch"
-                            VerticalContentAlignment="Stretch" />
-        </ControlTemplate>
-      </Setter>
-    </ControlTheme>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://LiveMonitor.Desktop/Styles/DesignTokens.axaml" />
+        <ResourceInclude Source="avares://LiveMonitor.Desktop/Styles/Icons.axaml" />
+      </ResourceDictionary.MergedDictionaries>
 
-    <ControlTheme x:Key="{x:Type dockCtl:ToolControl}" TargetType="dockCtl:ToolControl">
-      <Setter Property="Template">
-        <ControlTemplate>
-          <ContentControl Content="{Binding ActiveDockable.Context}"
-                          HorizontalAlignment="Stretch"
-                          VerticalAlignment="Stretch"
-                          HorizontalContentAlignment="Stretch"
-                          VerticalContentAlignment="Stretch">
-            <ContentControl.ContentTemplate>
-              <DataTemplate DataType="vm:RoomTileViewModel">
-                <views:RoomTileView />
-              </DataTemplate>
-            </ContentControl.ContentTemplate>
-          </ContentControl>
-        </ControlTemplate>
-      </Setter>
-    </ControlTheme>
+      <ControlTheme x:Key="{x:Type dockCtl:ToolChromeControl}" TargetType="dockCtl:ToolChromeControl">
+        <Setter Property="Template">
+          <ControlTemplate>
+            <!-- 无边框外观；换位由 RoomTileView 顶部手动拖动条完成。 -->
+            <ContentPresenter Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                              HorizontalContentAlignment="Stretch"
+                              VerticalContentAlignment="Stretch" />
+          </ControlTemplate>
+        </Setter>
+      </ControlTheme>
+
+      <ControlTheme x:Key="{x:Type dockCtl:ToolControl}" TargetType="dockCtl:ToolControl">
+        <Setter Property="Template">
+          <ControlTemplate>
+            <ContentControl Content="{Binding ActiveDockable.Context}"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch"
+                            VerticalContentAlignment="Stretch">
+              <ContentControl.ContentTemplate>
+                <DataTemplate DataType="vm:RoomTileViewModel">
+                  <views:RoomTileView />
+                </DataTemplate>
+              </ContentControl.ContentTemplate>
+            </ContentControl>
+          </ControlTemplate>
+        </Setter>
+      </ControlTheme>
+    </ResourceDictionary>
   </Application.Resources>
 
   <Application.Styles>
     <semi:SemiTheme />
     <dock:DockFluentTheme />
-    <Style Selector="psp|ProportionalStackPanelSplitter">
-      <Setter Property="Background" Value="#2B3240" />
-      <Setter Property="MinWidth" Value="5" />
-      <Setter Property="MinHeight" Value="5" />
-    </Style>
+    <StyleInclude Source="avares://LiveMonitor.Desktop/Styles/Controls.axaml" />
   </Application.Styles>
 </Application>

@@ -3,160 +3,252 @@
         xmlns:dock="using:Dock.Avalonia.Controls"
         xmlns:views="using:LiveMonitor.Desktop.Views"
         x:Class="LiveMonitor.Desktop.Views.MainWindow"
-        Title="LiveMonitor"
+        Title="LimoClip"
         Width="1440" Height="900"
         MinWidth="1100" MinHeight="700"
         WindowStartupLocation="CenterScreen"
-        Background="#121316">
-  <Window.Styles>
-    <Style Selector="Button.group-pill">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderBrush" Value="#2E323C" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="CornerRadius" Value="12" />
-      <Setter Property="Padding" Value="9,3" />
-      <Setter Property="FontSize" Value="10" />
-      <Setter Property="Foreground" Value="#94A3B8" />
-    </Style>
-    <Style Selector="Button.group-pill.active">
-      <Setter Property="Background" Value="#1E3A5F" />
-      <Setter Property="BorderBrush" Value="#3B82F6" />
-      <Setter Property="Foreground" Value="#DBEAFE" />
-    </Style>
-    <Style Selector="Button.room-action">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderThickness" Value="0" />
-      <Setter Property="Padding" Value="3" />
-      <Setter Property="Width" Value="21" />
-      <Setter Property="Height" Value="21" />
-      <Setter Property="FontSize" Value="11" />
-    </Style>
-  </Window.Styles>
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaChromeHints="PreferSystemChrome"
+        ExtendClientAreaTitleBarHeightHint="48"
+        Background="{DynamicResource BrushBgCanvas}">
+
   <Grid x:Name="RootGrid" RowDefinitions="48,*,28" ColumnDefinitions="260,*">
-    <!-- Top toolbar -->
+
+    <!-- ==================== 1. 一体化顶部导播栏 (48px) ==================== -->
     <Border x:Name="TopBar" Grid.Row="0" Grid.ColumnSpan="2"
-            Background="#1B1D22"
-            BorderBrush="#2E323C"
+            Background="{DynamicResource BrushBgSurface}"
+            BorderBrush="{DynamicResource BrushBorderSubtle}"
             BorderThickness="0,0,0,1"
-            Padding="10,0">
+            Padding="8,0"
+            PointerPressed="OnTopBarPointerPressed">
       <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto">
-        <Button Grid.Column="0" Content="☰" Click="OnToggleSidebar" Padding="7,4" Margin="0,0,8,0"
-                ToolTip.Tip="展开/收起主库" />
-        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-          <TextBlock Text="LiveMonitor" FontSize="15" FontWeight="SemiBold" Foreground="#E6E8EE" />
-          <TextBlock Text="V0.1" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" />
-          <TextBlock Text="●" FontSize="12" Foreground="#F59E0B" IsVisible="{Binding IsDirty}"
-                     ToolTip.Tip="方案有未保存修改" VerticalAlignment="Center" />
-          <Border Width="1" Height="16" Background="#2E323C" Margin="6,0" VerticalAlignment="Center" />
-          <Button x:Name="WorkspaceTabButton" Classes="group-pill active" Content="📺 监控工作区"
-                  Click="OnSwitchToWorkspace" VerticalAlignment="Center"
-                  ToolTip.Tip="查看并管理监控工作区" />
-          <Button x:Name="RecordingTabButton" Classes="group-pill" Content="⏺ 录制中心"
-                  Click="OnSwitchToRecordingCenter" VerticalAlignment="Center"
-                  ToolTip.Tip="管理各直播间的录制与历史录像" />
-          <Button x:Name="ClipTabButton" Classes="group-pill" Content="✂ 剪辑台"
-                  Click="OnSwitchToClipStudio" VerticalAlignment="Center"
-                  ToolTip.Tip="预览录像、裁剪区间并导出 MP4（V0.4）" />
+
+        <!-- 侧边栏折叠 -->
+        <Button Grid.Column="0" Classes="ghost-btn" Click="OnToggleSidebar"
+                Width="30" Height="30" Padding="0" Margin="0,0,6,0"
+                ToolTip.Tip="展开/收起直播间主库">
+          <PathIcon Data="{DynamicResource IconSidebar}" Width="14" Height="14" />
+        </Button>
+
+        <!-- 品牌 + 三视图分段胶囊导航 -->
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" IsHitTestVisible="False">
+            <Border Width="22" Height="22" CornerRadius="6" Background="{DynamicResource BrushAccent}">
+              <PathIcon Data="{DynamicResource IconBrandPlay}" Width="10" Height="10" Foreground="#FFFFFF" />
+            </Border>
+            <TextBlock Text="LimoClip" FontSize="13.5" FontWeight="Bold"
+                       Foreground="{DynamicResource BrushTextPrimary}" VerticalAlignment="Center" />
+          </StackPanel>
+
+          <Border Width="7" Height="7" CornerRadius="4" Background="{DynamicResource BrushWarning}"
+                  IsVisible="{Binding IsDirty}" VerticalAlignment="Center"
+                  ToolTip.Tip="当前窗口方案有未保存修改" />
+
+          <Border Width="1" Height="16" Background="{DynamicResource BrushBorderSubtle}" Margin="2,0" VerticalAlignment="Center" />
+
+          <!-- 分段胶囊容器 -->
+          <Border Background="{DynamicResource BrushBgBase}"
+                  BorderBrush="{DynamicResource BrushBorderSubtle}"
+                  BorderThickness="1"
+                  CornerRadius="8"
+                  Padding="2"
+                  VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal" Spacing="2">
+              <Button x:Name="WorkspaceTabButton" Classes="nav-tab active"
+                      Click="OnSwitchToWorkspace" ToolTip.Tip="多屏监控工作区">
+                <StackPanel Orientation="Horizontal" Spacing="5">
+                  <PathIcon Data="{DynamicResource IconMonitor}" Width="13" Height="13" />
+                  <TextBlock Text="监控" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+              <Button x:Name="RecordingTabButton" Classes="nav-tab"
+                      Click="OnSwitchToRecordingCenter" ToolTip.Tip="独立录制中心与历史录像">
+                <StackPanel Orientation="Horizontal" Spacing="5">
+                  <PathIcon Data="{DynamicResource IconRecord}" Width="13" Height="13" />
+                  <TextBlock Text="录制" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+              <Button x:Name="ClipTabButton" Classes="nav-tab"
+                      Click="OnSwitchToClipStudio" ToolTip.Tip="双波形剪辑台与导出 MP4">
+                <StackPanel Orientation="Horizontal" Spacing="5">
+                  <PathIcon Data="{DynamicResource IconScissors}" Width="13" Height="13" />
+                  <TextBlock Text="剪辑" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+            </StackPanel>
+          </Border>
         </StackPanel>
 
-        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="16,0,0,0">
-          <ComboBox x:Name="ProfileBox" Width="150" Height="28"
+        <!-- 方案切换与保存 -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="8,0,0,0">
+          <ComboBox x:Name="ProfileBox" Width="132" Height="28"
                     ItemsSource="{Binding Profiles}"
                     SelectedItem="{Binding SelectedProfile}">
             <ComboBox.ItemTemplate>
               <DataTemplate>
-                <TextBlock Text="{Binding Name}" FontSize="11" />
+                <TextBlock Text="{Binding Name}" FontSize="11.5" />
               </DataTemplate>
             </ComboBox.ItemTemplate>
           </ComboBox>
-          <Button Content="保存" Click="OnSave" Padding="8,4" />
-          <Button Content="另存为" Click="OnSaveAs" Padding="8,4" />
+          <Button Classes="subtle-btn" Click="OnSave" Height="28" Padding="8,3" ToolTip.Tip="保存当前方案">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+              <PathIcon Data="{DynamicResource IconSave}" Width="12" Height="12" />
+              <TextBlock Text="保存" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+          <Button Classes="ghost-btn" Content="另存为" Click="OnSaveAs" Height="28" Padding="6,3" />
         </StackPanel>
 
-        <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-          <Border Background="#16281E" BorderBrush="#2E5A3A" BorderThickness="1"
-                  CornerRadius="4" Padding="8,4" VerticalAlignment="Center"
-                  ToolTip.Tip="统计当前播放器每 2 秒的解码丢帧率">
-            <StackPanel Orientation="Horizontal" Spacing="6">
-              <Border Width="7" Height="7" CornerRadius="4" Background="#22C55E"
+        <!-- 右侧导播工具区（预留右侧 132px 给 Windows 原生最小化/最大化/关闭按钮） -->
+        <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="3" VerticalAlignment="Center" Margin="0,0,132,0">
+
+          <!-- 解码健康度胶囊 -->
+          <Border Background="{DynamicResource BrushBgBase}"
+                  BorderBrush="{DynamicResource BrushBorderSubtle}"
+                  BorderThickness="1"
+                  CornerRadius="12"
+                  Padding="8,3"
+                  Margin="0,0,2,0"
+                  VerticalAlignment="Center"
+                  ToolTip.Tip="每 2 秒巡检活跃播放器的解码丢帧率">
+            <StackPanel Orientation="Horizontal" Spacing="5">
+              <Border Width="7" Height="7" CornerRadius="4" Background="{DynamicResource BrushSuccess}"
                       VerticalAlignment="Center" IsVisible="{Binding !IsHealthWarning}" />
-              <Border Width="7" Height="7" CornerRadius="4" Background="#EF4444"
+              <Border Width="7" Height="7" CornerRadius="4" Background="{DynamicResource BrushDanger}"
                       VerticalAlignment="Center" IsVisible="{Binding IsHealthWarning}" />
-              <TextBlock Text="{Binding HealthText}" FontSize="10" Foreground="#A7F3D0" />
+              <TextBlock Text="{Binding HealthText}" Classes="mono" FontSize="10"
+                         Foreground="{DynamicResource BrushTextSecondary}" VerticalAlignment="Center" />
             </StackPanel>
           </Border>
-          <Button x:Name="MasterMuteButton" Click="OnToggleMasterMute"
-                  Padding="6,4" ToolTip.Tip="{Binding MasterMuteToolTip}">
-            <TextBlock Text="{Binding MasterMuteIcon}" FontFamily="Segoe Fluent Icons" FontSize="16" />
-          </Button>
-          <Border Background="#1D2430" BorderBrush="#2B3442" BorderThickness="1"
-                  CornerRadius="4" Padding="8,3" VerticalAlignment="Center">
-            <TextBlock Text="{Binding LayoutModeText}" FontSize="10" Foreground="#9AA6B8" />
+
+          <!-- 当前布局模式标签 -->
+          <Border Background="{DynamicResource BrushBgBase}"
+                  BorderBrush="{DynamicResource BrushBorderSubtle}"
+                  BorderThickness="1"
+                  CornerRadius="6"
+                  Padding="6,3"
+                  Margin="0,0,2,0"
+                  VerticalAlignment="Center">
+            <TextBlock Text="{Binding LayoutModeText}" FontSize="10"
+                       Foreground="{DynamicResource BrushTextMuted}" VerticalAlignment="Center" />
           </Border>
-          <Button Content="⊞ 一键自适应排布" Click="OnAutoFit" Padding="9,4"
-                  ToolTip.Tip="按当前直播间数量重算最接近 16:9 的网格，并清除自定义比例" />
-          <Button Content="☷ 主副屏布局" Click="OnHeroLayout" Padding="9,4"
-                  ToolTip.Tip="一路主画面 + 右侧副屏纵向排列（适合一个重点关注 + 一路扫视）" />
-          <Button Content="⛶ 桌面全屏" Click="OnToggleDesktopFullscreen" Padding="9,4"
-                  ToolTip.Tip="隐藏顶栏/侧栏/状态栏的桌面级全屏（F11，Esc 退出）" />
-          <Button Content="↶ 恢复比例" Click="OnRestoreCustomLayout" Padding="8,4"
+
+          <!-- 全局静音开关 -->
+          <Button x:Name="MasterMuteButton" Classes="ghost-btn" Click="OnToggleMasterMute"
+                  Width="28" Height="28" Padding="0" ToolTip.Tip="{Binding MasterMuteToolTip}">
+            <TextBlock Text="{Binding MasterMuteIcon}" FontFamily="Segoe Fluent Icons" FontSize="14" />
+          </Button>
+
+          <!-- 一键自适应排布 -->
+          <Button Classes="ghost-btn" Click="OnAutoFit" Width="28" Height="28" Padding="0"
+                  ToolTip.Tip="一键自适应排布：按当前直播间数量重算最优 16:9 网格">
+            <PathIcon Data="{DynamicResource IconAutoGrid}" Width="13" Height="13" />
+          </Button>
+
+          <!-- 主副屏布局 -->
+          <Button Classes="ghost-btn" Click="OnHeroLayout" Width="28" Height="28" Padding="0"
+                  ToolTip.Tip="主副屏布局：一路大主屏 + 右侧副屏纵向排列">
+            <PathIcon Data="{DynamicResource IconHeroLayout}" Width="13" Height="13" />
+          </Button>
+
+          <!-- 恢复自定义比例 -->
+          <Button Classes="ghost-btn" Click="OnRestoreCustomLayout" Width="28" Height="28" Padding="0"
                   IsVisible="{Binding CanRestoreCustomLayout}"
-                  ToolTip.Tip="恢复到点一键自适应之前的自定义比例" />
-          <ToggleButton Content="高能事件" FontSize="10" Padding="8,4"
+                  ToolTip.Tip="恢复点自适应之前的自定义比例">
+            <PathIcon Data="{DynamicResource IconUndo}" Width="13" Height="13" />
+          </Button>
+
+          <!-- 桌面全屏 -->
+          <Button Classes="ghost-btn" Click="OnToggleDesktopFullscreen" Width="28" Height="28" Padding="0"
+                  ToolTip.Tip="桌面级全屏（F11 切换，Esc 退出）">
+            <PathIcon Data="{DynamicResource IconFullscreen}" Width="13" Height="13" />
+          </Button>
+
+          <Border Width="1" Height="14" Background="{DynamicResource BrushBorderSubtle}" Margin="2,0" VerticalAlignment="Center" />
+
+          <!-- 高能事件面板开关 -->
+          <ToggleButton Classes="ghost-btn" Height="28" Padding="7,3"
                         IsChecked="{Binding IsHighlightPanelVisible, Mode=TwoWay}"
-                        ToolTip.Tip="展开/收起高能事件面板（不写入方案布局）" />
-          <Button Content="账号与设置" Click="OnSettings" Padding="8,4" />
+                        ToolTip.Tip="展开/收起实时高能事件面板">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+              <PathIcon Data="{DynamicResource IconSpark}" Width="12" Height="12" Foreground="{DynamicResource BrushWarning}" />
+              <TextBlock Text="高能" FontSize="11" VerticalAlignment="Center" />
+            </StackPanel>
+          </ToggleButton>
+
+          <!-- 账号与设置 -->
+          <Button Classes="ghost-btn" Click="OnSettings" Width="28" Height="28" Padding="0"
+                  ToolTip.Tip="账号登录、弹幕屏蔽、ASR 与插件热更新设置">
+            <PathIcon Data="{DynamicResource IconSettings}" Width="14" Height="14" />
+          </Button>
         </StackPanel>
       </Grid>
     </Border>
 
-    <!-- Left live-room library -->
+    <!-- ==================== 2. 左侧直播间主库 (260px) ==================== -->
     <Border Grid.Row="1" Grid.Column="0" x:Name="Sidebar"
-            Background="#1B1D22"
-            BorderBrush="#2E323C"
+            Background="{DynamicResource BrushBgBase}"
+            BorderBrush="{DynamicResource BrushBorderSubtle}"
             BorderThickness="0,0,1,0"
             Padding="12">
       <DockPanel LastChildFill="True">
-        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,2,0,8">
-          <TextBlock Text="直播间主库" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
-          <Button Grid.Column="1" Content="+ 添加" FontSize="11" Padding="8,4" Click="OnAddRoom" />
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="2,2,0,10">
+          <TextBlock Text="直播间主库" FontSize="13" FontWeight="SemiBold"
+                     Foreground="{DynamicResource BrushTextPrimary}" VerticalAlignment="Center" />
+          <Button Grid.Column="1" Classes="primary-btn" Click="OnAddRoom" Padding="9,4">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+              <PathIcon Data="{DynamicResource IconPlus}" Width="11" Height="11" />
+              <TextBlock Text="添加" FontSize="11.5" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
         </Grid>
+
         <TextBox DockPanel.Dock="Top" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                 Watermark="搜索主播 / 房间号" FontSize="11" Margin="0,0,0,8" />
-        <ScrollViewer DockPanel.Dock="Top" MaxHeight="78" Margin="0,0,0,8"
+                 Watermark="搜索主播名 / 房间号..." FontSize="11.5" Margin="0,0,0,10" />
+
+        <ScrollViewer DockPanel.Dock="Top" MaxHeight="72" Margin="0,0,0,8"
                       HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Auto">
           <WrapPanel x:Name="GroupPills" Orientation="Horizontal" />
         </ScrollViewer>
-        <Border DockPanel.Dock="Bottom" Margin="0,8,0,0"
-                Background="#1B1D22" BorderBrush="#2E323C" BorderThickness="1"
-                CornerRadius="6" Padding="8">
-          <TextBlock Text="双击列表中的直播间，放入第一个空窗格。"
-                     FontSize="10" Foreground="#94A3B8" TextWrapping="Wrap" />
+
+        <Border DockPanel.Dock="Bottom" Margin="0,10,0,0"
+                Background="{DynamicResource BrushBgSurface}"
+                BorderBrush="{DynamicResource BrushBorderSubtle}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="10,8">
+          <TextBlock Text="双击任意直播间即可加入右侧监控墙。"
+                     FontSize="10.5" Foreground="{DynamicResource BrushTextMuted}" TextWrapping="Wrap" />
         </Border>
+
         <ListBox x:Name="RoomList"
+                 Classes="room-list"
                  ItemsSource="{Binding FilteredRooms}"
                  Background="Transparent"
                  BorderThickness="0">
           <ListBox.ItemTemplate>
             <DataTemplate>
-              <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,5">
+              <Grid ColumnDefinitions="Auto,*,Auto">
                 <Border Grid.Column="0" Background="{Binding PlatformBadgeBackground}" CornerRadius="4"
                         Padding="5,2" VerticalAlignment="Center" Margin="0,0,8,0">
-                  <TextBlock Text="{Binding PlatformBadge}" FontSize="9" Foreground="{Binding PlatformBadgeForeground}" />
+                  <TextBlock Text="{Binding PlatformBadge}" FontSize="9.5" FontWeight="SemiBold"
+                             Foreground="{Binding PlatformBadgeForeground}" />
                 </Border>
-                <StackPanel Grid.Column="1" Spacing="1">
-                  <TextBlock Text="{Binding DisplayTitle}" FontSize="11" Foreground="#E6E8EE" />
-                  <TextBlock Text="{Binding Meta}" FontSize="9" Foreground="#6B7484" />
+                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding DisplayTitle}" FontSize="12" FontWeight="Medium"
+                             Foreground="{DynamicResource BrushTextPrimary}" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding Meta}" Classes="mono" FontSize="9.5"
+                             Foreground="{DynamicResource BrushTextMuted}" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-                  <TextBlock Text="●" FontSize="9" Foreground="{Binding StatusBrush}"
-                             ToolTip.Tip="{Binding StatusTip}" VerticalAlignment="Center" Margin="0,0,2,0" />
-                  <Button Classes="room-action" Click="OnEditRoom" ToolTip.Tip="修改直播间">
-                    <TextBlock Text="&#xE70F;" FontFamily="Segoe Fluent Icons" FontSize="11" Foreground="#94A3B8" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" Margin="4,0,0,0">
+                  <Border Width="7" Height="7" CornerRadius="4" Background="{Binding StatusBrush}"
+                          ToolTip.Tip="{Binding StatusTip}" VerticalAlignment="Center" Margin="0,0,4,0" />
+                  <Button Classes="room-action" Click="OnEditRoom" ToolTip.Tip="编辑直播间">
+                    <PathIcon Data="{DynamicResource IconEdit}" Width="12" Height="12" Foreground="{DynamicResource BrushTextSecondary}" />
                   </Button>
                   <Button Classes="room-action" Click="OnDeleteRoom" ToolTip.Tip="从主库删除">
-                    <TextBlock Text="&#xE711;" FontFamily="Segoe Fluent Icons" FontSize="11" Foreground="#F87171" />
+                    <PathIcon Data="{DynamicResource IconClose}" Width="12" Height="12" Foreground="{DynamicResource BrushDanger}" />
                   </Button>
                 </StackPanel>
               </Grid>
@@ -166,56 +258,68 @@
       </DockPanel>
     </Border>
 
-    <!-- Dock workspace -->
-    <Border Grid.Row="1" Grid.Column="1" Background="#121316" Padding="8">
+    <!-- ==================== 3. 右侧平铺监控工作区 ==================== -->
+    <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource BrushBgCanvas}" Padding="6">
       <Grid>
         <dock:DockControl x:Name="Dock" Layout="{Binding Layout}" />
 
-        <!-- 高能事件面板：叠加在工作区右侧；不塞进 Dock，避免把面板结构写进方案 DockLayoutJson -->
+        <!-- 高能事件悬浮抽屉（不写入 DockLayoutJson） -->
         <Border x:Name="HighlightPanel"
                 IsVisible="{Binding IsHighlightPanelVisible}"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Stretch"
-                Width="330"
+                Width="336"
                 Margin="0,6,6,6"
-                Background="#EE15181E"
-                BorderBrush="#2E323C"
+                Background="{DynamicResource BrushBgOverlay}"
+                BorderBrush="{DynamicResource BrushBorderStrong}"
                 BorderThickness="1"
-                CornerRadius="6"
-                Padding="10">
+                CornerRadius="10"
+                Padding="12">
           <DockPanel LastChildFill="True">
-            <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,6">
-              <TextBlock Text="高能事件" FontSize="12" FontWeight="SemiBold"
-                         Foreground="#E6E8EE" VerticalAlignment="Center" />
-              <Button Grid.Column="1" Content="清空" FontSize="10" Padding="7,3" Margin="0,0,4,0"
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,10">
+              <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <PathIcon Data="{DynamicResource IconSpark}" Width="14" Height="14" Foreground="{DynamicResource BrushWarning}" />
+                <TextBlock Text="实时高能事件" FontSize="13" FontWeight="SemiBold"
+                           Foreground="{DynamicResource BrushTextPrimary}" VerticalAlignment="Center" />
+              </StackPanel>
+              <Button Grid.Column="1" Classes="ghost-btn" Content="清空" FontSize="11" Padding="8,3" Margin="0,0,4,0"
                       Click="OnClearHighlightEvents" />
-              <Button Grid.Column="2" Content="收起" FontSize="10" Padding="7,3"
-                      Click="OnCloseHighlightPanel" />
+              <Button Grid.Column="2" Classes="ghost-btn" Width="26" Height="26" Padding="0"
+                      Click="OnCloseHighlightPanel" ToolTip.Tip="收起面板">
+                <PathIcon Data="{DynamicResource IconClose}" Width="12" Height="12" />
+              </Button>
             </Grid>
+
             <TextBlock DockPanel.Dock="Bottom"
-                       Text="只统计通过过滤链的弹幕密度；阈值在「账号与设置」里调整。"
-                       FontSize="9" Foreground="#6B7484" TextWrapping="Wrap" Margin="0,6,0,0" />
+                       Text="仅统计通过过滤链的弹幕密度；触发阈值可在设置中调整。"
+                       FontSize="10" Foreground="{DynamicResource BrushTextMuted}" TextWrapping="Wrap" Margin="0,8,0,0" />
+
             <Grid>
               <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <ItemsControl ItemsSource="{Binding HighlightEvents}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                      <Border Background="#1B1F27" BorderBrush="#262B36" BorderThickness="1"
-                              CornerRadius="4" Padding="7,5" Margin="0,0,0,5">
-                        <StackPanel Spacing="2">
-                          <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Border Background="{Binding PlatformBadgeBackground}" CornerRadius="3" Padding="4,1"
-                                    VerticalAlignment="Center">
-                              <TextBlock Text="{Binding PlatformBadge}" FontSize="9"
+                      <Border Background="{DynamicResource BrushBgSurface}"
+                              BorderBrush="{DynamicResource BrushBorderSubtle}"
+                              BorderThickness="1"
+                              CornerRadius="8"
+                              Padding="10,8"
+                              Margin="0,0,0,6">
+                        <StackPanel Spacing="4">
+                          <Grid ColumnDefinitions="Auto,*,Auto">
+                            <Border Grid.Column="0" Background="{Binding PlatformBadgeBackground}" CornerRadius="3" Padding="4,1"
+                                    VerticalAlignment="Center" Margin="0,0,6,0">
+                              <TextBlock Text="{Binding PlatformBadge}" FontSize="9" FontWeight="SemiBold"
                                          Foreground="{Binding PlatformBadgeForeground}" />
                             </Border>
-                            <TextBlock Text="{Binding RoomTitle}" FontSize="10" Foreground="#E6E8EE"
-                                       TextTrimming="CharacterEllipsis" MaxWidth="190" VerticalAlignment="Center" />
-                            <TextBlock Text="{Binding TimeText}" FontSize="9" Foreground="#6B7484"
-                                       VerticalAlignment="Center" />
-                          </StackPanel>
-                          <TextBlock Text="{Binding RateText}" FontSize="9" Foreground="#93C5FD" />
-                          <TextBlock Text="{Binding TriggerReason}" FontSize="9" Foreground="#94A3B8"
+                            <TextBlock Grid.Column="1" Text="{Binding RoomTitle}" FontSize="11" FontWeight="Medium"
+                                       Foreground="{DynamicResource BrushTextPrimary}"
+                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="2" Text="{Binding TimeText}" Classes="mono" FontSize="9.5"
+                                       Foreground="{DynamicResource BrushTextMuted}" VerticalAlignment="Center" Margin="6,0,0,0" />
+                          </Grid>
+                          <TextBlock Text="{Binding RateText}" Classes="mono" FontSize="10.5" Foreground="#93C5FD" />
+                          <TextBlock Text="{Binding TriggerReason}" FontSize="10" Foreground="{DynamicResource BrushTextSecondary}"
                                      TextWrapping="Wrap" />
                         </StackPanel>
                       </Border>
@@ -223,17 +327,24 @@
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
               </ScrollViewer>
-              <TextBlock Text="还没有高能事件。某路弹幕密度超过基线 3 倍时会记录在这里。"
-                         IsVisible="{Binding IsHighlightEventsEmpty}"
-                         FontSize="10" Foreground="#6B7484" TextWrapping="Wrap"
-                         HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+              <StackPanel IsVisible="{Binding IsHighlightEventsEmpty}"
+                          HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" Margin="20">
+                <PathIcon Data="{DynamicResource IconSpark}" Width="26" Height="26"
+                          Foreground="{DynamicResource BrushTextMuted}" Opacity="0.45" />
+                <TextBlock Text="暂无高能事件" FontSize="12" FontWeight="Medium"
+                           Foreground="{DynamicResource BrushTextSecondary}" HorizontalAlignment="Center" />
+                <TextBlock Text="当某路弹幕密度超过基线阈值时，会自动在此记录打点。"
+                           FontSize="10.5" Foreground="{DynamicResource BrushTextMuted}"
+                           TextWrapping="Wrap" TextAlignment="Center" />
+              </StackPanel>
             </Grid>
           </DockPanel>
         </Border>
 
         <!-- 全屏浮层：独立播放器，只保留这一路声音 -->
         <Border IsVisible="{Binding IsFocused}"
-                Background="#0B0E14"
+                Background="{DynamicResource BrushBgCanvas}"
                 DoubleTapped="OnFocusDoubleTapped">
           <ContentControl Content="{Binding FocusPlayer}"
                           HorizontalContentAlignment="Stretch"
@@ -242,82 +353,88 @@
                           VerticalAlignment="Stretch" />
         </Border>
 
-        <!-- 全屏焦点提示；2.5 秒后自动隐藏，Esc 或双击退出 -->
+        <!-- 全屏焦点悬浮胶囊提示 -->
         <Border IsVisible="{Binding IsFocusHintVisible}"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Top"
-                Margin="0,10,0,0"
-                Background="#E60B0E14"
-                BorderBrush="#3A4455"
+                Margin="0,12,0,0"
+                Background="{DynamicResource BrushBgOverlay}"
+                BorderBrush="{DynamicResource BrushBorderStrong}"
                 BorderThickness="1"
-                CornerRadius="6"
-                Padding="10,6">
+                CornerRadius="10"
+                Padding="12,7">
           <StackPanel Orientation="Horizontal" Spacing="10">
-            <TextBlock Text="{Binding FocusedTitle}" FontSize="11" Foreground="#E6E8EE"
-                       VerticalAlignment="Center" />
-            <Button Content="桌面全屏 (F11)" FontSize="10" Padding="8,3" Click="OnToggleDesktopFullscreen" />
-            <Button Content="退出全屏 (Esc)" FontSize="10" Padding="8,3" Click="OnExitFocus" />
+            <TextBlock Text="{Binding FocusedTitle}" FontSize="12" FontWeight="Medium"
+                       Foreground="{DynamicResource BrushTextPrimary}" VerticalAlignment="Center" />
+            <Button Classes="subtle-btn" Content="桌面全屏 (F11)" FontSize="10.5" Padding="8,3" Click="OnToggleDesktopFullscreen" />
+            <Button Classes="primary-btn" Content="退出焦点 (Esc)" FontSize="10.5" Padding="8,3" Click="OnExitFocus" />
           </StackPanel>
         </Border>
 
-        <!-- 桌面级全屏提示：隐藏外壳后仍能一键退出 -->
+        <!-- 桌面级全屏提示 -->
         <Border x:Name="DesktopFullscreenHint"
                 IsVisible="False"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Top"
-                Margin="0,10,0,0"
-                Background="#E60B0E14"
-                BorderBrush="#3A4455"
+                Margin="0,12,0,0"
+                Background="{DynamicResource BrushBgOverlay}"
+                BorderBrush="{DynamicResource BrushBorderStrong}"
                 BorderThickness="1"
-                CornerRadius="6"
-                Padding="10,6">
+                CornerRadius="10"
+                Padding="12,7">
           <StackPanel Orientation="Horizontal" Spacing="10">
-            <TextBlock Text="桌面全屏 · 按 F11 或 Esc 退出" FontSize="11" Foreground="#E6E8EE"
-                       VerticalAlignment="Center" />
-            <Button Content="退出桌面全屏" FontSize="10" Padding="8,3" Click="OnExitDesktopFullscreen" />
+            <TextBlock Text="桌面全屏 · 按 F11 或 Esc 退出" FontSize="12"
+                       Foreground="{DynamicResource BrushTextPrimary}" VerticalAlignment="Center" />
+            <Button Classes="primary-btn" Content="退出桌面全屏" FontSize="10.5" Padding="8,3" Click="OnExitDesktopFullscreen" />
           </StackPanel>
         </Border>
       </Grid>
     </Border>
 
-    <!-- V0.3 录制中心：独立全屏视图，覆盖工作区；切换视图不销毁 Dock 与播放器 -->
+    <!-- ==================== 4. 独立视图宿主（录制中心 / 剪辑台） ==================== -->
     <Border x:Name="RecordingCenterHost" Grid.Row="1" Grid.ColumnSpan="2"
-            Background="#0F1115"
+            Background="{DynamicResource BrushBgCanvas}"
             IsVisible="{Binding IsRecordingCenterVisible}">
       <views:RecordingCenterView DataContext="{Binding RecordingCenter}" />
     </Border>
 
-    <!-- V0.4 剪辑台：独立全屏视图，内含本地 libmpv 预览、双波形时间轴与导出面板 -->
     <Border x:Name="ClipStudioHost" Grid.Row="1" Grid.ColumnSpan="2"
-            Background="#0F1115"
+            Background="{DynamicResource BrushBgCanvas}"
             IsVisible="{Binding IsClipStudioVisible}">
       <views:ClipStudioView x:Name="ClipStudioViewHost" DataContext="{Binding ClipStudio}" />
     </Border>
 
-    <!-- Status bar -->
+    <!-- ==================== 5. 底部状态栏 (28px，等宽数字) ==================== -->
     <Border x:Name="StatusBar" Grid.Row="2" Grid.ColumnSpan="2"
-            Background="#1B1D22"
-            BorderBrush="#2E323C"
+            Background="{DynamicResource BrushBgSurface}"
+            BorderBrush="{DynamicResource BrushBorderSubtle}"
             BorderThickness="0,1,0,0"
             Padding="12,0">
       <Grid ColumnDefinitions="Auto,*,Auto">
-        <TextBlock Grid.Column="0" Text="{Binding StatusText}" FontSize="10"
-                   Foreground="#94A3B8" VerticalAlignment="Center" />
-        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-          <TextBlock Text="{Binding UnicycleBlockedText}" FontSize="10" Foreground="#94A3B8"
-                     ToolTip.Tip="V0.1 只保存屏蔽词与开关；实时弹幕过滤将在 V0.2 接入后计数" />
-          <TextBlock Text="{Binding RoomCountText}" FontSize="10" Foreground="#94A3B8" />
-          <TextBlock Text="{Binding Metrics.MemoryText}" FontSize="10" Foreground="#94A3B8" />
-          <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-            <TextBlock Text="GPU" FontSize="10" Foreground="#64748B" />
+        <TextBlock Grid.Column="0" Text="{Binding StatusText}" FontSize="10.5"
+                   Foreground="{DynamicResource BrushTextSecondary}" VerticalAlignment="Center" />
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+          <TextBlock Text="{Binding UnicycleBlockedText}" Classes="mono" FontSize="10.5"
+                     Foreground="{DynamicResource BrushTextSecondary}"
+                     ToolTip.Tip="独轮车与关键词过滤器累计拦截条数" />
+          <TextBlock Text="{Binding RoomCountText}" Classes="mono" FontSize="10.5"
+                     Foreground="{DynamicResource BrushTextSecondary}" />
+          <TextBlock Text="{Binding Metrics.MemoryText}" Classes="mono" FontSize="10.5"
+                     Foreground="{DynamicResource BrushTextSecondary}" />
+          <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+            <TextBlock Text="GPU" Classes="mono" FontSize="10" Foreground="{DynamicResource BrushTextMuted}" />
             <ProgressBar Value="{Binding Metrics.GpuBarValue}" Minimum="0" Maximum="100"
-                         Width="52" Height="5" Foreground="#3B82F6" />
+                         Width="54" Height="5" Foreground="{DynamicResource BrushAccent}" />
           </StackPanel>
-          <TextBlock Text="{Binding Metrics.GpuUtilizationText}" FontSize="10" Foreground="#94A3B8" />
-          <TextBlock Text="{Binding Metrics.GpuDecoderText}" FontSize="10" Foreground="#64748B" />
-          <TextBlock Text="{Binding Metrics.GpuEncoderText}" FontSize="10" Foreground="#64748B" />
+          <TextBlock Text="{Binding Metrics.GpuUtilizationText}" Classes="mono" FontSize="10.5"
+                     Foreground="{DynamicResource BrushTextPrimary}" />
+          <TextBlock Text="{Binding Metrics.GpuDecoderText}" Classes="mono" FontSize="10"
+                     Foreground="{DynamicResource BrushTextMuted}" />
+          <TextBlock Text="{Binding Metrics.GpuEncoderText}" Classes="mono" FontSize="10"
+                     Foreground="{DynamicResource BrushTextMuted}" />
         </StackPanel>
       </Grid>
     </Border>
+
   </Grid>
 </Window>

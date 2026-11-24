@@ -100,7 +100,7 @@
         <Border Grid.Row="0" Grid.Column="0" Background="#11151D" BorderBrush="#262B36"
                 BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,10,10">
             <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*">
-                <TextBlock Classes="clip-title" Text="✂ 剪辑台" />
+                <TextBlock Classes="clip-title" Text="剪辑台" />
                 <TextBlock Grid.Row="1" Classes="clip-section" Text="切换录像场次" />
                 <ComboBox Grid.Row="2" Classes="clip-field" Margin="0,4,0,0"
                           ItemsSource="{Binding Sessions}"
@@ -117,7 +117,7 @@
                     </ComboBox.ItemTemplate>
                 </ComboBox>
                 <Button Grid.Row="3" Classes="clip-action" Margin="0,6,0,0"
-                        Content="📂 打开本地文件…"
+                        Content="打开本地文件…"
                         Command="{Binding OpenLocalFileCommand}" />
                 <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
                     <TextBlock Classes="clip-caption" Text="{Binding DanmakuInfoText}" />
@@ -127,11 +127,12 @@
                     <ItemsControl ItemsSource="{Binding Highlights}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <!-- 卡片根节点改为 StackPanel：上层「跳转」与下层「🎙 转写」是两个并列 Button，避免嵌套 Button 冒泡冲突。 -->
+                                <!-- 卡片根节点改为 StackPanel：上层「跳转」与下层「转写」是两个并列 Button，避免嵌套 Button 冒泡冲突。 -->
                                 <StackPanel Margin="0,0,0,4">
                                     <Button Classes="clip-highlight" Click="OnHighlightClick">
                                         <Grid ColumnDefinitions="Auto,*,Auto">
-                                            <TextBlock Text="🔥" FontSize="11" VerticalAlignment="Center" />
+                                            <PathIcon Data="{DynamicResource IconSpark}" Width="11" Height="11"
+                                                      Foreground="#F59E0B" VerticalAlignment="Center" />
                                             <StackPanel Grid.Column="1" Margin="6,0,0,0">
                                                 <TextBlock Text="{Binding TimeText}" FontSize="11" Foreground="#E5E7EB" />
                                                 <TextBlock Text="{Binding RateText}" FontSize="9" Foreground="#F87171" />
@@ -178,11 +179,11 @@
                     <player:LocalClipPlayerView x:Name="Player" />
                 </Border>
                 <Grid Grid.Row="2" Margin="0,8,0,0" ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto">
-                    <Button Classes="clip-icon" Content="◀ -5s" Click="OnSeekBackClick" />
+                    <Button Classes="clip-icon" Content="-5s" Click="OnSeekBackClick" />
                     <Button Grid.Column="1" Classes="clip-icon" Margin="6,0,0,0"
                             Content="{Binding PlayPauseGlyph}" Click="OnPlayPauseClick" FontSize="14" />
                     <Button Grid.Column="2" Classes="clip-icon" Margin="6,0,0,0"
-                            Content="+5s ▶" Click="OnSeekForwardClick" />
+                            Content="+5s" Click="OnSeekForwardClick" />
                     <TextBlock Grid.Column="3" Text="{Binding PositionText}" FontSize="12"
                                Foreground="#CBD5E1" VerticalAlignment="Center" Margin="12,0" />
                     <ComboBox Grid.Column="4" Classes="clip-field" Width="92" VerticalAlignment="Center"
@@ -195,7 +196,7 @@
                         </ComboBox.ItemTemplate>
                     </ComboBox>
                     <CheckBox Grid.Column="5" Classes="clip-check" Margin="10,0,0,0"
-                              Content="💬 弹幕回放" IsChecked="{Binding DanmakuPlaybackEnabled}" />
+                              Content="弹幕回放" IsChecked="{Binding DanmakuPlaybackEnabled}" />
                 </Grid>
             </Grid>
         </Border>
@@ -289,9 +290,9 @@
                             CornerRadius="6" Padding="8" Margin="0,6,0,0"
                             IsVisible="{Binding IsAsrPanelVisible}">
                         <StackPanel Spacing="5">
-                            <TextBlock Classes="clip-title" Text="🎙 语音识别" />
+                            <TextBlock Classes="clip-title" Text="语音识别" />
                             <Button Classes="clip-primary" HorizontalAlignment="Stretch"
-                                    Content="🎙 识别当前选区"
+                                    Content="识别当前选区"
                                     Command="{Binding TranscribeSelectionCommand}" />
                             <Button Classes="clip-xs" HorizontalAlignment="Stretch"
                                     Content="取消识别"

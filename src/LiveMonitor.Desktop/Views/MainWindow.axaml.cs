@@ -54,6 +54,38 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// 无边框一体化顶栏：空白区域支持按住左键拖动窗口，双击在最大化/还原之间切换。
+    /// 顶栏内的按钮、下拉框等子控件会自行处理指针事件，不会冒泡到这里。
+    /// </summary>
+    private void OnTopBarPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        var point = e.GetCurrentPoint(this);
+        if (!point.Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        if (e.ClickCount == 2)
+        {
+            WindowState = WindowState == WindowState.Maximized
+                ? WindowState.Normal
+                : WindowState.Maximized;
+            e.Handled = true;
+            return;
+        }
+
+        try
+        {
+            BeginMoveDrag(e);
+            e.Handled = true;
+        }
+        catch (InvalidOperationException)
+        {
+            // 指针状态或平台实现不允许拖动时忽略，不影响顶栏其它控件。
+        }
+    }
+
+    /// <summary>
     /// Dock 11.3.12.1 默认把比例分割线解析成 GridSplitter（0x0、不可拖），
     /// 这里在内容 presenter 上显式注册模型到控件的模板，确保拖动条真正出现。
     /// </summary>

@@ -1,0 +1,174 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:psp="using:Dock.Controls.ProportionalStackPanel">
+
+  <!-- 等宽数字文本（时长、码率、内存、GPU 百分比） -->
+  <Style Selector="TextBlock.mono">
+    <Setter Property="FontFamily" Value="{DynamicResource FontMono}" />
+  </Style>
+
+  <!-- Dock 拖拽分割线：默认隐形，悬停与拖拽时亮起蓝色引导条 -->
+  <Style Selector="psp|ProportionalStackPanelSplitter">
+    <Setter Property="Background" Value="#141821" />
+    <Setter Property="MinWidth" Value="4" />
+    <Setter Property="MinHeight" Value="4" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.15" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="psp|ProportionalStackPanelSplitter:pointerover">
+    <Setter Property="Background" Value="{DynamicResource BrushAccent}" />
+  </Style>
+
+  <!-- 顶栏分段胶囊导航按钮 -->
+  <Style Selector="Button.nav-tab">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Padding" Value="9,4" />
+    <Setter Property="Foreground" Value="{DynamicResource BrushTextSecondary}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.14" />
+        <BrushTransition Property="Foreground" Duration="0:0:0.14" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.nav-tab:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
+  </Style>
+  <Style Selector="Button.nav-tab.active">
+    <Setter Property="Background" Value="{DynamicResource BrushAccentSoft}" />
+    <Setter Property="Foreground" Value="#93C5FD" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="Button.nav-tab.active /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrushAccentSoft}" />
+    <Setter Property="Foreground" Value="#93C5FD" />
+  </Style>
+
+  <!-- 幽灵工具按钮（用于顶栏与工具图标，降低边框噪声） -->
+  <Style Selector="Button.ghost-btn, ToggleButton.ghost-btn">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Padding" Value="6,4" />
+    <Setter Property="Foreground" Value="{DynamicResource BrushTextSecondary}" />
+    <Setter Property="FontSize" Value="11.5" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.ghost-btn:pointerover /template/ ContentPresenter, ToggleButton.ghost-btn:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSubtle}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
+  </Style>
+  <Style Selector="ToggleButton.ghost-btn:checked /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrushAccentSoft}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}" />
+    <Setter Property="Foreground" Value="#93C5FD" />
+  </Style>
+
+  <!-- 紧凑次级按钮 -->
+  <Style Selector="Button.subtle-btn">
+    <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSubtle}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Padding" Value="9,4" />
+    <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
+    <Setter Property="FontSize" Value="11.5" />
+  </Style>
+  <Style Selector="Button.subtle-btn:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrushBgHover}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushBorderStrong}" />
+  </Style>
+
+  <!-- 主操作强调按钮 -->
+  <Style Selector="Button.primary-btn">
+    <Setter Property="Background" Value="{DynamicResource BrushAccent}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Padding" Value="10,4" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="FontSize" Value="11.5" />
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
+  <Style Selector="Button.primary-btn:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrushAccentHover}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushAccentHover}" />
+  </Style>
+
+  <!-- 左侧分组筛选胶囊（保持 group-pill / active 类名兼容后台代码） -->
+  <Style Selector="Button.group-pill">
+    <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Padding" Value="9,3" />
+    <Setter Property="Margin" Value="0,0,5,5" />
+    <Setter Property="FontSize" Value="10.5" />
+    <Setter Property="Foreground" Value="{DynamicResource BrushTextSecondary}" />
+  </Style>
+  <Style Selector="Button.group-pill:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrushBgHover}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
+  </Style>
+  <Style Selector="Button.group-pill.active">
+    <Setter Property="Background" Value="{DynamicResource BrushAccentSoft}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}" />
+    <Setter Property="Foreground" Value="#BFDBFE" />
+  </Style>
+  <Style Selector="Button.group-pill.active /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrushAccentSoft}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushAccent}" />
+    <Setter Property="Foreground" Value="#BFDBFE" />
+  </Style>
+
+  <!-- 左侧直播间列表项：紧凑圆角卡片 + 悬停柔和亮起 -->
+  <Style Selector="ListBox.room-list ListBoxItem">
+    <Setter Property="Padding" Value="8,6" />
+    <Setter Property="Margin" Value="0,0,0,4" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="ListBox.room-list ListBoxItem:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSubtle}" />
+  </Style>
+  <Style Selector="ListBox.room-list ListBoxItem:selected /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrushAccentSoft}" />
+    <Setter Property="BorderBrush" Value="#4D3B82F6" />
+  </Style>
+
+  <!-- 列表行内编辑/删除图标按钮 -->
+  <Style Selector="Button.room-action">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Padding" Value="3" />
+    <Setter Property="Width" Value="22" />
+    <Setter Property="Height" Value="22" />
+    <Setter Property="Opacity" Value="0.65" />
+  </Style>
+  <Style Selector="Button.room-action:pointerover">
+    <Setter Property="Opacity" Value="1" />
+  </Style>
+  <Style Selector="Button.room-action:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrushBgHover}" />
+  </Style>
+
+</Styles>

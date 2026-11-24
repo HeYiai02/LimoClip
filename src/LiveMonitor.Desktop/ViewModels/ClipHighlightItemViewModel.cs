@@ -62,7 +62,7 @@ public sealed partial class ClipHighlightItemViewModel : ObservableObject
 
     public bool HasAsrError => !string.IsNullOrEmpty(AsrError);
 
-    public string TranscribeButtonText => IsTranscribing ? "转写中…" : "🎙 转写";
+    public string TranscribeButtonText => IsTranscribing ? "转写中…" : "转写";
 
     /// <summary>卡片摘要：完整文本 Trim 后截断到约 60 字符，空文本回退为占位提示。</summary>
     public string AsrSummary

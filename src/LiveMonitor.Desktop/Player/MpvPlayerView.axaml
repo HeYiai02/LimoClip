@@ -7,6 +7,18 @@
              Background="#05070A"
              HorizontalAlignment="Stretch"
              VerticalAlignment="Stretch">
+  <UserControl.Styles>
+    <!-- 音量滑块：默认手柄是大号白圆点（外圈品牌蓝描边），在几乎透明的控制栏上过于抢眼。
+         这里把 Semi 主题模板里的手柄圆点缩成 10px 的浅色小圆点，只保留可拖拽的暗示。 -->
+    <Style Selector="Slider#VolumeSlider /template/ Border">
+      <Setter Property="Width" Value="10" />
+      <Setter Property="Height" Value="10" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Background" Value="#E6F1F5F9" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+  </UserControl.Styles>
+
   <Grid ClipToBounds="True">
     <player:MpvVideoView x:Name="Video" />
 
@@ -14,7 +26,7 @@
          可见性由 MpvPlayerView 结合「窗格弹幕开关」与「全局渲染总闸」在代码中计算。 -->
     <controls:DanmakuOverlay x:Name="DanmakuLayer"
                              IsVisible="False"
-                             Margin="0,0,0,34" />
+                             Margin="0,0,0,33" />
 
     <!-- 四态占位层：加载中 / 未开播 / 播放中（隐藏） / 失败 -->
     <Border x:Name="StateOverlay" Background="#D90B0E13">
@@ -26,19 +38,20 @@
                      Width="140"
                      Height="3"
                      IsIndeterminate="True"
-                     Foreground="#4C8DFF" />
+                     Foreground="{DynamicResource BrushAccent}" />
         <TextBlock x:Name="StateTitle"
                    FontSize="16"
                    FontWeight="SemiBold"
-                   Foreground="#E6E8EE"
+                   Foreground="{DynamicResource BrushTextPrimary}"
                    HorizontalAlignment="Center" />
         <TextBlock x:Name="StateDetail"
                    FontSize="12"
-                   Foreground="#8A93A6"
+                   Foreground="{DynamicResource BrushTextSecondary}"
                    TextWrapping="Wrap"
                    TextAlignment="Center"
                    HorizontalAlignment="Center" />
         <Button x:Name="RetryButton"
+                Classes="primary-btn"
                 Content="重新连接"
                 IsVisible="False"
                 Click="OnRetryClick"
@@ -46,71 +59,107 @@
       </StackPanel>
     </Border>
 
-    <!-- 悬浮控制栏 -->
+    <!-- 悬浮控制栏：几乎透明的暗色渐变 + 一条极轻的分离线，让画面本身仍是主角 -->
     <Border x:Name="ControlBar"
             VerticalAlignment="Bottom"
-            Background="#CC0B0E13"
-            BorderBrush="#262B36"
-            BorderThickness="0,1,0,0"
-            Padding="8,5">
+            Padding="10,4"
+            BorderBrush="#14FFFFFF"
+            BorderThickness="0,1,0,0">
+      <Border.Background>
+        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+          <GradientStop Color="#00000000" Offset="0" />
+          <GradientStop Color="#29070A10" Offset="0.55" />
+          <GradientStop Color="#4D070A10" Offset="1" />
+        </LinearGradientBrush>
+      </Border.Background>
       <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
-        <StackPanel Grid.Column="0" Spacing="1" VerticalAlignment="Center">
+        <StackPanel Grid.Column="0"
+                    Orientation="Horizontal"
+                    Spacing="6"
+                    VerticalAlignment="Center"
+                    ClipToBounds="True">
           <TextBlock x:Name="TitleText"
                      Text="未分配房间"
-                     FontSize="11"
-                     Foreground="#E6E8EE"
-                     TextTrimming="CharacterEllipsis" />
+                     FontSize="11.5"
+                     FontWeight="SemiBold"
+                     Foreground="{DynamicResource BrushTextPrimary}"
+                     TextTrimming="CharacterEllipsis"
+                     VerticalAlignment="Center" />
+          <TextBlock Text="·"
+                     FontSize="10"
+                     Foreground="{DynamicResource BrushTextMuted}"
+                     VerticalAlignment="Center" />
           <TextBlock x:Name="QualityText"
                      Text="—"
+                     Classes="mono"
                      FontSize="10"
-                     Foreground="#7C8596" />
+                     Foreground="{DynamicResource BrushTextSecondary}"
+                     VerticalAlignment="Center" />
         </StackPanel>
 
-        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="8,0">
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="6"
+                    VerticalAlignment="Center"
+                    Margin="10,0,4,0">
           <controls:AudioLevelMeter x:Name="AudioMeter"
-                                    Width="62"
-                                    Height="18"
+                                    Width="56"
+                                    Height="16"
                                     Margin="0,0,2,0"
                                     VerticalAlignment="Center" />
-          <TextBlock Text="音量" FontSize="10" Foreground="#7C8596" VerticalAlignment="Center" />
+          <TextBlock Text="音量"
+                     FontSize="9.5"
+                     Foreground="{DynamicResource BrushTextMuted}"
+                     VerticalAlignment="Center" />
           <Slider x:Name="VolumeSlider"
-                  Width="72"
+                  Width="66"
                   Minimum="0"
                   Maximum="100"
                   Value="100"
                   TickFrequency="1"
                   IsSnapToTickEnabled="True"
+                  VerticalAlignment="Center"
                   ValueChanged="OnVolumeChanged" />
         </StackPanel>
 
         <Button x:Name="MuteButton"
                 Grid.Column="2"
-                Padding="6,2"
-                Margin="0,0,6,0"
+                Classes="ghost-btn"
+                Width="24" Height="24"
+                Padding="0"
+                Margin="2,0,0,0"
                 ToolTip.Tip="开声"
                 Click="OnMuteClick">
           <TextBlock x:Name="MuteIcon"
                      Text="&#xE74F;"
                      FontFamily="Segoe Fluent Icons"
-                     FontSize="16"
+                     FontSize="14"
+                     Foreground="{DynamicResource BrushTextSecondary}"
                      VerticalAlignment="Center" />
         </Button>
 
         <ToggleButton x:Name="DanmakuButton"
                       Grid.Column="3"
-                      Padding="6,2"
-                      Margin="0,0,6,0"
+                      Classes="ghost-btn"
+                      Height="24"
+                      MinWidth="24"
+                      Padding="6,0"
+                      Margin="4,0,0,0"
                       FontSize="10"
                       ToolTip.Tip="弹幕开关（关闭渲染后仍参与高能统计）"
                       IsChecked="{Binding IsDanmakuVisible, Mode=TwoWay}">
-          <TextBlock Text="弹" FontSize="11" VerticalAlignment="Center" />
+          <TextBlock Text="弹" FontSize="10.5" VerticalAlignment="Center" />
         </ToggleButton>
 
         <Button x:Name="CompactButton"
                 Grid.Column="4"
-                Content="60fps"
+                Classes="ghost-btn"
+                Height="24"
+                Padding="7,0"
+                Margin="4,0,0,0"
                 FontSize="10"
-                Padding="7,3"
+                FontFamily="{DynamicResource FontMono}"
+                Content="60fps"
                 Click="OnCompactClick" />
       </Grid>
     </Border>
@@ -118,14 +167,15 @@
     <Border x:Name="HealthBadge"
             HorizontalAlignment="Right"
             VerticalAlignment="Top"
-            Margin="8"
-            Padding="6,3"
-            CornerRadius="3"
-            Background="#CC0B0E13">
+            Margin="0,8,66,0"
+            Padding="6,2"
+            CornerRadius="4"
+            Background="#A6070A10">
       <TextBlock x:Name="HealthText"
                  Text="等待"
-                 FontSize="10"
-                 Foreground="#7C8596" />
+                 Classes="mono"
+                 FontSize="9.5"
+                 Foreground="{DynamicResource BrushTextMuted}" />
     </Border>
   </Grid>
 </UserControl>
