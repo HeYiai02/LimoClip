@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "LimoClip 桌面直播监控与剪辑架构",
+    "output": "docs/architecture.html",
+    "quality_profile": "showcase",
+    "locale": "zh-CN"
+  },
+  "layout": { "mode": "auto" },
+  "components": [
+    { "id": "ui", "type": "frontend", "label": "桌面壳 UI", "sublabel": "Avalonia 11 · 监控/录制/剪辑", "tag": ".NET 8 · 单窗口" },
+    { "id": "workspace", "type": "backend", "label": "监控工作区", "sublabel": "布局 / 画质 / 断流重连", "tag": "WorkspacePlayerManager" },
+    { "id": "mpv", "type": "backend", "label": "libmpv 播放器", "sublabel": "硬解 · 多路窗格", "tag": "20~30 路低开销" },
+    { "id": "danmaku", "type": "backend", "label": "弹幕引擎", "sublabel": "连接 / 过滤 / 高能检测", "tag": "DanmakuManager" },
+    { "id": "platforms", "type": "backend", "label": "平台插件层", "sublabel": "六平台 Provider · 工厂注册", "tag": "PlatformFactory" },
+    { "id": "pluginhost", "type": "backend", "label": "插件宿主", "sublabel": "Ed25519 验签 · 热更新", "tag": "PlatformPluginHost" },
+    { "id": "recorder", "type": "backend", "label": "录制引擎", "sublabel": "分段录制 · concat 合并", "tag": "RecordingManager" },
+    { "id": "ffmpeg", "type": "external", "label": "FFmpeg", "sublabel": "拉流 / 转封装 / 导出", "tag": "随包便携版" },
+    { "id": "clipper", "type": "backend", "label": "剪辑台", "sublabel": "波形 · 双版导出 · ASR 对齐", "tag": "ClipStudio" },
+    { "id": "data", "type": "database", "label": "SQLite 主库", "sublabel": "房间 / 方案 / 会话 / 设置", "tag": "%LocalAppData%" },
+    { "id": "cred", "type": "security", "label": "DPAPI 凭据", "sublabel": "平台 Cookie 加密存储", "tag": "Windows DPAPI" },
+    { "id": "cdn", "type": "cloud", "label": "直播 CDN / API", "sublabel": "B站 / 虎牙 / 斗鱼 / 抖音 / YouTube / Twitch" },
+    { "id": "chats", "type": "external", "label": "平台弹幕服务", "sublabel": "WebSocket / TCP 长连接" },
+    { "id": "asr", "type": "external", "label": "云端 ASR", "sublabel": "OpenAI 兼容转写接口" },
+    { "id": "ytdlp", "type": "external", "label": "yt-dlp", "sublabel": "YouTube / Twitch 兜底解析", "tag": "外部工具" },
+    { "id": "pluginfeed", "type": "external", "label": "插件清单源", "sublabel": "GitHub Raw → Gitee 镜像", "tag": "签名清单" }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "本机 Windows 桌面（LimoClip 进程 + 便携工具链）",
+      "wraps": ["ui", "workspace", "mpv", "danmaku", "platforms", "pluginhost", "recorder", "ffmpeg", "clipper", "data", "cred", "ytdlp"]
+    },
+    {
+      "kind": "security-group",
+      "label": "本机安全边界：DPAPI 加密凭据 + 本地 SQLite",
+      "wraps": ["cred", "data"]
+    },
+    {
+      "kind": "region",
+      "label": "外部网络（平台侧与云端服务）",
+      "wraps": ["cdn", "chats", "asr", "pluginfeed"]
+    }
+  ],
+  "connections": [
+    { "id": "ui-workspace", "from": "ui", "to": "workspace", "label": "双击房间 / 切换布局", "variant": "emphasis" },
+    { "id": "ui-recorder", "from": "ui", "to": "recorder", "label": "录制控制", "variant": "dashed" },
+    { "id": "ui-clipper", "from": "ui", "to": "clipper", "label": "打开剪辑台" },
+    { "id": "workspace-platforms", "from": "workspace", "to": "platforms", "label": "解析房间与画质", "variant": "emphasis" },
+    { "id": "workspace-mpv", "from": "workspace", "to": "mpv", "label": "下发流地址与 Headers", "variant": "emphasis" },
+    { "id": "workspace-danmaku", "from": "workspace", "to": "danmaku", "label": "启动弹幕会话", "variant": "dashed" },
+    { "id": "platforms-cdn", "from": "platforms", "to": "cdn", "label": "房间元数据 / 拉流地址", "variant": "emphasis" },
+    { "id": "mpv-cdn", "from": "mpv", "to": "cdn", "label": "FLV / HLS 拉流" },
+    { "id": "danmaku-chats", "from": "danmaku", "to": "chats", "label": "弹幕订阅" },
+    { "id": "danmaku-ui", "from": "danmaku", "to": "ui", "label": "弹幕与高能浮层", "variant": "dashed" },
+    { "id": "platforms-ytdlp", "from": "platforms", "to": "ytdlp", "label": "兜底解析", "variant": "dashed" },
+    { "id": "pluginhost-platforms", "from": "pluginhost", "to": "platforms", "label": "注册 / 替换 Provider", "variant": "dashed" },
+    { "id": "pluginhost-feed", "from": "pluginhost", "to": "pluginfeed", "label": "清单 + 签名 DLL 下载", "variant": "security" },
+    { "id": "cred-workspace", "from": "cred", "to": "workspace", "label": "解密 Cookie", "variant": "security" },
+    { "id": "recorder-ffmpeg", "from": "recorder", "to": "ffmpeg", "label": "启动 FFmpeg 子进程", "variant": "emphasis" },
+    { "id": "ffmpeg-cdn", "from": "ffmpeg", "to": "cdn", "label": "持续拉流录制" },
+    { "id": "recorder-data", "from": "recorder", "to": "data", "label": "录制会话落库" },
+    { "id": "clipper-ffmpeg", "from": "clipper", "to": "ffmpeg", "label": "剪辑 / 转码导出" },
+    { "id": "clipper-asr", "from": "clipper", "to": "asr", "label": "音频转写", "variant": "dashed" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "主链路",
+      "items": [
+        "双击房间 → 工作区解析 → 六平台 Provider 给出流地址 → libmpv 多窗格播放",
+        "断流不判未开播：显示「重连中」，按 3/10/30 秒退避重试并重新解析地址"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "录制与剪辑",
+      "items": [
+        "每次 FFmpeg 只录一段，停止时按墙钟起点裁剪 CDN 重发重叠并 concat 合并",
+        "剪辑台提供音频/弹幕双波形、弹幕 ASS 与带弹幕/干净双版 MP4 导出"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "插件与热更新",
+      "items": [
+        "六平台全部内置为插件（单 DLL）；外部插件经 Ed25519 验签后才加载",
+        "清单 GitHub Raw → Gitee 镜像回退；DLL 支持 mirrorDownloadUrl 主备下载"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "本地优先",
+      "items": [
+        "房间、布局方案、录制会话与 ASR Key 全部保存在本机 SQLite",
+        "平台 Cookie 经 Windows DPAPI 加密，不经过任何第三方账号服务器"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "外部依赖与限制",
+      "items": [
+        "虎牙等 CDN 单连接只稳定数秒，依赖分段录制与自动重连策略",
+        "YouTube / Twitch 依赖 yt-dlp 与网络可达性；ASR 与插件源需要联网"
+      ]
+    }
+  ]
+}

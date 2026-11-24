@@ -33,6 +33,18 @@ LimoClip 是一款面向 Windows 桌面端的开源直播工具（基于 .NET + 
 
 ---
 
+## 项目架构
+
+<p align="center">
+  <a href="https://heyiai02.github.io/LimoClip/architecture.html">
+    <img src="docs/images/architecture.svg" alt="LimoClip 系统架构图（点击查看可交互版本）" width="100%">
+  </a>
+</p>
+
+> 上图为项目架构总览（使用 [Archify](https://github.com/tt-a1i/archify) 生成）：从桌面壳、监控工作区、libmpv 播放、弹幕引擎、平台插件层，到录制/剪辑/ASR 与本地数据层的完整链路。点击图片打开**可交互版本**（节点聚焦、上下游追踪、路径高亮、明暗主题切换），各模块的具体实现方式见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+
+---
+
 ## 平台支持状态
 
 | 平台 | 视频拉流 | 实时弹幕 | 账号登录 (WebView2) | 状态 |
