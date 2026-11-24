@@ -443,6 +443,7 @@ Program.Main
 - **沉浸模式**：焦点模式或桌面全屏下，鼠标空闲 2.5s 自动隐藏各播放器底部控制条与右上角状态角标、隐藏顶部提示；鼠标/按键活动立即恢复（`_immersiveIdleTimer` + 逐窗格 `SetChromeVisible`）；
 - **桌面级全屏**：F11 或顶栏「桌面全屏」按钮；记录进入前的 `WindowState`，进入 `WindowState.FullScreen` 并隐藏外壳，顶部提示仅在鼠标移到屏幕顶部（Y≤90）时出现；Esc 退出（自带 400ms 去抖避免重复触发）；
 - 侧栏：房间库搜索、分组药丸（`WrapPanel` 自动换行 + `ScrollViewer` 限高）、房间条目操作（编辑/删除/双击加入工作区）。
+- 侧栏开播状态：`MainWindowViewModel` 每 60s 独立轮询主库全部房间（`DispatcherTimer` + 信号量限并发 3、单房间 10s 超时），按 `PlatformType` 取 Provider、带 Cookie 调 `GetRoomStatusAsync`，结果写入 `_knownLiveStatus` 并刷新条目状态点；工作区窗格的实时状态仍由播放器状态同步，两条来源合并后显示，未查询到历史状态的房间保持灰色「状态未知」。顶栏一体化自绘标题栏：空白区域按住拖动窗口、双击最大化/还原，事件源命中按钮/下拉框/输入框等交互控件时直接放行（`IsTopBarInteractiveSource`），避免吞掉首次点击。
 
 ### 10.2 布局系统（Dock）
 

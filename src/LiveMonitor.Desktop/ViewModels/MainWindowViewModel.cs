@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -77,6 +78,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private DispatcherTimer? _focusHintTimer;
     private bool _isFocusHintVisible;
     private bool _isHighlightPanelVisible;
+
+    // V0.6：侧栏主播开播状态独立轮询。工作区只覆盖当前打开的房间，
+    // 未放入工作区的房间也要能显示直播/未开播，不能一直停在「状态未知」。
+    private DispatcherTimer? _roomStatusTimer;
+    private bool _roomStatusRefreshing;
+    private static readonly TimeSpan RoomStatusPollInterval = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan RoomStatusCheckTimeout = TimeSpan.FromSeconds(10);
 
     /// <summary>V0.3：true 表示顶栏切到「录制中心」视图；监控工作区仍保留在视觉树中。</summary>
     [ObservableProperty]
@@ -531,6 +539,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _suppressProfileLoad = false;
         await LoadProfileAsync(SelectedProfile).ConfigureAwait(true);
         StartHealthMonitor();
+        StartRoomStatusMonitor();
         _loadedProfile = SelectedProfile;
     }
 
@@ -1919,6 +1928,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _toastCts?.Cancel();
         _healthTimer?.Stop();
         _healthTimer = null;
+        _roomStatusTimer?.Stop();
+        _roomStatusTimer = null;
         _focusHintTimer?.Stop();
         _focusHintTimer = null;
         ReleaseDanmakuSubscriptions();
@@ -2328,6 +2339,104 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             : $"解码正常 ({percent:F0}% 丢帧)";
 
         SyncRoomStatuses();
+    }
+
+    // V0.6：独立轮询主库所有房间的开播状态，避免「只有放进工作区才显示状态」。
+    private void StartRoomStatusMonitor()
+    {
+        if (_roomStatusTimer is not null)
+        {
+            return;
+        }
+
+        _roomStatusTimer = new DispatcherTimer { Interval = RoomStatusPollInterval };
+        _roomStatusTimer.Tick += async (_, _) => await RefreshAllRoomStatusesAsync().ConfigureAwait(true);
+        _roomStatusTimer.Start();
+
+        // 启动后立即刷新一轮，避免首屏长时间停留在「状态未知」。
+        _ = RefreshAllRoomStatusesAsync();
+    }
+
+    private async Task RefreshAllRoomStatusesAsync()
+    {
+        if (_disposed || _roomStatusRefreshing)
+        {
+            return;
+        }
+
+        _roomStatusRefreshing = true;
+        try
+        {
+            var rooms = Rooms.Select(item => item.Room).ToList();
+            using var gate = new SemaphoreSlim(3);
+
+            // 有上限的并发：15 路房间若逐个等 10s 超时会拖到两分钟以上。
+            var tasks = rooms.Select(async room =>
+            {
+                await gate.WaitAsync().ConfigureAwait(true);
+                try
+                {
+                    if (_disposed)
+                    {
+                        return;
+                    }
+
+                    if (room.Platform == PlatformType.CustomStream)
+                    {
+                        // 清流没有「开播」概念，按在线处理，避免长期显示为未知。
+                        _knownLiveStatus[room.Id] = true;
+                        return;
+                    }
+
+                    var live = await TryQueryRoomLiveAsync(room).ConfigureAwait(true);
+                    if (live is not null)
+                    {
+                        _knownLiveStatus[room.Id] = live;
+                    }
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            });
+
+            await Task.WhenAll(tasks).ConfigureAwait(true);
+        }
+        finally
+        {
+            _roomStatusRefreshing = false;
+        }
+
+        foreach (var item in Rooms)
+        {
+            if (_knownLiveStatus.TryGetValue(item.Id, out var live))
+            {
+                item.SetLiveStatus(live);
+            }
+        }
+    }
+
+    /// <summary>查询单个房间的开播状态；失败返回 null（保留上一次已知状态，不误报为未开播）。</summary>
+    private async Task<bool?> TryQueryRoomLiveAsync(LiveRoom room)
+    {
+        var provider = _services.Platforms.Providers.FirstOrDefault(candidate => candidate.Platform == room.Platform);
+        if (provider is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var cookie = await _services.Credentials.GetCookieAsync(room.Platform).ConfigureAwait(true);
+            using var cts = new CancellationTokenSource(RoomStatusCheckTimeout);
+            var status = await provider.GetRoomStatusAsync(room.RoomId, cookie, cts.Token).ConfigureAwait(true);
+            return status.IsLive;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[room-status] 查询房间开播状态失败 {room.Platform}/{room.RoomId}：{ex.Message}");
+            return null;
+        }
     }
 
     /// <summary>把工作区已知的直播状态同步到左侧主库；从未检测过的房间保持灰色未知。</summary>
