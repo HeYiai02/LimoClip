@@ -30,6 +30,18 @@ public sealed class DanmakuClientFactoryTests
         Assert.Equal("somestreamer", twitch.RoomId);
     }
 
+    [Fact]
+    public void Create_CustomStream_ReturnsNullClient()
+    {
+        var factory = new DanmakuClientFactory();
+
+        var client = factory.Create(PlatformType.CustomStream, "cs_abcd1234", cookie: null);
+
+        var nullClient = Assert.IsType<LiveMonitor.Platforms.CustomStream.NullDanmakuClient>(client);
+        Assert.Equal(PlatformType.CustomStream, nullClient.Platform);
+        Assert.Equal("cs_abcd1234", nullClient.RoomId);
+    }
+
     [Theory]
     [InlineData(PlatformType.Douyin)]
     [InlineData(PlatformType.Douyu)]

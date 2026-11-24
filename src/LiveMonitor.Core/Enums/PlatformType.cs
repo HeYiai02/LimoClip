@@ -11,5 +11,11 @@ public enum PlatformType
     Douyu = 3,
     Huya = 4,
     Twitch = 5,
-    YouTube = 6
+    YouTube = 6,
+
+    /// <summary>
+    /// 自定义清流直链（HLS / HTTP-FLV / RTMP / RTSP / SRT 等）。
+    /// 不属于任何第三方平台，无弹幕、无房间号查询，由内置 <c>CustomStreamProvider</c> 直接交给 libmpv / FFmpeg 拉流。
+    /// </summary>
+    CustomStream = 99
 }

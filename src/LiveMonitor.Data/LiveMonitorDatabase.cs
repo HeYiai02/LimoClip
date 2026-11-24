@@ -17,6 +17,7 @@ public sealed class LiveMonitorDatabase
             RawUrl TEXT NOT NULL,
             Alias TEXT NOT NULL,
             GroupTag TEXT,
+            CustomHeadersJson TEXT,
             CreatedAt TEXT NOT NULL,
             UNIQUE(Platform, RoomId)
         );
@@ -169,6 +170,9 @@ public sealed class LiveMonitorDatabase
             "TEXT", ct).ConfigureAwait(false);
         await EnsureColumnAsync(connection, "HighlightEvents", "RecordingOffsetMs",
             "INTEGER", ct).ConfigureAwait(false);
+        // V0.6-A：自定义清流允许为 HTTP(S) 直链附加 Referer / User-Agent 等请求头。
+        await EnsureColumnAsync(connection, "LiveRooms", "CustomHeadersJson",
+            "TEXT", ct).ConfigureAwait(false);
 
         // 旧库的 HighlightEvents 在补列之前不能建该索引，因此放在 EnsureColumn 之后。
         await using (var sessionIndex = connection.CreateCommand())
@@ -181,7 +185,7 @@ public sealed class LiveMonitorDatabase
 
         await using (var version = connection.CreateCommand())
         {
-            version.CommandText = "PRAGMA user_version = 4;";
+            version.CommandText = "PRAGMA user_version = 5;";
             await version.ExecuteNonQueryAsync(ct);
         }
     }

@@ -38,7 +38,7 @@ public sealed class RecordingRepositoryTests
         Assert.Contains("RecordingOffsetMs", columns);
 
         command.CommandText = "PRAGMA user_version;";
-        Assert.Equal(4L, Convert.ToInt64(await command.ExecuteScalarAsync()));
+        Assert.Equal(5L, Convert.ToInt64(await command.ExecuteScalarAsync()));
     }
 
     [Fact]

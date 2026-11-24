@@ -25,6 +25,12 @@ public sealed class LiveRoom
 
     public string? GroupTag { get; set; }
 
+    /// <summary>
+    /// 自定义清流可选的高级请求头 JSON（如 <c>{"Referer":"...","User-Agent":"..."}</c>）。
+    /// 仅 <see cref="PlatformType.CustomStream"/> 使用；普通平台为空。
+    /// </summary>
+    public string? CustomHeadersJson { get; set; }
+
     /// <summary>以 UTC 保存；UI 负责转换成本地时间。</summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

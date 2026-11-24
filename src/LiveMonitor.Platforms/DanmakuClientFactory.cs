@@ -64,6 +64,8 @@ public sealed class DanmakuClientFactory : IDanmakuClientFactory
         {
             PlatformType.Bilibili => new BilibiliDanmakuClient(roomId, cookie, _httpClient),
             PlatformType.Twitch => new TwitchDanmakuClient(roomId, cookie),
+            // 自定义清流没有弹幕服务：返回空实现而不是 null，避免调用方把「无弹幕」当成可重试失败。
+            PlatformType.CustomStream => new CustomStream.NullDanmakuClient(platform, roomId),
             _ => null
         };
     }

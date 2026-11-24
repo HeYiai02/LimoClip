@@ -8,7 +8,7 @@ namespace LiveMonitor.Data.Repositories;
 public sealed class RoomRepository : IRoomRepository
 {
     private const string SelectColumns =
-        "Id, DisplayNumber, Platform, RoomId, RawUrl, Alias, GroupTag, CreatedAt";
+        "Id, DisplayNumber, Platform, RoomId, RawUrl, Alias, GroupTag, CustomHeadersJson, CreatedAt";
 
     private readonly LiveMonitorDatabase _database;
 
@@ -93,8 +93,8 @@ public sealed class RoomRepository : IRoomRepository
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = """
-                INSERT INTO LiveRooms (Id, DisplayNumber, Platform, RoomId, RawUrl, Alias, GroupTag, CreatedAt)
-                VALUES ($id, $displayNumber, $platform, $roomId, $rawUrl, $alias, $groupTag, $createdAt);
+                INSERT INTO LiveRooms (Id, DisplayNumber, Platform, RoomId, RawUrl, Alias, GroupTag, CustomHeadersJson, CreatedAt)
+                VALUES ($id, $displayNumber, $platform, $roomId, $rawUrl, $alias, $groupTag, $customHeadersJson, $createdAt);
                 """;
             command.Parameters.AddWithValue("$id", SqliteValues.ToDb(room.Id));
             command.Parameters.AddWithValue("$displayNumber", room.DisplayNumber);
@@ -103,6 +103,7 @@ public sealed class RoomRepository : IRoomRepository
             command.Parameters.AddWithValue("$rawUrl", room.RawUrl);
             command.Parameters.AddWithValue("$alias", room.Alias);
             command.Parameters.AddWithValue("$groupTag", SqliteValues.NullableText(room.GroupTag));
+            command.Parameters.AddWithValue("$customHeadersJson", SqliteValues.NullableText(room.CustomHeadersJson));
             command.Parameters.AddWithValue("$createdAt", SqliteValues.ToDb(room.CreatedAt));
 
             await command.ExecuteNonQueryAsync(ct);
@@ -133,6 +134,7 @@ public sealed class RoomRepository : IRoomRepository
                 RawUrl = $rawUrl,
                 Alias = $alias,
                 GroupTag = $groupTag,
+                CustomHeadersJson = $customHeadersJson,
                 CreatedAt = $createdAt
             WHERE Id = $id;
             """;
@@ -142,6 +144,7 @@ public sealed class RoomRepository : IRoomRepository
         command.Parameters.AddWithValue("$rawUrl", room.RawUrl);
         command.Parameters.AddWithValue("$alias", room.Alias);
         command.Parameters.AddWithValue("$groupTag", SqliteValues.NullableText(room.GroupTag));
+        command.Parameters.AddWithValue("$customHeadersJson", SqliteValues.NullableText(room.CustomHeadersJson));
         command.Parameters.AddWithValue("$createdAt", SqliteValues.ToDb(room.CreatedAt));
         command.Parameters.AddWithValue("$id", SqliteValues.ToDb(room.Id));
 
@@ -182,6 +185,7 @@ public sealed class RoomRepository : IRoomRepository
         RawUrl = reader.GetString(4),
         Alias = reader.GetString(5),
         GroupTag = reader.IsDBNull(6) ? null : reader.GetString(6),
-        CreatedAt = SqliteValues.ToDateTime(reader.GetString(7))
+        CustomHeadersJson = reader.IsDBNull(7) ? null : reader.GetString(7),
+        CreatedAt = SqliteValues.ToDateTime(reader.GetString(8))
     };
 }

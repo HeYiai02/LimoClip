@@ -57,6 +57,36 @@ public sealed class DataLayerTests
     }
 
     [Fact]
+    public async Task RoomRepository_RoundTripsCustomStreamHeaders_V06A()
+    {
+        await using var test = await TestDatabase.CreateAsync();
+        var repository = new RoomRepository(test.Database);
+
+        var room = new LiveRoom
+        {
+            Platform = PlatformType.CustomStream,
+            RoomId = "cs_abcd1234",
+            RawUrl = "https://cdn.example.com/live/stream.m3u8?token=abc",
+            Alias = "赛事清流",
+            CustomHeadersJson = """{"Referer":"https://live.example.com/","User-Agent":"UA-1"}""",
+        };
+
+        await repository.AddAsync(room);
+        var reloaded = await repository.GetByIdAsync(room.Id);
+
+        Assert.NotNull(reloaded);
+        Assert.Equal(PlatformType.CustomStream, reloaded.Platform);
+        Assert.Equal("cs_abcd1234", reloaded.RoomId);
+        Assert.Equal(room.RawUrl, reloaded.RawUrl);
+        Assert.Equal(room.CustomHeadersJson, reloaded.CustomHeadersJson);
+
+        reloaded.CustomHeadersJson = null;
+        await repository.UpdateAsync(reloaded);
+        var cleared = await repository.GetByIdAsync(room.Id);
+        Assert.Null(cleared!.CustomHeadersJson);
+    }
+
+    [Fact]
     public async Task RoomDelete_CascadesLayoutSlots()
     {
         await using var test = await TestDatabase.CreateAsync();

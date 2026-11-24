@@ -119,7 +119,7 @@ public sealed class ProvidersManifestTests
                 new ProviderPluginEntry
                 {
                     PluginId = "broken",
-                    Platform = (PlatformType)99,
+                    Platform = (PlatformType)98,
                     Version = "",
                     MinAppVersion = "",
                     DllName = "sub/dir/plugin.dll",
