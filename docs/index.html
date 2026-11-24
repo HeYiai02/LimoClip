@@ -641,7 +641,7 @@
       </div>
       <h1>把多路盯播、全程留档与<span>高能出片</span><br />装进一个轻量桌面工作台</h1>
       <p class="hero-sub">
-        基于 C# + Avalonia + libmpv + FFmpeg 构建。支持多屏硬件解码监控、B站独轮车自动拦截、抗断电 MKV 全程录制，以及音轨 + 弹幕密度双波形剪辑与云端语音转写。
+        基于 C# + Avalonia + libmpv + FFmpeg 构建。支持多屏硬件解码监控、B站独轮车自动拦截、抗断电 MKV 全程录制，以及音轨 + 弹幕密度双波形剪辑与云端语音转写；另可直接粘贴自定义清流直链观看与录制。
       </p>
       <div class="hero-cta">
         <a class="btn btn-primary" id="heroDownloadBtn" href="https://github.com/heyiai02/LimoClip/releases/latest" target="_blank" rel="noopener">
@@ -730,6 +730,11 @@
           <h3>Twitch 原生通道去广告（V0.5-G/H）</h3>
           <p>原生 GQL + Usher 通道固定 embed 播放参数规避流内插播广告，另有去广告 M3U8 代理模板与 yt-dlp 兜底三层降级。</p>
         </div>
+        <div class="card">
+          <div class="card-icon">📡</div>
+          <h3>自定义清流直链（V0.6-A）</h3>
+          <p>直接粘贴 HLS / FLV / TS / MPD / RTMP / RTSP / SRT 直链或 CDN Token 链接即可观看与录制；支持自定义 Referer/UA、编辑换链不丢槽位，录制/剪辑/ASR 能力全部复用。</p>
+        </div>
       </div>
     </div>
   </section>
@@ -813,7 +818,7 @@
     <div class="container">
       <div class="section-head">
         <h2>平台支持</h2>
-        <p>六平台全部内置：拉流 + 实时弹幕 + WebView2 账号登录；平台插件支持 Ed25519 验签热更新，单个平台接口变动无需重装主程序</p>
+        <p>六平台 + 自定义清流全部内置：拉流 + 实时弹幕 + WebView2 账号登录；平台插件支持 Ed25519 验签热更新，单个平台接口变动无需重装主程序</p>
       </div>
 
       <div class="plat-grid">
@@ -846,6 +851,11 @@
           <span class="mock-badge" style="background:#334155;">抖音</span>
           <div class="plat-name">抖音直播</div>
           <div class="plat-status">✓ 已支持 · V0.5-C</div>
+        </div>
+        <div class="plat-card ready">
+          <span class="mock-badge" style="background:#0ea5e9;">清流</span>
+          <div class="plat-name">自定义清流</div>
+          <div class="plat-status">✓ 已支持 · V0.6-A</div>
         </div>
       </div>
     </div>

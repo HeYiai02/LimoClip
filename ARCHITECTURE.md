@@ -15,7 +15,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 - 同时监控 20~30 路直播（默认自适应平铺 + 焦点放大）；
 - 独立录制中心：开播自动录制、独立 ffmpeg 进程落盘、断电/崩溃抗性 MKV；
 - 剪辑台：双波形（音频包络 + 弹幕密度）定位、无损切段、硬编回填两版导出、云端 ASR 逐句转写；
-- 六平台接入：B 站、Twitch、YouTube、虎牙、斗鱼、抖音；
+- 六平台接入：B 站、Twitch、YouTube、虎牙、斗鱼、抖音；另支持**自定义清流**（直接粘贴 HLS/FLV/RTMP/RTSP/SRT 等直链进行监控、录制与剪辑）；
 - 插件化平台扩展：内置插件 + Ed25519 验签的外部插件热更新（GitHub 与 Gitee 双源）。
 
 | 层 | 选型 |
@@ -30,7 +30,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | WebView 登录 | WebView2（临时用户目录，登录后采集 Cookie） |
 | 平台解析 | 各家 HTTP API + Jint（斗鱼签名、抖音 sign.js）；yt-dlp 作为 YouTube/Twitch 兜底 |
 | 插件签名 | Ed25519（BouncyCastle）+ SHA256 清单校验 |
-| 测试 | xUnit（6 个测试工程，当前共 879 个用例） |
+| 测试 | xUnit（6 个测试工程，当前共 911 个用例） |
 
 ### 平台支持矩阵
 
@@ -42,6 +42,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | 虎牙 | 4 | `mp.huya.com` 移动接口 + FLV | `wss://wsapi.huya.com`（Tars/Wup） | 高码率档位；线路优先 HS | CDN 单连接寿命短 → 分段录制 |
 | Twitch | 5 | 原生 GQL + Usher HLS（`embed` 去广告）→ yt-dlp 兜底 | 原生 IRC WebSocket（`TwitchDanmakuClient`） | `auth-token` 用于 OAuth 头；可选大陆/去广告代理模板 | 去广告非永久保证 |
 | YouTube | 6 | yt-dlp `-j` 解析（含分离音频轨） | InnerTube `live_chat` 轮询 | 登录态 Cookie 传给 yt-dlp 提升画质 | 需要 yt-dlp |
+| 自定义清流 | 99 | 直链交给 libmpv / FFmpeg：http(s)（HLS/FLV/TS/MPD、无后缀 Token 直链）、rtmp(s)/rtsp(s)/srt/mms | 无（`NullDanmakuClient`） | 无需 Cookie；可选 Referer/UA 请求头（仅 http(s) 生效） | 无房间号概念（`cs_xxxxxxxx`）；手动开录，不参与自动录制轮询 |
 
 ---
 
@@ -172,14 +173,14 @@ Program.Main
 
 - SQLite 文件默认位于 `%LocalAppData%\LiveMonitor\livemonitor.db`。
 - 每个连接执行：`PRAGMA journal_mode = WAL`（库级一次）+ `PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000`。
-- `LiveMonitorDatabase` 负责建表与基于 `PRAGMA user_version` 的增量迁移（当前版本 4）；数据库结构变更必须走迁移并递增版本。
+- `LiveMonitorDatabase` 负责建表与基于 `PRAGMA user_version` 的增量迁移（当前版本 5；V0.6-A 新增 `LiveRooms.CustomHeadersJson`）；数据库结构变更必须走迁移并递增版本。
 - 访问封装：`SqliteValues` 统一读取可空值/时间；仓储实现类位于 `Repositories/`。
 
 ### 5.2 表结构
 
 | 表 | 用途 | 关键列 |
 | --- | --- | --- |
-| `LiveRooms` | 房间库 | `Id, DisplayNumber, Platform, RoomId, RawUrl, Alias, GroupTag, CreatedAt` |
+| `LiveRooms` | 房间库 | `Id, DisplayNumber, Platform, RoomId, RawUrl, Alias, GroupTag, CustomHeadersJson, CreatedAt` |
 | `LayoutProfiles` | 窗口方案 | `Id, Name, IsCustomLayout, DockLayoutJson, CreatedAt/UpdatedAt` |
 | `LayoutSlots` | 方案中的窗格槽位 | `Id, LayoutProfileId, LiveRoomId, PaneId, DefaultMuted, IsFocusSlot, PreferredQualityId, DefaultDanmakuVisible` |
 | `PlatformCredentials` | 平台登录 Cookie | `Platform(PK), EncryptedCookie, IsExpired, UpdatedAt` |
@@ -215,14 +216,14 @@ Program.Main
 
 | 枚举 | 值 | 说明 |
 | --- | --- | --- |
-| `PlatformType` | 1..6（Bilibili/Douyin/Douyu/Huya/Twitch/YouTube） | 数值固定，写库后不可变 |
+| `PlatformType` | 1..6（Bilibili/Douyin/Douyu/Huya/Twitch/YouTube）+ 99（CustomStream 自定义清流） | 数值固定，写库后不可变；99 为后加值，避开既有枚举 |
 | `PlayerState` | `Loading / Playing / Offline / Reconnecting / Failed` | `Reconnecting` 表示播放中断后的自动重连态（UI 不可显示为「未开播」） |
 | `RecordingStatus` | `Starting / Recording / Completed / Failed` | 与数据库 `RecordingSessions.Status` 对应 |
 | `MonitorTier` | 紧凑/常规（按分辨率选择解码策略） | 由播放器尺寸驱动 |
 
 ### 6.2 实体
 
-- `LiveRoom`：`Id, Platform, RoomId, RawUrl, DisplayNumber, Alias, GroupTag, CreatedAt`；`DisplayName` 由「别名或平台名 + #序号」生成。
+- `LiveRoom`：`Id, Platform, RoomId, RawUrl, DisplayNumber, Alias, GroupTag, CustomHeadersJson, CreatedAt`；`DisplayName` 由「别名或平台名 + #序号」生成；`CustomHeadersJson` 仅自定义清流使用（Referer/User-Agent 等）。
 - `LayoutProfile`：`Id, Name, IsCustomLayout, DockLayoutJson, Slots`；`LayoutSlot`：`Id, LayoutProfileId, LiveRoomId, PaneId, DefaultMuted, IsFocusSlot, PreferredQualityId, DefaultDanmakuVisible`。
 - `RecordingTarget`：`LiveRoomId, OutputDirectory, IsEnabled`；`RecordingSession`：录制历史（见 §5.2）。
 - `PlatformCredential`、`AppSetting`、`DanmakuBlockKeyword`。
@@ -321,6 +322,16 @@ Program.Main
 - 弹幕：`wss://webcast100-ws-web-lq.douyin.com/webcast/im/push/v2/`；签名 = 13 个参数按序拼 `k=v,` 后 MD5 十六进制，交给运行时加载的 `sign.js` 的 `get_sign`；协议为 Protobuf（`PushFrame → gzip → Response → Message`），`ChatMessage/Gift/Emoji` 字段号手写读写（`DouyinProto`），5s 心跳 `hb`，needAck 回 `ack`。
 - `sign.js` 为 AGPL 第三方，**不随仓库/安装包分发**：按「显式路径 → 环境变量 `LIMOCLIP_DOUYIN_SIGN_JS` → `%LocalAppData%/LiveMonitor/cache/douyin/sign.js` → 应用目录 → 插件目录」查找，缺失时从固定 raw 地址下载缓存。
 
+#### 自定义清流（`LiveMonitor.Platforms/CustomStream`）
+
+- `CustomStreamProvider`：`PlatformType.CustomStream` 的内置 Provider，不依赖任何平台接口：
+  - `CanHandle`/`LooksLikeStreamUrl`：`rtmp/rtmps/rtsp/rtsps/srt/mms/mmsh` 绝对地址，或 http(s) 且路径以 `.m3u8/.m3u/.flv/.ts/.mpd` 结尾；
+  - `ExtractRoomId`：生成固定短 ID `cs_xxxxxxxx`（真实地址存 `RawUrl`，Token 换链时编辑替换而不重复占位）；
+  - `GetRoomStatusAsync(roomId | 完整 URL)`：`roomId` 含 `://` 时直接当作直链（添加阶段不落库即可预览），否则按 `RoomId` 从 `IRoomRepository` 回查 `RawUrl` 与 `CustomHeadersJson`（含 Referer/UA，http(s) 时额外补 Cookie 头）；始终返回 `IsLive=true` 的单档 `StreamQuality("direct","清流原画",1080,60,url,headers)`；
+  - 请求头只对 http(s) 注入；rtsp/rtsps 忽略 HTTP 头并由 `FfmpegArgumentBuilder` 强制 `-rtsp_transport tcp`；非 http(s) 不传 `-headers/-user_agent/-ca_file`（ffmpeg 对 rtmp/rtsp 会报错）。
+- `NullDanmakuClient`：清流无弹幕服务；`DanmakuClientFactory.Create` 对 `CustomStream` 返回空实现（而非 `null`），避免上层把「无弹幕」当成可重试失败。
+- 注册：`AppServices.CreateAsync` 在 `RoomRepository` 创建后 `platforms.ReplaceProvider(new CustomStreamProvider(roomRepository))`；不修改 `IPlatformProvider` 契约。
+
 ### 7.3 公共设施（Platforms.Common）
 
 | 类型 | 作用 |
@@ -347,6 +358,7 @@ Program.Main
 
 ## 8. 弹幕子系统（LiveMonitor.Danmaku）
 
+- 清流平台（`CustomStream`）没有弹幕服务：`DanmakuClientFactory.Create` 返回 `NullDanmakuClient` 空实现，`DanmakuManager` 不会建立弹幕会话，录制也不会创建 JSONL 文件。
 - `DanmakuManager`：单例服务，持有各平台弹幕工厂与 `DanmakuSessionHandle` 引用计数表。
   - `InitializeAsync`：读取设置（是否开启过滤/高能检测参数）并启动清理任务；
   - `Acquire(platform, roomId)`：返回 `DanmakuSessionHandle`；监控窗格、录制、剪辑回放分别克隆句柄，最后一个句柄 Dispose 时才真正断开连接；
@@ -388,6 +400,8 @@ Program.Main
 4. ffmpeg 异常退出（CDN 断流）→ 释放旧录制器、统计本段时长/大小，**续录下一段**（最多连续 6 次启动失败，间隔 2s；每次重新解析房间状态获取新签名地址）；
 5. 停止（用户/主播离线/卡死）→ `StopGracefullyAsync(5s)` → `FinalizeOnceAsync`：捕获当前段 → 用 `SegmentMerger` 合并全部 `.partNNN.mkv` → 以合并结果作为**权威时长与文件大小**写回会话 → 状态 Completed/Failed；
 6. 会话结束事件通知 UI（录制中心刷新历史/监听提示）。
+
+**清流录制的差异**：`CustomStream` 不参与自动录制轮询（`PollRoomAsync` 直接返回，避免「恒 live」被反复开录）；开录时跳过弹幕记录器、`DanmakuFilePath` 写空串（剪辑台按空路径跳过弹幕轨）；`FfmpegArgumentBuilder` 对非 http(s) 输入不传 `-headers/-user_agent/-ca_file`，rtsp/rtsps 追加 `-rtsp_transport tcp`。
 
 **为什么分段：** 虎牙 CDN 单连接只持续 3~17s，直接 `-reconnect` 续写会让 FLV 时间戳归零，MKV 出现 `Non-monotonic DTS` 并损坏（`duration=N/A`）。因此改为「每段独立 ffmpeg 进程 + 合并」，并对 CDN 在每次连接时重发的少量缓存内容做**重叠裁剪**：
 
@@ -448,7 +462,7 @@ Program.Main
 ### 10.3 播放器与监控
 
 - `WorkspacePlayerManager`：监控侧核心服务——
-  - `StartAsync(tile)`：解析房间 → 取 Cookie → `provider.GetRoomStatusAsync` → 更新窗格标题/状态 → `QualityPolicy.Choose` 选画质 → `MpvPlayerView.PlayAsync(quality)` → 挂弹幕会话；
+  - `StartAsync(tile)`：解析房间 → 取 Cookie → `provider.GetRoomStatusAsync` → 更新窗格标题/状态 → `QualityPolicy.Choose` 选画质 → `MpvPlayerView.PlayAsync(quality)` → 挂弹幕会话；自定义清流会调用 `player.SetDanmakuEnabled(false)` 隐藏窗格弹幕开关；
   - 失败处理：`ReconnectPolicy`（3s/10s/30s 退避，最多 3 次）→ 60s 失败复检；主播离线时定时轮询（60s）；
   - 播放器状态 → 窗格状态文本（`PlayerStateText`：连接中/直播中/已停止/重连中/播放失败）；
   - 焦点模式：双击窗格进入单窗格全屏（`IsFocused` + 静音策略 + 恢复原布局）、Esc 退出；
@@ -464,7 +478,8 @@ Program.Main
 
 ### 10.4 录制中心 / 剪辑台 / 设置
 
-- `RecordingCenterViewModel`：目标列表（自动录制开关、目录修改、立即开录/停止、当前录制进度）、历史列表（去剪辑、打开文件夹、删除；删除会同时删视频与 jsonl）。
+- `AddRoomWindow` / `EditRoomWindow`：普通平台按链接识别平台；粘贴清流直链（或勾选「作为自定义清流添加」）时按清流保存，可填 Referer/User-Agent；编辑清流时可直接替换播放地址（保留槽位与录制配置）并触发当前窗格重新拉流。
+- `RecordingCenterViewModel`：目标列表（自动录制开关、目录修改、立即开录/停止、当前录制进度）、历史列表（去剪辑、打开文件夹、删除；删除会同时删视频与 jsonl）。清流目标不显示「自动录制」开关。
 - `ClipStudioViewModel`：录制场次选择 / 打开本地文件、片段播放（`LocalClipPlayerView`）、时间轴（波形+弹幕密度+选区）、导出面板（模式/编码器/目录/文件名/进度）、语音识别面板（转写当前选区、逐句跳转播放、复制文本）。
 - `SettingsWindow`：平台账号（六平台 WebView2 登录/清除，状态显示 Cookie 是否绑定）、弹幕与高能参数、录制默认目录与轮询间隔、ASR 预设/Key、Twitch 去广告代理、组件与插件更新（yt-dlp/插件检查与安装）。
 - `WebViewLoginService` + `PlatformLoginProfiles`：按平台加载登录页（Twitch/YouTube 等内存态页），底部「我已登录，采集 Cookie」按钮；命名平台自动轮询关键 Cookie（B 站 `SESSDATA`、Twitch `auth-token`、YouTube `SAPISID/__Secure-3PSID` 等），虎牙/斗鱼/抖音采集全部 Cookie；采集结果经 `CredentialStore.SaveAsync` DPAPI 加密入库；临时 WebView2 用户目录用后删除。
@@ -486,6 +501,7 @@ Program.Main
 6. **ASR 转写**：剪辑台选区 → FFmpeg 抽音频 → `OpenAiCompatibleAsrProvider` 调用云端 → 结果缓存 + 逐句 UI。
 7. **插件热更新**：设置页检查更新 → 清单（GitHub Raw → Gitee Raw 回退）→ 版本比较 → 下载（主地址 → `mirrorDownloadUrl` 回退）→ SHA256 + Ed25519 验签 → 安装 → 原子替换 Provider/弹幕工厂。
 8. **Twitch 去广告播放**：设置页可选代理模板 → 代理层解析；否则原生 GQL（`playerType=embed`）+ Usher，仍失败回退 yt-dlp。
+9. **自定义清流**：添加时勾选/自动识别直链 → `CustomStreamProvider` 直接返回 `StreamQuality`（无弹幕会话）→ 监控/录制复用通用链路；录制产物无 `.jsonl`，剪辑台按空弹幕路径处理。
 
 ---
 
@@ -522,14 +538,14 @@ dotnet build LiveMonitor.sln --no-restore
 - 工程目标框架：除 `Desktop`/`Media` 为 `net8.0-windows` 外均为 `net8.0`；测试工程对应同目标框架。
 - 需要 `tools/` 下的 ffmpeg/mpv 才能运行应用（`scripts/fetch-tools.ps1` 自动下载并校验）。
 
-### 13.2 测试（当前 879 个用例）
+### 13.2 测试（当前 911 个用例）
 
 | 测试工程 | 覆盖范围 | 用例数 |
 | --- | --- | --- |
-| `tests/LiveMonitor.Data.Tests` | 数据库/仓储/凭据（DPAPI） | 37 |
-| `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退 | 457 |
+| `tests/LiveMonitor.Data.Tests` | 数据库/仓储/凭据（DPAPI）、清流请求头迁移 | 38 |
+| `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退、自定义清流 Provider | 483 |
 | `tests/LiveMonitor.Danmaku.Tests` | 过滤器、高能检测、会话管理 | 98 |
-| `tests/LiveMonitor.Media.Tests` | 录制状态机、分段合并、剪辑导出、波形 | 178 |
+| `tests/LiveMonitor.Media.Tests` | 录制状态机、分段合并、剪辑导出、波形、FFmpeg 参数协议分支 | 183 |
 | `tests/LiveMonitor.Desktop.Tests` | ViewModel、Dock 布局、登录配置、播放状态文本 | 109 |
 
 运行方式（使用已构建的测试 dll，避免重复构建）：
@@ -561,7 +577,9 @@ dotnet test tests\LiveMonitor.Desktop.Tests\bin\Debug\net8.0-windows\LiveMonitor
 - Twitch：`embed` 参数目前可避开流内插播广告，但 Twitch 可能变更策略；可在设置页配置去广告代理模板作为补充。原生通道依赖网络可达性，失败自动回退 yt-dlp。
 - YouTube：依赖 yt-dlp；YouTube 接口变动时需更新 yt-dlp（设置页提供检查/更新）。
 - 抖音：`sign.js` 为第三方 AGPL 脚本，不随安装包分发，需运行时获取；离线环境可手动放置并设置 `LIMOCLIP_DOUYIN_SIGN_JS`。
+- 抖音：`sign.js` 为第三方 AGPL 脚本，不随安装包分发，需运行时获取；离线环境可手动放置并设置 `LIMOCLIP_DOUYIN_SIGN_JS`。
 - 斗鱼：拉流地址为动态签名（Jint 执行平台下发 JS），签名逻辑变更时需要更新解析代码。
+- 自定义清流：URL 有效性与「能否出流」由目标 CDN 决定，添加时不做真实性探测；防盗链站点需自行填 Referer/UA。清流无弹幕、无自动开录（持续推流恒 live 会触发反复开录），需手动录制。
 
 **功能侧**
 
