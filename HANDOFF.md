@@ -1,8 +1,8 @@
-# LiveMonitor 交接（截至 V0.5-G：侧栏分组/桌面全屏/主副屏布局 + Twitch 去广告；V0.5-F 虎牙断流修复；V0.5-A/B/C 已完成并打包；含本机运行规避方案）
+# LiveMonitor 交接（截至 V0.5-H：桌面全屏沉浸模式 + Twitch embed 去广告；V0.5-G 侧栏分组/桌面全屏/主副屏布局 + Twitch 三层降级；V0.5-F 虎牙断流修复；V0.5-A/B/C 已完成并打包；含本机运行规避方案）
 
 ## 状态
 
-- 分支 `main`；**当前 HEAD 为 V0.5-G 收尾提交（界面/布局与 Twitch 去广告；功能提交 `d2d1e49`、`95654ec`，本文档提交紧随其后）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避、波形修复、产品侧加固、V0.5-B 六次提交、V0.5-C Step6/Step7/Step8/Step9 各两次提交、V0.5-D 两次功能提交、V0.5-E 三次提交（虎牙 Cookie/线路/画质、斗鱼+抖音 Cookie、HANDOFF）、V0.5-F 一次提交（分段录制 + 重叠裁剪）、V0.5-G 两次功能提交（界面与布局、Twitch 去广告），提交清单见文末各节。
+- 分支 `main`；**当前 HEAD 为 V0.5-H 收尾提交（桌面全屏沉浸模式 + Twitch embed 去广告；功能提交 `b18546d`、`5c40845`，本文档提交紧随其后）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避、波形修复、产品侧加固、V0.5-B 六次提交、V0.5-C Step6/Step7/Step8/Step9 各两次提交、V0.5-D 两次功能提交、V0.5-E 三次提交（虎牙 Cookie/线路/画质、斗鱼+抖音 Cookie、HANDOFF）、V0.5-F 一次提交（分段录制 + 重叠裁剪）、V0.5-G 两次功能提交（界面与布局、Twitch 去广告）、V0.5-H 两次功能提交（沉浸模式自动隐藏、Twitch embed 去广告），提交清单见文末各节。
 - 构建：`dotnet build LiveMonitor.sln --no-restore` → **0 错误**，8~14 警告（MSB3277 / NU1803 / NU1900 等，均为本机环境既有告警，无新增代码告警）。
 - 测试：Data 37 / Platforms **453** / Danmaku 98 / Media **178** / Desktop **109** = **875 全绿**（V0.4 基线 471；V0.5-A +7 Media、+18 Desktop；产品侧加固 +17 Media；V0.5-B +125 Platforms、+2 Media；V0.5-C Step6 虎牙 +65 Platforms、Step7 斗鱼 +63 Platforms、Step8 抖音 +64 Platforms、http 流 ca_file 修复 +2 Media；V0.5-D +2 断流状态文案 +6 六平台登录配置；V0.5-E +11 Platforms（三平台 Cookie 接入）；V0.5-F +10 Media（分段录制 + 重叠裁剪 + 时长实测）；V0.5-G +5 Platforms（Twitch 去广告三层降级）+3 Desktop（主副屏布局单测））。
 - 验收：V0.4 GUI 端到端通过（脚本 `.cache/v04-acceptance2.ps1`，证据 `.cache/v04b-*.png`）；V0.5-A 完成真实 API 验证（55s 音频约 11s 返回，见「V0.5-A 增量」）；本机运行规避后完成真实 GUI 录制/打开目录/ASR 验证；**V0.5-B 阶段验收通过**（YouTube 添加/监控/录制 49.97s（含音频）/剪辑波形/双版导出（含音频）/ASR，见「V0.5-B 增量」）；V0.5-C Step6 虎牙：插件、协议单测与真实探针（拉流状态 + 20s 内 86 条弹幕）通过，但本机为海外出口、虎牙 CDN 对海外网络限流，GUI 播放/录制未能完整验证（见「V0.5-C 增量」）；V0.5-C Step7 斗鱼：插件、协议单测、真实探针与 **GUI 全链路验收通过**（真实录制 56.8s/11.4MB 含音频 + 72 条弹幕、剪辑台波形与混流、双版导出均含音频，见「V0.5-C 增量（Step7 斗鱼）」）。
@@ -508,3 +508,26 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 ### 新 session 首条消息（V0.5-G 后）
 
 - V0.5-G 已完成并验收：侧栏分组换行滚动、桌面级全屏 F11/Esc、主副屏非对称布局（保存/重启恢复）、Twitch 去广告三层降级（设置页可配代理）；全量测试 **875 全绿**，HEAD 为 V0.5-G 收尾提交（功能提交 `d2d1e49`、`95654ec`）。下一步可选：Twitch 真实去广告播放验证（需可达 Twitch 的网络/代理）、其它平台长时录制回归、发布 v0.5.0 Release、抖音 sign.js 离线化。
+
+## V0.5-H 增量（2026-11-24）：桌面全屏沉浸模式 + Twitch embed 去广告
+
+### 状态
+
+- 来源：用户反馈（m05948/m05949）「桌面全屏时上方一直提示退出全屏；鼠标不动时底部状态栏没隐藏；Twitch 还是有广告」。
+- ① 顶层提示：桌面全屏提示改为随鼠标活动短暂出现（指针 Y≤90 才显示），2.5s 空闲自动消失，不再常驻。
+- ② 底部控件：桌面全屏与焦点模式统一进入「沉浸模式」——鼠标空闲 2.5s 后隐藏每个窗格底部播放控制条（MpvPlayerView.ControlBar）与右上角 HealthBadge，鼠标移动/点击/滚轮立即恢复。
+- ③ Twitch 广告：探针实测 `playerType` 影响广告——`site/popout/mobile_web` 的 media playlist 含 `CLASS="twitch-stitched-ad"` 10~30s 插播段（`X-TV-TWITCH-STREAM-SOURCE="Amazon|…"`），`embed` 恒为 `source="live"` 无 stitched-ad（130s 内 21 次采样全部无广告）；原生层固定 `playerType="embed"`（即使带 auth-token），App 内实测 65s 播放无 Commercial break。
+- 校验：build 0 错误；五套测试 **875 全绿**（V0.5-H 无新增测试；Twitch 测试 `GetRoomStatus_WithAuthCookie_UsesEmbedPlayerTypeAndAuthorizationHeader` 断言改为 embed）。
+- GUI 验收（`E:\LimoClip-v05-run`，最新构建）：桌面全屏（1920×1080）空闲 4s 截图 `.cache/v05h-46-fs-idle.png`（无顶部提示、无控制条）；鼠标移动后 `v05h-47-fs-active.png`（控制条恢复、顶部提示不出现）；鼠标移到屏幕顶部 `v05h-47b-fs-top.png`（提示出现）；再空闲 `v05h-48-fs-idle2.png` 再次隐藏；按一次 F11 退出 `v05h-49-after-f11.png`（窗口恢复 1440×900）。Twitch 播放截图 `v05h-5/6/8/9/10/17`（CS GRAND FINAL 直播画面，无 Commercial break）。
+- 已知限制：Twitch 广告策略可能随账号/地区/时间变化，`embed` 是社区常用规避参数但非永久保证；若后续仍出现广告，可改用设置页「Twitch 去广告」代理模板（外部去广告 M3U8）。
+
+### 实现要点
+
+- `src/LiveMonitor.Desktop/Views/MainWindow.axaml.cs`：新增字段 `_immersiveIdleTimer`(2.5s)/`_isImmersiveActive`/`_lastFullscreenToggleAt`；ctor 订阅 PointerMoved/PointerPressed/PointerWheelChanged → `OnWindowPointerActivity`；`ApplyShellLayout` 末尾 `UpdateImmersiveMode(focused || fullscreenShell)`；`UpdateImmersiveMode/ShowImmersiveControls/HideImmersiveControls/OnWindowPointerActivity/SetPlayerControlBarsVisible/RestartImmersiveIdleTimer`；F11 KeyDown 加 400ms 去抖（避免自动化/重复事件一次按键切换两次）。
+- `src/LiveMonitor.Desktop/Player/MpvPlayerView.axaml.cs`：新增 `SetChromeVisible(bool)`（`ControlBar.IsVisible`；`HealthBadge.IsVisible = visible && _state == Playing`）。
+- `src/LiveMonitor.Platforms.Twitch/TwitchProvider.cs`：`RequestPlaybackAccessTokenAsync` 固定 `const string playerType = "embed";`（注释记录 site/popout/mobile_web 会拼 `twitch-stitched-ad`、embed 只返回直播源）。
+- 注：`MainWindow.axaml` 的 `Window.immersive-idle` 样式尝试已删除（Dock 内播放器不在样式作用域），改由代码遍历视觉树控制。
+
+### 新 session 首条消息（V0.5-H 后）
+
+- V0.5-H 已完成并验收：桌面全屏/焦点模式鼠标空闲自动隐藏窗格控制条与顶部提示、F11 单次切换；Twitch 原生播放通道固定 embed 参数规避流内插播广告（实测无 Commercial break），全量测试 **875 全绿**，HEAD 为 V0.5-H 收尾提交（功能提交 `b18546d`、`5c40845`）。下一步可选：Twitch 长时间播放观察（广告时段/频道切换）、焦点模式沉浸隐藏回归、其它平台录制回归、发布 v0.5.0 Release、抖音 sign.js 离线化。
