@@ -1132,6 +1132,16 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
         }
     }
 
+    /// <summary>
+    /// 沉浸模式（桌面全屏 / 焦点模式）下由主窗口控制底部控制条与右上角状态角标的显隐；
+    /// 恢复显示时按当前播放状态重新决定角标是否可见。
+    /// </summary>
+    public void SetChromeVisible(bool visible)
+    {
+        ControlBar.IsVisible = visible;
+        HealthBadge.IsVisible = visible && _state == PlayerState.Playing;
+    }
+
     private void ThrowIfDisposed()
     {
         if (Volatile.Read(ref _disposed) != 0)

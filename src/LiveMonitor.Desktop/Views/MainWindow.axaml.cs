@@ -4,6 +4,7 @@ using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Dock.Controls.ProportionalStackPanel;
 using Dock.Model.Core;
@@ -24,6 +25,9 @@ public partial class MainWindow : Window
     private WindowState _windowStateBeforeFullscreen = WindowState.Normal;
     private Guid? _lastRoomClickId;
     private DateTime _lastRoomClickAt;
+    private readonly DispatcherTimer _immersiveIdleTimer;
+    private bool _isImmersiveActive;
+    private DateTime _lastFullscreenToggleAt;
 
     public MainWindow()
     {
@@ -34,6 +38,19 @@ public partial class MainWindow : Window
         Dock.AddHandler(InputElement.PointerPressedEvent, OnDockPointerPressed, RoutingStrategies.Tunnel);
         RoomList.AddHandler(InputElement.PointerPressedEvent, OnRoomPointerPressed, RoutingStrategies.Tunnel);
         KeyDown += OnWindowKeyDown;
+        PointerMoved += OnWindowPointerActivity;
+        PointerPressed += OnWindowPointerActivity;
+        PointerWheelChanged += OnWindowPointerActivity;
+
+        _immersiveIdleTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };
+        _immersiveIdleTimer.Tick += (_, _) =>
+        {
+            _immersiveIdleTimer.Stop();
+            if (_isImmersiveActive)
+            {
+                HideImmersiveControls();
+            }
+        };
     }
 
     /// <summary>
@@ -253,7 +270,7 @@ public partial class MainWindow : Window
         Sidebar.IsVisible = sidebarVisible;
         TopBar.IsVisible = !focused && !fullscreenShell;
         StatusBar.IsVisible = !overlay && !focused && !fullscreenShell;
-        DesktopFullscreenHint.IsVisible = _isDesktopFullscreen;
+        UpdateImmersiveMode(focused || fullscreenShell);
         RootGrid.ColumnDefinitions[0].Width =
             sidebarVisible ? new GridLength(260) : new GridLength(0);
         RootGrid.RowDefinitions[0].Height =
@@ -268,6 +285,85 @@ public partial class MainWindow : Window
         Dock.InvalidateMeasure();
         Dock.InvalidateArrange();
         Dock.UpdateLayout();
+    }
+
+    /// <summary>
+    /// 沉浸模式（桌面全屏 / 焦点模式）：鼠标活动时临时显示窗格控制条与顶部提示，
+    /// 指针空闲 2.5 秒后自动隐藏，避免全屏观看时控件常驻。
+    /// </summary>
+    private void UpdateImmersiveMode(bool immersive)
+    {
+        if (_isImmersiveActive == immersive)
+        {
+            return;
+        }
+
+        _isImmersiveActive = immersive;
+        if (immersive)
+        {
+            ShowImmersiveControls();
+            RestartImmersiveIdleTimer();
+        }
+        else
+        {
+            _immersiveIdleTimer.Stop();
+            Classes.Set("immersive-idle", false);
+            SetPlayerControlBarsVisible(true);
+            DesktopFullscreenHint.IsVisible = false;
+        }
+    }
+
+    private void OnWindowPointerActivity(object? sender, PointerEventArgs e)
+    {
+        if (!_isImmersiveActive)
+        {
+            return;
+        }
+
+        ShowImmersiveControls();
+        if (_isDesktopFullscreen)
+        {
+            // 顶部提示只在指针靠近顶部时出现，避免全屏时一直挡着画面。
+            DesktopFullscreenHint.IsVisible = e.GetPosition(this).Y <= 90;
+        }
+
+        RestartImmersiveIdleTimer();
+    }
+
+    private void ShowImmersiveControls()
+    {
+        Classes.Set("immersive-idle", false);
+        SetPlayerControlBarsVisible(true);
+        if (_isDesktopFullscreen)
+        {
+            DesktopFullscreenHint.IsVisible = true;
+        }
+    }
+
+    private void HideImmersiveControls()
+    {
+        Classes.Set("immersive-idle", true);
+        SetPlayerControlBarsVisible(false);
+        DesktopFullscreenHint.IsVisible = false;
+    }
+
+    /// <summary>
+    /// 逐个窗格切换底部播放控制条（MpvPlayerView 的 ControlBar）显示状态。
+    /// Dock 里的播放器不在 MainWindow 的样式选择器作用域内，因此直接遍历视觉树处理。
+    /// </summary>
+    private void SetPlayerControlBarsVisible(bool visible)
+    {
+        var players = Dock.GetVisualDescendants().OfType<Player.MpvPlayerView>().ToList();
+        foreach (var player in players)
+        {
+            player.SetChromeVisible(visible);
+        }
+    }
+
+    private void RestartImmersiveIdleTimer()
+    {
+        _immersiveIdleTimer.Stop();
+        _immersiveIdleTimer.Start();
     }
 
     /// <summary>
@@ -383,6 +479,16 @@ public partial class MainWindow : Window
 
         if (e.Key == Key.F11)
         {
+            // 少数键盘/自动化输入会在一次按键内重复派发 KeyDown，这里做 400ms 去抖，
+            // 保证用户按一次 F11 只切换一次桌面全屏。
+            var now = DateTime.UtcNow;
+            if (now - _lastFullscreenToggleAt < TimeSpan.FromMilliseconds(400))
+            {
+                e.Handled = true;
+                return;
+            }
+
+            _lastFullscreenToggleAt = now;
             ToggleDesktopFullscreen();
             e.Handled = true;
             return;
