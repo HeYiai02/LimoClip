@@ -319,7 +319,9 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
             return;
         }
 
-        if (!IsRecording)
+        // 停止录制时管理器会先发 SessionCompleted、后发一次最终 Progress；
+        // 若这一帧进度晚于完成事件到达，不能把 IsRecording 拉回 true，否则按钮会卡在「停止录制」。
+        if (!IsRecording && _recordings.IsRecording(Room.Id))
         {
             IsRecording = true;
             SetStatus("录制中", "#F87171");
