@@ -55,10 +55,16 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 无边框一体化顶栏：空白区域支持按住左键拖动窗口，双击在最大化/还原之间切换。
-    /// 顶栏内的按钮、下拉框等子控件会自行处理指针事件，不会冒泡到这里。
+    /// 命中按钮、下拉框、输入框等交互控件时直接放行，避免第一次点击被拖动吞掉、
+    /// 第二次点击又被当成顶栏双击而误触最大化（方案下拉框需要双击才能展开的根因）。
     /// </summary>
     private void OnTopBarPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (IsTopBarInteractiveSource(e.Source))
+        {
+            return;
+        }
+
         var point = e.GetCurrentPoint(this);
         if (!point.Properties.IsLeftButtonPressed)
         {
@@ -83,6 +89,33 @@ public partial class MainWindow : Window
         {
             // 指针状态或平台实现不允许拖动时忽略，不影响顶栏其它控件。
         }
+    }
+
+    /// <summary>事件源是否落在顶栏内需要自行处理点击的控件上（按钮 / 下拉框 / 输入框 / 滑块等）。</summary>
+    private bool IsTopBarInteractiveSource(object? source)
+    {
+        for (var current = source as Visual; current is not null; current = current.GetVisualParent())
+        {
+            switch (current)
+            {
+                case Avalonia.Controls.ComboBox:
+                case Avalonia.Controls.TextBox:
+                case Avalonia.Controls.Slider:
+                case Avalonia.Controls.Primitives.ScrollBar:
+                case Avalonia.Controls.TabItem:
+                case Avalonia.Controls.Button:
+                    return true;
+                default:
+                    if (ReferenceEquals(current, TopBar))
+                    {
+                        return false;
+                    }
+
+                    break;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
