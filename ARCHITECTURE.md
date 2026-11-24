@@ -30,7 +30,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | WebView 登录 | WebView2（临时用户目录，登录后采集 Cookie） |
 | 平台解析 | 各家 HTTP API + Jint（斗鱼签名、抖音 sign.js）；yt-dlp 作为 YouTube/Twitch 兜底 |
 | 插件签名 | Ed25519（BouncyCastle）+ SHA256 清单校验 |
-| 测试 | xUnit（6 个测试工程，当前共 912 个用例） |
+| 测试 | xUnit（6 个测试工程，当前共 940 个用例） |
 
 ### 平台支持矩阵
 
@@ -488,7 +488,22 @@ Program.Main
 ### 10.5 系统指标与状态栏
 
 - `SystemMetricsService`：定时采样 CPU/GPU/内存与窗口 FPS（通过 `MpvPlayerView` 健康指标），状态栏显示「多路并发、解码状态、GPU/CPU 占用、网络延迟」。
-- 顶栏布局按钮：`一键自适应排布`、`主副屏布局`、`桌面全屏`、`恢复比例`（仅自定义布局时可见）；右侧为平台健康状态、主静音、布局模式文本（自动适配/自定义比例/主副屏）。
+- 顶栏布局按钮：`一键自适应排布`、`主副屏布局`、`自由布局`、`画中画预设`、`桌面全屏`、`恢复比例`（仅自定义布局时可见）；右侧为平台健康状态、主静音、布局模式文本（自动适配/自定义比例/主副屏/自由布局）。
+
+### 10.6 自由画布布局（V0.7）
+
+- 目标：在保留平铺（Dock）布局的同时，提供类似导播台的自由画布——窗格可任意拖动/缩放/重叠、自动磁吸、置顶画中画、锁定，并支持一键预设与方案持久化。
+- `Services/` 纯逻辑层（可单测）：
+  - `FreeformGeometry`：`NormalizedRect(Left/Top/Width/Height)`（0~1 归一化、clamp、像素换算、相交判断）、`ResizeEdge` 八方向枚举、`SnapGuideLine`/`SnapResult`。
+  - `FreeformSnapEngine`：拖动 `SnapMove` 与缩放 `SnapResize`，8px 阈值吸附画布边界/中线与其它窗格边缘/中线/中心；支持最小尺寸、Shift 锁 16:9、Ctrl 临时旁路磁吸。
+  - `FreeformLayoutDocument`：`{"version":2,"mode":"freeform","tiles":[{paneId,liveRoomId,left,top,width,height,zIndex,isPinned,isLocked}]}`，复用 `LayoutProfiles.DockLayoutJson` 列；`LooksLikeFreeform`/`TryParse` 兼容旧 Dock JSON（旧方案按窗格数自动迁移）。
+  - `FreeformLayoutPresets`：`AutoFit`（网格）、`Hero`（主画面 0.72 + 右侧纵列）、`PictureInPicture`（首路铺满 + 2~4 路 0.28×0.28 右下置顶）、`DefaultLanding`（新拖入房间居中错开落位）；`FreeformPreset` 枚举。
+- `Controls/` 交互层：
+  - `FreeformWorkspaceCanvas : Panel`：按归一化矩形 `Measure/Arrange` 窗格（`ContentControl` + 共享 `RoomTileView` 模板）；8px 边缘/10px 角缩放热区、标题栏 30px 或 Alt+左键拖动、右键菜单（置顶画中画/取消置顶、锁定/解锁、置顶/置底、贴合 16:9）、Z 轴普通层 1~999 与置顶层 1000~1999；`LayoutChanged` 事件回写文档。
+  - `SnapGuidesOverlay`：磁吸参考线浮层（蓝普通线 / 琥珀中心线，不参与命中测试）。
+- `MainWindowViewModel` 集成：`IsFreeformMode`/`FreeformDocument`/`WorkspaceTiles` 事件；`EnterFreeformMode`/`ToggleFreeformMode`/`ApplyFreeformPreset`/`UpdateFreeformDocument`；保存方案时自由布局写 v2 JSON（`SerializeCurrentLayout`），加载时自动识别并进入自由模式；`一键自适应排布` 自动退出自由模式。
+- 宿主切换：Dock 与画布互斥显示（`ShowDockWorkspace = !IsWorkspaceEmpty && !IsFreeformMode`）。播放器控件（`MpvPlayerView`）不能同时被两个 `ContentPresenter` 挂载，切换时先 `DetachWorkspacePlayers()`（停止+解绑旧控件）→ 切换宿主并等一轮布局 → `StartWorkspacePlayersAsync()` 重新创建并起播；Dock 在自由模式下保持 `Layout=null`。
+- 顶栏：`自由布局`（开/关，显示当前模式提示）、`画中画预设`（未进入自由布局时先进入再应用）；状态栏显示「已进入/退出自由布局」「已应用自由布局预设」。方案中的自由布局结构与平铺布局共用 `LayoutProfile`，保存/重启后可恢复。
 
 ---
 
@@ -539,7 +554,7 @@ dotnet build LiveMonitor.sln --no-restore
 - 工程目标框架：除 `Desktop`/`Media` 为 `net8.0-windows` 外均为 `net8.0`；测试工程对应同目标框架。
 - 需要 `tools/` 下的 ffmpeg/mpv 才能运行应用（`scripts/fetch-tools.ps1` 自动下载并校验）。
 
-### 13.2 测试（当前 912 个用例）
+### 13.2 测试（当前 940 个用例）
 
 | 测试工程 | 覆盖范围 | 用例数 |
 | --- | --- | --- |
@@ -547,7 +562,7 @@ dotnet build LiveMonitor.sln --no-restore
 | `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退、自定义清流 Provider | 483 |
 | `tests/LiveMonitor.Danmaku.Tests` | 过滤器、高能检测、会话管理 | 98 |
 | `tests/LiveMonitor.Media.Tests` | 录制状态机、分段合并、剪辑导出、波形、FFmpeg 参数协议分支 | 183 |
-| `tests/LiveMonitor.Desktop.Tests` | ViewModel、Dock 布局、登录配置、播放状态文本、录制目标状态 | 110 |
+| `tests/LiveMonitor.Desktop.Tests` | ViewModel、Dock/自由画布布局、登录配置、播放状态文本、录制目标状态 | 138 |
 
 运行方式（使用已构建的测试 dll，避免重复构建）：
 
