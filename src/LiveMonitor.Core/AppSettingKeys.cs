@@ -48,4 +48,8 @@ public static class AppSettingKeys
 
     /// <summary>识别语言；默认 auto（自动检测），与 OpenAI 兼容接口的 language 参数对应。</summary>
     public const string AsrLanguage = "AsrLanguage";
+
+    // V0.5-G Twitch 去广告（方案 B）
+    /// <summary>Twitch 播放列表代理模板（可选）；支持 {channel} 占位符，如 https://eu.luminous.dev/live/{channel} 或 https://proxy.example.com/{channel}.m3u8。留空则不走外部代理。</summary>
+    public const string TwitchPlaylistProxyUrl = "twitch.playlist_proxy_url";
 }

@@ -123,13 +123,17 @@ public sealed class PlatformFactory
         return true;
     }
 
-    public static PlatformFactory CreateDefault(HttpClient? httpClient = null, string? ytDlpPath = null)
+    public static PlatformFactory CreateDefault(
+        HttpClient? httpClient = null,
+        string? ytDlpPath = null,
+        Func<string?>? twitchPlaylistProxyTemplateProvider = null)
     {
         var executable = ToolLocator.ResolveYtDlpPath(ytDlpPath);
         return new PlatformFactory(new IPlatformProvider[]
         {
             new BilibiliProvider(httpClient),
-            new TwitchProvider(executable)
+            // V0.5-G：Twitch 走三层降级（外部去广告代理 → 原生 GQL + Usher → yt-dlp 兜底）。
+            new TwitchProvider(executable, httpClient, twitchPlaylistProxyTemplateProvider)
         });
     }
 

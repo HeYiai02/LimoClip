@@ -152,6 +152,7 @@ public partial class SettingsWindow : Window
 
             await LoadHighlightSettingsAsync();
             await LoadAsrSettingsAsync();
+            await LoadTwitchProxyAsync();
         }
         catch (Exception ex)
         {
@@ -323,6 +324,37 @@ public partial class SettingsWindow : Window
         {
             SetAsrBusy(false, null);
         }
+    }
+
+    /// <summary>读取 Twitch 去广告代理模板（V0.5-G）；留空表示不使用外部代理。</summary>
+    private async Task LoadTwitchProxyAsync()
+    {
+        var template = await _services.Settings.GetAsync(AppSettingKeys.TwitchPlaylistProxyUrl);
+        TwitchProxyBox.Text = template ?? string.Empty;
+        ApplyTwitchProxyTemplate(template);
+    }
+
+    private async void OnSaveTwitchProxy(object? sender, RoutedEventArgs e)
+    {
+        var template = TwitchProxyBox.Text?.Trim() ?? string.Empty;
+        try
+        {
+            await _services.Settings.SetAsync(AppSettingKeys.TwitchPlaylistProxyUrl, template);
+            ApplyTwitchProxyTemplate(template);
+            StatusText.Text = string.IsNullOrWhiteSpace(template)
+                ? "已保存：Twitch 仅使用内置原生播放列表（GQL + Usher）。"
+                : "已保存：Twitch 将优先使用自定义去广告代理。";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"保存 Twitch 代理失败：{ex.Message}";
+        }
+    }
+
+    private static void ApplyTwitchProxyTemplate(string? template)
+    {
+        var normalized = string.IsNullOrWhiteSpace(template) ? null : template.Trim();
+        TwitchAdConfig.PlaylistProxyTemplateProvider = () => normalized;
     }
 
     private async void OnTestAsrConnection(object? sender, RoutedEventArgs e)

@@ -1,3 +1,4 @@
+using LiveMonitor.Core;
 using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Danmaku;
 using LiveMonitor.Data;
@@ -235,10 +236,21 @@ public sealed class AppServices
     {
         var database = await CreateDatabaseAsync(ct).ConfigureAwait(false);
 
-        var platforms = PlatformFactory.CreateDefault();
+        // V0.5-G Twitch 去广告：平台工厂构造时需要共享 HttpClient 与可选的播放列表代理模板，
+        // 因此插件 HttpClient / 设置仓储提前创建；代理模板留空时只走原生 GQL + Usher / yt-dlp。
+        var pluginHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        pluginHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd("LimoClip-PluginHost/1.0.0");
+        var settings = new AppSettingsRepository(database);
+        var twitchProxyTemplate = await settings
+            .GetAsync(AppSettingKeys.TwitchPlaylistProxyUrl, ct)
+            .ConfigureAwait(false);
+        TwitchAdConfig.PlaylistProxyTemplateProvider = () => twitchProxyTemplate;
+
+        var platforms = PlatformFactory.CreateDefault(
+            pluginHttpClient,
+            twitchPlaylistProxyTemplateProvider: () => TwitchAdConfig.PlaylistProxyTemplateProvider?.Invoke());
         var credentials = new CredentialStore(database);
         var blocklist = new BlocklistRepository(database);
-        var settings = new AppSettingsRepository(database);
         var highlightEvents = new HighlightEventRepository(database);
         var danmakuFactory = new DanmakuClientFactory();
         var danmaku = new DanmakuManager(
@@ -303,8 +315,6 @@ public sealed class AppServices
 
         // V0.5-B 平台插件：共享 HttpClient 供插件清单/下载与 yt-dlp 更新检查使用；
         // 先登记内置 B 站/Twitch 插件版本，再加载本地已安装插件（验签失败自动回退内置实现）。
-        var pluginHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-        pluginHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd("LimoClip-PluginHost/1.0.0");
         var ytDlpPath = ToolLocator.ResolveYtDlpPath();
         var pluginHost = new PlatformPluginHost(
             pluginHttpClient,
@@ -317,7 +327,8 @@ public sealed class AppServices
             pluginHost.RegisterBuiltIn(builtInPlugin);
         }
 
-        pluginHost.LoadInstalledPlugins();        var pluginUpdates = new PluginUpdateService(
+        pluginHost.LoadInstalledPlugins();
+        var pluginUpdates = new PluginUpdateService(
             pluginHttpClient,
             pluginHost,
             PluginVersionInfo.Resolve(typeof(AppServices).Assembly));

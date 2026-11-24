@@ -15,7 +15,10 @@ public sealed class TwitchPlugin : IPlatformPlugin
     public string Version => PluginVersionInfo.Resolve(typeof(TwitchPlugin));
 
     public IPlatformProvider CreateStreamProvider(HttpClient httpClient, string ytDlpPath)
-        => new TwitchProvider(ytDlpPath);
+        => new TwitchProvider(
+            ytDlpPath,
+            httpClient,
+            () => TwitchAdConfig.PlaylistProxyTemplateProvider?.Invoke());
 
     public IDanmakuClient? CreateDanmakuClient(
         string roomId,
