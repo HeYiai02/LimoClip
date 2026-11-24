@@ -1,233 +1,413 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="LiveMonitor.Desktop.Views.SettingsWindow"
-        Title="账号与设置"
-        Width="720" Height="620"
-        MinWidth="620" MinHeight="520"
+        Title="设置"
+        Width="900" Height="660"
+        MinWidth="780" MinHeight="560"
         WindowStartupLocation="CenterOwner"
-        Background="#0F1115">
-  <Grid RowDefinitions="Auto,*,Auto" Margin="20">
-    <StackPanel Grid.Row="0" Spacing="2" Margin="0,0,0,14">
-      <TextBlock Text="账号与设置" FontSize="20" FontWeight="SemiBold" Foreground="#E6E8EE" />
-      <TextBlock Text="登录态只保存在本机 DPAPI 加密的 PlatformCredentials 中。"
-                 FontSize="11" Foreground="#7C8596" />
-    </StackPanel>
-
-    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-      <StackPanel Spacing="14">
-        <Border Background="#151923" BorderBrush="#262B36" BorderThickness="1"
-                CornerRadius="8" Padding="14">
-          <StackPanel Spacing="10">
-            <TextBlock Text="平台账号" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
-            <StackPanel x:Name="AccountRowsPanel" Spacing="6" />
-            <TextBlock x:Name="AccountHint" FontSize="10" Foreground="#6B7484"
-                       TextWrapping="Wrap"
-                       Text="支持 B 站 / Twitch / YouTube / 虎牙 / 斗鱼 / 抖音。登录态只保存在本机，使用 DPAPI 加密；YouTube 登录用于 yt-dlp 获取登录态画质，其余平台登录可用于提升画质与风控通过率。" />
+        Background="{DynamicResource BrushBgBase}">
+  <Grid RowDefinitions="*,Auto">
+    <Grid Grid.Row="0" ColumnDefinitions="180,*">
+      <!-- 左侧纵向图标导航 -->
+      <Border Grid.Column="0"
+              Background="{DynamicResource BrushBgCanvas}"
+              BorderBrush="{DynamicResource BrushBorderSubtle}"
+              BorderThickness="0,0,1,0"
+              Padding="10,16,10,12">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Bottom" Spacing="2" Margin="8,12,8,0">
+            <TextBlock Text="LimoClip" FontSize="11" FontWeight="SemiBold"
+                       Foreground="{DynamicResource BrushTextMuted}" />
+            <TextBlock Text="V0.6-A" FontSize="10" Classes="mono"
+                       Foreground="{DynamicResource BrushTextMuted}" />
           </StackPanel>
-        </Border>
 
-        <Border Background="#151923" BorderBrush="#262B36" BorderThickness="1"
-                CornerRadius="8" Padding="14">
-          <StackPanel Spacing="10">
-            <TextBlock Text="语音识别（ASR）" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
-            <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto"
-                  ColumnSpacing="12" RowSpacing="8">
-              <TextBlock Grid.Row="0" Grid.Column="0" Text="识别服务"
-                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
-              <ComboBox Grid.Row="0" Grid.Column="1" x:Name="AsrPresetBox" FontSize="12"
-                        HorizontalAlignment="Stretch" SelectionChanged="OnAsrPresetChanged">
-                <ComboBox.ItemTemplate>
-                  <DataTemplate>
-                    <TextBlock Text="{Binding DisplayName}" FontSize="12"
-                               ToolTip.Tip="{Binding Description}" />
-                  </DataTemplate>
-                </ComboBox.ItemTemplate>
-              </ComboBox>
+          <StackPanel DockPanel.Dock="Top" Spacing="2">
+            <TextBlock Text="设置" FontSize="16" FontWeight="Bold"
+                       Foreground="{DynamicResource BrushTextPrimary}"
+                       Margin="8,0,0,14" />
 
-              <TextBlock Grid.Row="1" Grid.Column="0" Text="接口地址"
-                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
-              <TextBox Grid.Row="1" Grid.Column="1" x:Name="AsrEndpointBox" FontSize="12"
-                       Watermark="https://api.example.com/v1/audio/transcriptions" />
+            <Button x:Name="NavAccount" Classes="settings-nav active" Tag="account"
+                    Click="OnSettingsNav">
+              <StackPanel Orientation="Horizontal" Spacing="9">
+                <PathIcon Data="{DynamicResource IconUser}" Width="14" Height="14" />
+                <TextBlock Text="账号与平台" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
 
-              <TextBlock Grid.Row="2" Grid.Column="0" Text="模型"
-                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
-              <TextBox Grid.Row="2" Grid.Column="1" x:Name="AsrModelBox" FontSize="12"
-                       Watermark="例如 FunAudioLLM/SenseVoiceSmall" />
+            <Button x:Name="NavDanmaku" Classes="settings-nav" Tag="danmaku"
+                    Click="OnSettingsNav">
+              <StackPanel Orientation="Horizontal" Spacing="9">
+                <PathIcon Data="{DynamicResource IconFilter}" Width="14" Height="14" />
+                <TextBlock Text="弹幕与过滤" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
 
-              <TextBlock Grid.Row="3" Grid.Column="0" Text="语言"
-                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
-              <ComboBox Grid.Row="3" Grid.Column="1" x:Name="AsrLanguageBox" FontSize="12"
-                        HorizontalAlignment="Stretch" />
+            <Button x:Name="NavAsr" Classes="settings-nav" Tag="asr"
+                    Click="OnSettingsNav">
+              <StackPanel Orientation="Horizontal" Spacing="9">
+                <PathIcon Data="{DynamicResource IconMic}" Width="14" Height="14" />
+                <TextBlock Text="语音识别" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
 
-              <TextBlock Grid.Row="4" Grid.Column="0" Text="API Key"
-                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
-              <TextBox Grid.Row="4" Grid.Column="1" x:Name="AsrApiKeyBox" FontSize="12"
-                       PasswordChar="●" Watermark="粘贴 API Key" />
-            </Grid>
-            <TextBlock x:Name="AsrPresetDescriptionText" FontSize="10" Foreground="#6B7484"
-                       TextWrapping="Wrap" />
-            <StackPanel Orientation="Horizontal" Spacing="8">
-              <Button x:Name="AsrSaveButton" Content="保存" FontSize="11" Padding="12,4"
-                      Click="OnSaveAsrSettings" />
-              <Button x:Name="AsrTestButton" Content="测试连接" FontSize="11" Padding="10,4"
-                      Click="OnTestAsrConnection" />
-            </StackPanel>
-            <TextBlock x:Name="AsrStatusText" FontSize="10" Foreground="#7C8596"
-                       TextWrapping="Wrap" Text="尚未读取语音识别设置。" />
-            <TextBlock FontSize="10" Foreground="#6B7484" TextWrapping="Wrap"
-                       Text="API Key 使用 Windows DPAPI 加密保存，仅当前 Windows 用户可解密，不会写入日志或明文数据库。「测试连接」只验证当前表单内容、不落盘；自定义服务需填写 OpenAI 兼容的 /audio/transcriptions 接口地址。" />
+            <Button x:Name="NavHighlight" Classes="settings-nav" Tag="highlight"
+                    Click="OnSettingsNav">
+              <StackPanel Orientation="Horizontal" Spacing="9">
+                <PathIcon Data="{DynamicResource IconSpark}" Width="14" Height="14" />
+                <TextBlock Text="高能检测" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+
+            <Button x:Name="NavUpdates" Classes="settings-nav" Tag="updates"
+                    Click="OnSettingsNav">
+              <StackPanel Orientation="Horizontal" Spacing="9">
+                <PathIcon Data="{DynamicResource IconDownload}" Width="14" Height="14" />
+                <TextBlock Text="组件与更新" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
           </StackPanel>
-        </Border>
 
-        <Border Background="#151923" BorderBrush="#262B36" BorderThickness="1"
-                CornerRadius="8" Padding="14">
-          <StackPanel Spacing="10">
-            <TextBlock Text="组件与插件更新" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto" RowDefinitions="Auto,Auto"
-                  ColumnSpacing="10" RowSpacing="8">
-              <TextBlock Grid.Row="0" Grid.Column="0" Text="yt-dlp"
-                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
-              <TextBlock Grid.Row="0" Grid.Column="1" x:Name="YtDlpVersionText" Margin="12,0"
-                         FontSize="11" Foreground="#7C8596" VerticalAlignment="Center"
-                         Text="尚未检查" />
-              <Button Grid.Row="0" Grid.Column="2" x:Name="CheckYtDlpButton" Content="检查更新"
-                      FontSize="11" Padding="10,4" Click="OnCheckYtDlpUpdate" />
-              <Button Grid.Row="0" Grid.Column="3" x:Name="InstallYtDlpButton" Content="下载并更新"
-                      FontSize="11" Padding="10,4" IsEnabled="False" Click="OnInstallYtDlpUpdate" />
+          <Border />
+        </DockPanel>
+      </Border>
 
-              <TextBlock Grid.Row="1" Grid.Column="0" Text="平台插件"
-                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
-              <TextBlock Grid.Row="1" Grid.Column="1" x:Name="PluginUpdateSummaryText" Margin="12,0"
-                         FontSize="11" Foreground="#7C8596" VerticalAlignment="Center"
-                         Text="尚未检查（内置 B 站 / Twitch / YouTube / 虎牙 / 斗鱼 / 抖音）" TextWrapping="Wrap" />
-              <Button Grid.Row="1" Grid.Column="2" x:Name="CheckPluginsButton" Content="检查插件更新"
-                      FontSize="11" Padding="10,4" Click="OnCheckPluginUpdates" />
-              <Button Grid.Row="1" Grid.Column="3" x:Name="InstallPluginsButton" Content="下载并安装"
-                      FontSize="11" Padding="10,4" IsEnabled="False" Click="OnInstallPluginUpdates" />
-            </Grid>
-            <TextBlock x:Name="UpdateStatusText" FontSize="10" Foreground="#7C8596"
-                       TextWrapping="Wrap" Text="更新组件会从 GitHub 下载，需要联网。" />
-            <TextBlock FontSize="10" Foreground="#6B7484" TextWrapping="Wrap"
-                       Text="平台插件包使用 Ed25519 签名校验，验签不通过会被拒绝加载；插件在无录制/弹幕任务时立即生效，否则下次启动生效。yt-dlp 更新会先下载到临时文件并校验，再原子替换 tools 目录内的 exe。" />
-          </StackPanel>
-        </Border>
+      <!-- 右侧内容区 -->
+      <Grid Grid.Column="1" RowDefinitions="Auto,*">
+        <StackPanel Grid.Row="0" Margin="20,16,20,4" Spacing="2">
+          <TextBlock x:Name="PageTitle" Text="账号与平台" FontSize="16" FontWeight="Bold"
+                     Foreground="{DynamicResource BrushTextPrimary}" />
+          <TextBlock x:Name="PageSubtitle" FontSize="11"
+                     Foreground="{DynamicResource BrushTextSecondary}"
+                     TextWrapping="Wrap"
+                     Text="登录态只保存在本机 DPAPI 加密的 PlatformCredentials 中。" />
+        </StackPanel>
 
-        <Border Background="#151923" BorderBrush="#262B36" BorderThickness="1"
-                CornerRadius="8" Padding="14">
-          <StackPanel Spacing="10">
-            <TextBlock Text="弹幕屏蔽词库" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
-            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
-              <TextBox Grid.Column="0" x:Name="KeywordBox"
-                       Watermark="输入要屏蔽的关键词 / 正则表达式" FontSize="12" />
-              <CheckBox Grid.Column="1" x:Name="KeywordIsRegexCheck" Content="正则"
-                        FontSize="11" VerticalAlignment="Center"
-                        ToolTip.Tip="勾选后按 .NET 正则表达式匹配弹幕内容" />
-              <Button Grid.Column="2" Content="添加" FontSize="11" Padding="12,4"
-                      Click="OnAddKeyword" />
-            </Grid>
-            <ListBox x:Name="KeywordList" Height="150" FontSize="11">
-              <ListBox.ItemTemplate>
-                <DataTemplate>
-                  <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Grid.Column="0" Text="{Binding Keyword}" Foreground="#D5DAE4" />
-                    <TextBlock Grid.Column="1" Text="正则" IsVisible="{Binding IsRegex}"
-                               FontSize="10" Foreground="#FB7299" VerticalAlignment="Center" />
+        <Grid Grid.Row="1">
+          <!-- 页：账号与平台 -->
+          <ScrollViewer x:Name="AccountPage" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="12" Margin="20,8,20,16">
+              <Border Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="平台账号" FontSize="13" FontWeight="SemiBold"
+                             Foreground="{DynamicResource BrushTextPrimary}" />
+                  <StackPanel x:Name="AccountRowsPanel" Spacing="2" />
+                  <Border Background="{DynamicResource BrushBgCanvas}" CornerRadius="6"
+                          Padding="10,8">
+                    <TextBlock x:Name="AccountHint" FontSize="10"
+                               Foreground="{DynamicResource BrushTextMuted}"
+                               TextWrapping="Wrap"
+                               Text="支持 B 站 / Twitch / YouTube / 虎牙 / 斗鱼 / 抖音。登录态只保存在本机，使用 DPAPI 加密；YouTube 登录用于 yt-dlp 获取登录态画质，其余平台登录可用于提升画质与风控通过率。" />
+                  </Border>
+                </StackPanel>
+              </Border>
+
+              <Border Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="Twitch 去广告（可选）" FontSize="13" FontWeight="SemiBold"
+                             Foreground="{DynamicResource BrushTextPrimary}" />
+                  <TextBlock FontSize="10" Foreground="{DynamicResource BrushTextSecondary}"
+                             TextWrapping="Wrap"
+                             Text="Twitch 直播流内会插播广告。可填写外部去广告 M3U8 代理模板：用占位符 channel 代表频道名，例如 https://eu.luminous.dev/live/channel。留空时使用内置的原生 GQL + Usher 播放列表（可去广告），失败会自动回退 yt-dlp。" />
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBox Grid.Column="0" x:Name="TwitchProxyBox" FontSize="11"
+                             Watermark="留空 = 仅使用内置原生播放列表（推荐先留空）" />
+                    <Button Grid.Column="1" Content="保存" Classes="subtle-btn"
+                            Padding="14,4" Click="OnSaveTwitchProxy" />
                   </Grid>
-                </DataTemplate>
-              </ListBox.ItemTemplate>
-            </ListBox>
-            <StackPanel Orientation="Horizontal" Spacing="8">
-              <Button Content="删除选中" FontSize="11" Padding="10,4" Click="OnRemoveKeyword" />
-              <CheckBox x:Name="UnicycleToggle" Content="开启独轮车自动屏蔽"
-                        FontSize="11" VerticalAlignment="Center"
-                        Checked="OnUnicycleChanged" Unchecked="OnUnicycleChanged" />
+                  <TextBlock FontSize="10" Foreground="{DynamicResource BrushTextMuted}"
+                             TextWrapping="Wrap"
+                             Text="代理只在播放 Twitch 时使用，不会转发登录 Cookie；代理不可用会自动降级，不影响其它平台。" />
+                </StackPanel>
+              </Border>
+
+              <Border Classes="card">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="安全说明" FontSize="13" FontWeight="SemiBold"
+                             Foreground="{DynamicResource BrushTextPrimary}" />
+                  <TextBlock FontSize="10" Foreground="{DynamicResource BrushTextSecondary}"
+                             TextWrapping="Wrap"
+                             Text="Cookie 等同登录态。登录窗关闭后不会写入日志或数据库明文；DPAPI 仅当前 Windows 用户可解密。" />
+                </StackPanel>
+              </Border>
             </StackPanel>
-            <CheckBox x:Name="DanmakuPreviewToggle" Content="监控画面弹幕预览"
-                      FontSize="11" VerticalAlignment="Center"
-                      Checked="OnDanmakuPreviewChanged" Unchecked="OnDanmakuPreviewChanged" />
-            <CheckBox x:Name="DanmakuStickerToggle" Content="渲染纯表情包弹幕（关闭后仅统计与高能检测）"
-                      FontSize="11" VerticalAlignment="Center"
-                      Checked="OnDanmakuStickerChanged" Unchecked="OnDanmakuStickerChanged" />
-            <CheckBox x:Name="DanmakuEmoteImagesToggle" Content="显示表情图片（静态，多屏时建议关闭）"
-                      FontSize="11" VerticalAlignment="Center"
-                      Checked="OnDanmakuEmoteImagesChanged" Unchecked="OnDanmakuEmoteImagesChanged" />
-            <TextBlock FontSize="10" Foreground="#6B7484" TextWrapping="Wrap"
-                       Text="支持包含匹配与正则（勾选「正则」）。实时过滤已接入 V0.2；独轮车规则仅对 B 站生效。默认行内表情按 [表情] 文本显示、纯大表情包显示为 [表情名]；勾选「显示表情图片」后会把命中表情渲染成静态小图（不跑 GIF/动画）。" />
-          </StackPanel>
-        </Border>
+          </ScrollViewer>
 
-        <Border Background="#151923" BorderBrush="#262B36" BorderThickness="1"
-                CornerRadius="8" Padding="14">
-          <StackPanel Spacing="10">
-            <TextBlock Text="高能事件检测" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
-            <Grid ColumnDefinitions="Auto,140" RowDefinitions="Auto,Auto,Auto,Auto,Auto"
-                  ColumnSpacing="12" RowSpacing="8">
-              <TextBlock Grid.Row="0" Grid.Column="0" Text="短窗（秒）"
-                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
-              <NumericUpDown Grid.Row="0" Grid.Column="1" x:Name="HighlightShortWindow"
-                             Minimum="1" Maximum="600" Increment="1" FormatString="0" FontSize="11" />
-              <TextBlock Grid.Row="1" Grid.Column="0" Text="基线窗（秒）"
-                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
-              <NumericUpDown Grid.Row="1" Grid.Column="1" x:Name="HighlightBaselineWindow"
-                             Minimum="1" Maximum="3600" Increment="10" FormatString="0" FontSize="11" />
-              <TextBlock Grid.Row="2" Grid.Column="0" Text="密度倍数"
-                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
-              <NumericUpDown Grid.Row="2" Grid.Column="1" x:Name="HighlightDensityMultiplier"
-                             Minimum="0.1" Maximum="1000" Increment="0.5" FormatString="0.0##" FontSize="11" />
-              <TextBlock Grid.Row="3" Grid.Column="0" Text="短窗最少条数"
-                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
-              <NumericUpDown Grid.Row="3" Grid.Column="1" x:Name="HighlightMinShortWindowCount"
-                             Minimum="1" Maximum="1000000" Increment="1" FormatString="0" FontSize="11" />
-              <TextBlock Grid.Row="4" Grid.Column="0" Text="冷却（秒）"
-                         FontSize="11" Foreground="#A9B4C6" VerticalAlignment="Center" />
-              <NumericUpDown Grid.Row="4" Grid.Column="1" x:Name="HighlightCooldownSeconds"
-                             Minimum="0" Maximum="86400" Increment="10" FormatString="0" FontSize="11" />
-            </Grid>
-            <TextBlock Text="加权关键词（一行一个，命中后按 1.5 条计）"
-                       FontSize="11" Foreground="#A9B4C6" />
-            <TextBox x:Name="HighlightBoostKeywordsBox" AcceptsReturn="True" TextWrapping="Wrap"
-                     Height="72" FontSize="11" Watermark="666&#10;草&#10;神回&#10;Pog" />
-            <StackPanel Orientation="Horizontal" Spacing="8">
-              <Button Content="保存高能参数" FontSize="11" Padding="12,4" Click="OnSaveHighlight" />
-              <Button Content="恢复默认" FontSize="11" Padding="10,4" Click="OnResetHighlight" />
+          <!-- 页：弹幕与过滤 -->
+          <ScrollViewer x:Name="DanmakuPage" IsVisible="False" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="12" Margin="20,8,20,16">
+              <Border Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="弹幕屏蔽词库" FontSize="13" FontWeight="SemiBold"
+                             Foreground="{DynamicResource BrushTextPrimary}" />
+                  <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                    <TextBox Grid.Column="0" x:Name="KeywordBox"
+                             Watermark="输入要屏蔽的关键词 / 正则表达式" FontSize="12" />
+                    <CheckBox Grid.Column="1" x:Name="KeywordIsRegexCheck" Content="正则"
+                              FontSize="11" VerticalAlignment="Center"
+                              ToolTip.Tip="勾选后按 .NET 正则表达式匹配弹幕内容" />
+                    <Button Grid.Column="2" Content="添加" Classes="primary-btn"
+                            Padding="12,4" Click="OnAddKeyword" />
+                  </Grid>
+                  <ListBox x:Name="KeywordList" Classes="settings-list" Height="160"
+                           FontSize="11">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate>
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBlock Grid.Column="0" Text="{Binding Keyword}"
+                                     Foreground="{DynamicResource BrushTextPrimary}" />
+                          <TextBlock Grid.Column="1" Text="正则" IsVisible="{Binding IsRegex}"
+                                     FontSize="10" Foreground="{DynamicResource BrushWarning}"
+                                     VerticalAlignment="Center" />
+                        </Grid>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="删除选中" Classes="ghost-btn" Padding="10,4"
+                            Click="OnRemoveKeyword" />
+                    <CheckBox x:Name="UnicycleToggle" Content="开启独轮车自动屏蔽"
+                              FontSize="11" VerticalAlignment="Center"
+                              Checked="OnUnicycleChanged" Unchecked="OnUnicycleChanged" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+
+              <Border Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="监控画面弹幕" FontSize="13" FontWeight="SemiBold"
+                             Foreground="{DynamicResource BrushTextPrimary}" />
+                  <CheckBox x:Name="DanmakuPreviewToggle" Content="监控画面弹幕预览"
+                            FontSize="11" VerticalAlignment="Center"
+                            Checked="OnDanmakuPreviewChanged" Unchecked="OnDanmakuPreviewChanged" />
+                  <CheckBox x:Name="DanmakuStickerToggle"
+                            Content="渲染纯表情包弹幕（关闭后仅统计与高能检测）"
+                            FontSize="11" VerticalAlignment="Center"
+                            Checked="OnDanmakuStickerChanged" Unchecked="OnDanmakuStickerChanged" />
+                  <CheckBox x:Name="DanmakuEmoteImagesToggle"
+                            Content="显示表情图片（静态，多屏时建议关闭）"
+                            FontSize="11" VerticalAlignment="Center"
+                            Checked="OnDanmakuEmoteImagesChanged" Unchecked="OnDanmakuEmoteImagesChanged" />
+                  <Border Background="{DynamicResource BrushBgCanvas}" CornerRadius="6"
+                          Padding="10,8">
+                    <TextBlock FontSize="10" Foreground="{DynamicResource BrushTextMuted}"
+                               TextWrapping="Wrap"
+                               Text="支持包含匹配与正则（勾选「正则」）。实时过滤已接入 V0.2；独轮车规则仅对 B 站生效。默认行内表情按 [表情] 文本显示、纯大表情包显示为 [表情名]；勾选「显示表情图片」后会把命中表情渲染成静态小图（不跑 GIF/动画）。" />
+                  </Border>
+                </StackPanel>
+              </Border>
             </StackPanel>
-            <TextBlock FontSize="10" Foreground="#6B7484" TextWrapping="Wrap"
-                       Text="短窗密度达到基线的倍数、且短窗条数与绝对下限达标时触发；触发后进入冷却。参数保存在本机 AppSettings。" />
-          </StackPanel>
-        </Border>
+          </ScrollViewer>
 
-        <Border Background="#151923" BorderBrush="#262B36" BorderThickness="1"
-                CornerRadius="8" Padding="14">
-          <StackPanel Spacing="10">
-            <TextBlock Text="Twitch 去广告（可选）" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
-            <TextBlock FontSize="10" Foreground="#7C8596" TextWrapping="Wrap"
-                       Text="Twitch 直播流内会插播广告。可填写外部去广告 M3U8 代理模板：用占位符 channel 代表频道名，例如 https://eu.luminous.dev/live/channel。留空时使用内置的原生 GQL + Usher 播放列表（可去广告），失败会自动回退 yt-dlp。" />
-            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-              <TextBox Grid.Column="0" x:Name="TwitchProxyBox" FontSize="11"
-                       Watermark="留空 = 仅使用内置原生播放列表（推荐先留空）" />
-              <Button Grid.Column="1" Content="保存" FontSize="11" Padding="14,4" Click="OnSaveTwitchProxy" />
-            </Grid>
-            <TextBlock FontSize="10" Foreground="#6B7484" TextWrapping="Wrap"
-                       Text="代理只在播放 Twitch 时使用，不会转发登录 Cookie；代理不可用会自动降级，不影响其它平台。" />
-          </StackPanel>
-        </Border>
+          <!-- 页：语音识别 -->
+          <ScrollViewer x:Name="AsrPage" IsVisible="False" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="12" Margin="20,8,20,16">
+              <Border Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="语音识别（ASR）" FontSize="13" FontWeight="SemiBold"
+                             Foreground="{DynamicResource BrushTextPrimary}" />
+                  <Grid ColumnDefinitions="96,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                        ColumnSpacing="12" RowSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="识别服务" FontSize="11"
+                               Foreground="{DynamicResource BrushTextSecondary}"
+                               VerticalAlignment="Center" />
+                    <ComboBox Grid.Row="0" Grid.Column="1" x:Name="AsrPresetBox" FontSize="12"
+                              HorizontalAlignment="Stretch" SelectionChanged="OnAsrPresetChanged">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                          <TextBlock Text="{Binding DisplayName}" FontSize="12"
+                                     ToolTip.Tip="{Binding Description}" />
+                        </DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
 
-        <Border Background="#151923" BorderBrush="#262B36" BorderThickness="1"
-                CornerRadius="8" Padding="14">
-          <StackPanel Spacing="4">
-            <TextBlock Text="安全说明" FontSize="13" FontWeight="SemiBold" Foreground="#E6E8EE" />
-            <TextBlock FontSize="10" Foreground="#7C8596" TextWrapping="Wrap"
-                       Text="Cookie 等同登录态。登录窗关闭后不会写入日志或数据库明文；DPAPI 仅当前 Windows 用户可解密。" />
-          </StackPanel>
-        </Border>
-      </StackPanel>
-    </ScrollViewer>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="接口地址" FontSize="11"
+                               Foreground="{DynamicResource BrushTextSecondary}"
+                               VerticalAlignment="Center" />
+                    <TextBox Grid.Row="1" Grid.Column="1" x:Name="AsrEndpointBox" FontSize="12"
+                             Watermark="https://api.example.com/v1/audio/transcriptions" />
 
-    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,14,0,0">
-      <TextBlock x:Name="StatusText" Grid.Column="0" FontSize="11"
-                 Foreground="#7C8596" VerticalAlignment="Center" />
-      <Button Grid.Column="1" Content="关闭" FontSize="12" Padding="18,6"
-              Click="OnClose" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="模型" FontSize="11"
+                               Foreground="{DynamicResource BrushTextSecondary}"
+                               VerticalAlignment="Center" />
+                    <TextBox Grid.Row="2" Grid.Column="1" x:Name="AsrModelBox" FontSize="12"
+                             Watermark="例如 FunAudioLLM/SenseVoiceSmall" />
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="语言" FontSize="11"
+                               Foreground="{DynamicResource BrushTextSecondary}"
+                               VerticalAlignment="Center" />
+                    <ComboBox Grid.Row="3" Grid.Column="1" x:Name="AsrLanguageBox" FontSize="12"
+                              HorizontalAlignment="Stretch" />
+
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="API Key" FontSize="11"
+                               Foreground="{DynamicResource BrushTextSecondary}"
+                               VerticalAlignment="Center" />
+                    <TextBox Grid.Row="4" Grid.Column="1" x:Name="AsrApiKeyBox" FontSize="12"
+                             PasswordChar="●" Watermark="粘贴 API Key" />
+                  </Grid>
+                  <TextBlock x:Name="AsrPresetDescriptionText" FontSize="10"
+                             Foreground="{DynamicResource BrushTextMuted}"
+                             TextWrapping="Wrap" />
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="AsrSaveButton" Content="保存" Classes="primary-btn"
+                            Padding="14,4" Click="OnSaveAsrSettings" />
+                    <Button x:Name="AsrTestButton" Content="测试连接" Classes="subtle-btn"
+                            Padding="12,4" Click="OnTestAsrConnection" />
+                  </StackPanel>
+                  <TextBlock x:Name="AsrStatusText" FontSize="10"
+                             Foreground="{DynamicResource BrushTextSecondary}"
+                             TextWrapping="Wrap" Text="尚未读取语音识别设置。" />
+                  <Border Background="{DynamicResource BrushBgCanvas}" CornerRadius="6"
+                          Padding="10,8">
+                    <TextBlock FontSize="10" Foreground="{DynamicResource BrushTextMuted}"
+                               TextWrapping="Wrap"
+                               Text="API Key 使用 Windows DPAPI 加密保存，仅当前 Windows 用户可解密，不会写入日志或明文数据库。「测试连接」只验证当前表单内容、不落盘；自定义服务需填写 OpenAI 兼容的 /audio/transcriptions 接口地址。" />
+                  </Border>
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </ScrollViewer>
+
+          <!-- 页：高能检测 -->
+          <ScrollViewer x:Name="HighlightPage" IsVisible="False" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="12" Margin="20,8,20,16">
+              <Border Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="检测参数" FontSize="13" FontWeight="SemiBold"
+                             Foreground="{DynamicResource BrushTextPrimary}" />
+                  <Grid ColumnDefinitions="110,140" RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                        ColumnSpacing="12" RowSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="短窗（秒）" FontSize="11"
+                               Foreground="{DynamicResource BrushTextSecondary}"
+                               VerticalAlignment="Center" />
+                    <NumericUpDown Grid.Row="0" Grid.Column="1" x:Name="HighlightShortWindow"
+                                   Minimum="1" Maximum="600" Increment="1" FormatString="0"
+                                   FontSize="11" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="基线窗（秒）" FontSize="11"
+                               Foreground="{DynamicResource BrushTextSecondary}"
+                               VerticalAlignment="Center" />
+                    <NumericUpDown Grid.Row="1" Grid.Column="1" x:Name="HighlightBaselineWindow"
+                                   Minimum="1" Maximum="3600" Increment="10" FormatString="0"
+                                   FontSize="11" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="密度倍数" FontSize="11"
+                               Foreground="{DynamicResource BrushTextSecondary}"
+                               VerticalAlignment="Center" />
+                    <NumericUpDown Grid.Row="2" Grid.Column="1" x:Name="HighlightDensityMultiplier"
+                                   Minimum="0.1" Maximum="1000" Increment="0.5"
+                                   FormatString="0.0##" FontSize="11" />
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="短窗最少条数" FontSize="11"
+                               Foreground="{DynamicResource BrushTextSecondary}"
+                               VerticalAlignment="Center" />
+                    <NumericUpDown Grid.Row="3" Grid.Column="1" x:Name="HighlightMinShortWindowCount"
+                                   Minimum="1" Maximum="1000000" Increment="1" FormatString="0"
+                                   FontSize="11" />
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="冷却（秒）" FontSize="11"
+                               Foreground="{DynamicResource BrushTextSecondary}"
+                               VerticalAlignment="Center" />
+                    <NumericUpDown Grid.Row="4" Grid.Column="1" x:Name="HighlightCooldownSeconds"
+                                   Minimum="0" Maximum="86400" Increment="10" FormatString="0"
+                                   FontSize="11" />
+                  </Grid>
+                </StackPanel>
+              </Border>
+
+              <Border Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="加权关键词" FontSize="13" FontWeight="SemiBold"
+                             Foreground="{DynamicResource BrushTextPrimary}" />
+                  <TextBlock Text="一行一个，命中后按 1.5 条计" FontSize="10"
+                             Foreground="{DynamicResource BrushTextMuted}" />
+                  <TextBox x:Name="HighlightBoostKeywordsBox" AcceptsReturn="True"
+                           TextWrapping="Wrap" Height="80" FontSize="11"
+                           FontFamily="{DynamicResource FontMono}"
+                           Watermark="666&#10;草&#10;神回&#10;Pog" />
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="保存高能参数" Classes="primary-btn" Padding="12,4"
+                            Click="OnSaveHighlight" />
+                    <Button Content="恢复默认" Classes="ghost-btn" Padding="10,4"
+                            Click="OnResetHighlight" />
+                  </StackPanel>
+                  <TextBlock FontSize="10" Foreground="{DynamicResource BrushTextMuted}"
+                             TextWrapping="Wrap"
+                             Text="短窗密度达到基线的倍数、且短窗条数与绝对下限达标时触发；触发后进入冷却。参数保存在本机 AppSettings。" />
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </ScrollViewer>
+
+          <!-- 页：组件与更新 -->
+          <ScrollViewer x:Name="UpdatesPage" IsVisible="False" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="12" Margin="20,8,20,16">
+              <Border Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="yt-dlp" FontSize="13" FontWeight="SemiBold"
+                             Foreground="{DynamicResource BrushTextPrimary}" />
+                  <Grid ColumnDefinitions="96,*,Auto,Auto" ColumnSpacing="10" RowSpacing="8">
+                    <TextBlock Grid.Column="0" Text="本地版本" FontSize="11"
+                               Foreground="{DynamicResource BrushTextSecondary}"
+                               VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" x:Name="YtDlpVersionText" Classes="mono"
+                               Margin="6,0" FontSize="11"
+                               Foreground="{DynamicResource BrushTextSecondary}"
+                               VerticalAlignment="Center" Text="尚未检查" />
+                    <Button Grid.Column="2" x:Name="CheckYtDlpButton" Content="检查更新"
+                            Classes="subtle-btn" Padding="10,4" Click="OnCheckYtDlpUpdate" />
+                    <Button Grid.Column="3" x:Name="InstallYtDlpButton" Content="下载并更新"
+                            Classes="ghost-btn" Padding="10,4" IsEnabled="False"
+                            Click="OnInstallYtDlpUpdate" />
+                  </Grid>
+                  <TextBlock x:Name="UpdateStatusText" FontSize="10"
+                             Foreground="{DynamicResource BrushTextSecondary}"
+                             TextWrapping="Wrap" Text="更新组件会从 GitHub 下载，需要联网。" />
+                </StackPanel>
+              </Border>
+
+              <Border Classes="card">
+                <StackPanel Spacing="10">
+                  <TextBlock Text="平台插件" FontSize="13" FontWeight="SemiBold"
+                             Foreground="{DynamicResource BrushTextPrimary}" />
+                  <Grid ColumnDefinitions="96,*,Auto,Auto" ColumnSpacing="10" RowSpacing="8">
+                    <TextBlock Grid.Column="0" Text="可用更新" FontSize="11"
+                               Foreground="{DynamicResource BrushTextSecondary}"
+                               VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" x:Name="PluginUpdateSummaryText" Classes="mono"
+                               Margin="6,0" FontSize="11"
+                               Foreground="{DynamicResource BrushTextSecondary}"
+                               VerticalAlignment="Center" TextWrapping="Wrap"
+                               Text="尚未检查（内置 B 站 / Twitch / YouTube / 虎牙 / 斗鱼 / 抖音）" />
+                    <Button Grid.Column="2" x:Name="CheckPluginsButton" Content="检查插件更新"
+                            Classes="subtle-btn" Padding="10,4" Click="OnCheckPluginUpdates" />
+                    <Button Grid.Column="3" x:Name="InstallPluginsButton" Content="下载并安装"
+                            Classes="ghost-btn" Padding="10,4" IsEnabled="False"
+                            Click="OnInstallPluginUpdates" />
+                  </Grid>
+                  <Border Background="{DynamicResource BrushBgCanvas}" CornerRadius="6"
+                          Padding="10,8">
+                    <TextBlock FontSize="10" Foreground="{DynamicResource BrushTextMuted}"
+                               TextWrapping="Wrap"
+                               Text="平台插件包使用 Ed25519 签名校验，验签不通过会被拒绝加载；插件在无录制/弹幕任务时立即生效，否则下次启动生效。yt-dlp 更新会先下载到临时文件并校验，再原子替换 tools 目录内的 exe。" />
+                  </Border>
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </ScrollViewer>
+        </Grid>
+      </Grid>
     </Grid>
+
+    <!-- 底部状态与操作栏 -->
+    <Border Grid.Row="1"
+            Background="{DynamicResource BrushBgBase}"
+            BorderBrush="{DynamicResource BrushBorderSubtle}"
+            BorderThickness="0,1,0,0"
+            Padding="20,12">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+        <TextBlock x:Name="StatusText" Grid.Column="0" FontSize="11"
+                   Foreground="{DynamicResource BrushTextSecondary}"
+                   VerticalAlignment="Center" TextWrapping="Wrap" />
+        <Button Grid.Column="1" Content="关闭" Classes="subtle-btn"
+                Padding="18,6" FontSize="12" Click="OnClose" />
+      </Grid>
+    </Border>
   </Grid>
 </Window>

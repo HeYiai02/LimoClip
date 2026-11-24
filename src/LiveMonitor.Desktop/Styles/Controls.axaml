@@ -154,6 +154,67 @@
     <Setter Property="BorderBrush" Value="#4D3B82F6" />
   </Style>
 
+  <!-- 通用分组卡片（设置窗、录制中心、剪辑台共用） -->
+  <Style Selector="Border.card">
+    <Setter Property="Background" Value="{DynamicResource BrushBgSurface}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSubtle}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="16,14" />
+  </Style>
+
+  <!-- 设置窗左侧纵向导航项 -->
+  <Style Selector="Button.settings-nav">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Padding" Value="9,8" />
+    <Setter Property="Margin" Value="0,0,0,2" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="Foreground" Value="{DynamicResource BrushTextSecondary}" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+        <BrushTransition Property="Foreground" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.settings-nav:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
+    <Setter Property="Foreground" Value="{DynamicResource BrushTextPrimary}" />
+  </Style>
+  <Style Selector="Button.settings-nav.active">
+    <Setter Property="Foreground" Value="#BFDBFE" />
+  </Style>
+  <Style Selector="Button.settings-nav.active /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrushAccentSoft}" />
+    <Setter Property="Foreground" Value="#BFDBFE" />
+  </Style>
+
+  <!-- 设置窗内的紧凑列表（屏蔽词库等） -->
+  <Style Selector="ListBox.settings-list">
+    <Setter Property="Background" Value="{DynamicResource BrushBgCanvas}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushBorderSubtle}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Padding" Value="4" />
+  </Style>
+  <Style Selector="ListBox.settings-list ListBoxItem">
+    <Setter Property="Padding" Value="8,5" />
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="ListBox.settings-list ListBoxItem:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
+  </Style>
+  <Style Selector="ListBox.settings-list ListBoxItem:selected /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource BrushAccentSoft}" />
+  </Style>
+
   <!-- 列表行内编辑/删除图标按钮 -->
   <Style Selector="Button.room-action">
     <Setter Property="Background" Value="Transparent" />

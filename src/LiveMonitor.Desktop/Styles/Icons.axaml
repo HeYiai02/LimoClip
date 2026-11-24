@@ -46,4 +46,16 @@
   <!-- 品牌播放三角 -->
   <StreamGeometry x:Key="IconBrandPlay">M8 5.5v13l11-6.5L8 5.5z</StreamGeometry>
 
+  <!-- 设置窗导航：账号与平台 -->
+  <StreamGeometry x:Key="IconUser">M12 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM4 21a8 8 0 0 1 16 0H4z</StreamGeometry>
+
+  <!-- 设置窗导航：弹幕与过滤（漏斗） -->
+  <StreamGeometry x:Key="IconFilter">M3 4h18l-7 8v7l-4-2v-5L3 4z</StreamGeometry>
+
+  <!-- 设置窗导航：语音识别（麦克风） -->
+  <StreamGeometry x:Key="IconMic">M12 2a3.5 3.5 0 0 1 3.5 3.5v5a3.5 3.5 0 0 1-7 0v-5A3.5 3.5 0 0 1 12 2zM11 16h2v4h3v2H8v-2h3v-4z</StreamGeometry>
+
+  <!-- 设置窗导航：组件与更新（下载） -->
+  <StreamGeometry x:Key="IconDownload">M11 3h2v10h3.5L12 20.5 7.5 13H11V3zM4 21h16v1.5H4V21z</StreamGeometry>
+
 </ResourceDictionary>

@@ -25,9 +25,19 @@ public partial class SettingsWindow : Window
     /// <summary>ASR 语言下拉项与持久化 Id 一一对应（下标相同）。</summary>
     private static readonly string[] AsrLanguageIds = { "auto", "zh", "en", "ja", "ko" };
     private static readonly string[] AsrLanguageNames = { "自动检测", "中文", "英文", "日文", "韩文" };
-    private static readonly IBrush AsrNeutralBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#7C8596"));
-    private static readonly IBrush AsrSuccessBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#4ADE80"));
-    private static readonly IBrush AsrErrorBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#F87171"));
+    private static readonly IBrush AsrNeutralBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#94A3B8"));
+    private static readonly IBrush AsrSuccessBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#22C55E"));
+    private static readonly IBrush AsrErrorBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#EF4444"));
+
+    /// <summary>左侧设置分组：Key 对应导航按钮 Tag，标题/副标题显示在右侧页头。</summary>
+    private static readonly (string Key, string Title, string Subtitle)[] SettingsPages =
+    {
+        ("account", "账号与平台", "登录态只保存在本机 DPAPI 加密的 PlatformCredentials 中。"),
+        ("danmaku", "弹幕与过滤", "屏蔽词、独轮车与监控画面弹幕渲染开关都集中在这里。"),
+        ("asr", "语音识别（ASR）", "为剪辑台生成逐字稿；API Key 使用 DPAPI 加密保存。"),
+        ("highlight", "高能事件检测", "按短窗弹幕密度与基线倍率自动记录打点。"),
+        ("updates", "组件与更新", "yt-dlp 与平台插件的版本检查、下载与验签。"),
+    };
 
     private bool _loading;
 
@@ -52,6 +62,7 @@ public partial class SettingsWindow : Window
     public SettingsWindow()
     {
         InitializeComponent();
+        SelectSettingsPage("account");
     }
 
     public SettingsWindow(AppServices services) : this()
@@ -85,14 +96,14 @@ public partial class SettingsWindow : Window
             {
                 Text = profile.DisplayName,
                 FontSize = 12,
-                Foreground = new SolidColorBrush(Color.Parse("#A9B4C6")),
+                Foreground = new SolidColorBrush(Color.Parse("#F1F5F9")),
                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
             };
             var status = new TextBlock
             {
                 Text = "未绑定",
                 FontSize = 11,
-                Foreground = new SolidColorBrush(Color.Parse("#7C8596")),
+                Foreground = new SolidColorBrush(Color.Parse("#64748B")),
                 Margin = new Thickness(12, 0, 12, 0),
                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
             };
@@ -103,6 +114,7 @@ public partial class SettingsWindow : Window
                 Padding = new Thickness(10, 4),
                 Tag = profile.Platform,
             };
+            login.Classes.Add("subtle-btn");
             login.Click += OnPlatformLogin;
             var clear = new Button
             {
@@ -112,6 +124,7 @@ public partial class SettingsWindow : Window
                 Margin = new Thickness(6, 0, 0, 0),
                 Tag = profile.Platform,
             };
+            clear.Classes.Add("ghost-btn");
             clear.Click += OnPlatformClear;
 
             Grid.SetColumn(name, 0);
@@ -866,6 +879,46 @@ public partial class SettingsWindow : Window
     }
 
     private void OnClose(object? sender, RoutedEventArgs e) => Close();
+
+    private void OnSettingsNav(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string key })
+        {
+            SelectSettingsPage(key);
+        }
+    }
+
+    /// <summary>切换左侧设置分组：只切换可见性，不重建控件（保留各页滚动位置与表单状态）。</summary>
+    private void SelectSettingsPage(string key)
+    {
+        var pages = new (string Key, Button Nav, ScrollViewer Page)[]
+        {
+            ("account", NavAccount, AccountPage),
+            ("danmaku", NavDanmaku, DanmakuPage),
+            ("asr", NavAsr, AsrPage),
+            ("highlight", NavHighlight, HighlightPage),
+            ("updates", NavUpdates, UpdatesPage),
+        };
+
+        foreach (var (pageKey, nav, page) in pages)
+        {
+            bool active = string.Equals(pageKey, key, StringComparison.Ordinal);
+            nav.Classes.Set("active", active);
+            page.IsVisible = active;
+        }
+
+        foreach (var (pageKey, title, subtitle) in SettingsPages)
+        {
+            if (!string.Equals(pageKey, key, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            PageTitle.Text = title;
+            PageSubtitle.Text = subtitle;
+            break;
+        }
+    }
 
     /// <summary>组件与插件更新分区状态文本的语气（决定前景色）。</summary>
     private enum UpdateStatusKind
