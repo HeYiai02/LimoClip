@@ -332,8 +332,10 @@ public sealed class TwitchProvider : IPlatformProvider
         string? authToken,
         CancellationToken ct)
     {
-        // 带登录态时用 site（可拿订阅画质）；匿名时用 embed（服务端限制最少）。
-        var playerType = string.IsNullOrWhiteSpace(authToken) ? "embed" : "site";
+        // 实测（2026-11-24，约 130 秒连续采样）：site / popout / mobile_web 的 media playlist 会拼接
+        // twitch-stitched-ad（30 秒广告），而 embed 通道始终只返回直播源（X-TV-TWITCH-STREAM-SOURCE="live"），
+        // 因此这里固定用 embed，避免直播中插入 SSAI 广告。
+        const string playerType = "embed";
         var payload = new object[]
         {
             new

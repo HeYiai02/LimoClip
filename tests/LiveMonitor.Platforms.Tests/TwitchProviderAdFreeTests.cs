@@ -102,7 +102,7 @@ public sealed class TwitchProviderAdFreeTests
     }
 
     [Fact]
-    public async Task GetRoomStatus_WithAuthCookie_UsesSitePlayerTypeAndAuthorizationHeader()
+    public async Task GetRoomStatus_WithAuthCookie_UsesEmbedPlayerTypeAndAuthorizationHeader()
     {
         string? tokenAuthorization = null;
         string? tokenRequestBody = null;
@@ -133,7 +133,8 @@ public sealed class TwitchProviderAdFreeTests
         Assert.Equal("ESL 直播", status.Title);
         Assert.Equal("ESLCS", status.AnchorName);
         Assert.Equal("OAuth abc123", tokenAuthorization);
-        Assert.Contains("\"playerType\":\"site\"", tokenRequestBody, StringComparison.Ordinal);
+        // 实测 site/popout/mobile_web 会拼接 SSAI 广告，embed 不拼，因此固定使用 embed。
+        Assert.Contains("\"playerType\":\"embed\"", tokenRequestBody, StringComparison.Ordinal);
         Assert.NotNull(usherUrl);
         Assert.Contains("usher.ttvnw.net", usherUrl, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("allow_source=true", usherUrl, StringComparison.Ordinal);
