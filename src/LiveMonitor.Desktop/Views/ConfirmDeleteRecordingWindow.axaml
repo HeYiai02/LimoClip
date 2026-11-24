@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:LiveMonitor.Desktop.ViewModels"
         x:Class="LiveMonitor.Desktop.Views.ConfirmDeleteRecordingWindow"
+        Icon="avares://LiveMonitor.Desktop/Assets/AppIcon.ico"
         Title="删除录制记录"
         Width="580"
         SizeToContent="Height"

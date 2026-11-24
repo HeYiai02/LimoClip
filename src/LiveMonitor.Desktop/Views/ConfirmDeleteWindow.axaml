@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="LiveMonitor.Desktop.Views.ConfirmDeleteWindow"
+        Icon="avares://LiveMonitor.Desktop/Assets/AppIcon.ico"
         Title="从主库删除"
         Width="440"
         SizeToContent="Height"
