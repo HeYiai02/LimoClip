@@ -531,3 +531,19 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 ### 新 session 首条消息（V0.5-H 后）
 
 - V0.5-H 已完成并验收：桌面全屏/焦点模式鼠标空闲自动隐藏窗格控制条与顶部提示、F11 单次切换；Twitch 原生播放通道固定 embed 参数规避流内插播广告（实测无 Commercial break），全量测试 **875 全绿**，HEAD 为 V0.5-H 收尾提交（功能提交 `b18546d`、`5c40845`）。下一步可选：Twitch 长时间播放观察（广告时段/频道切换）、焦点模式沉浸隐藏回归、其它平台录制回归、发布 v0.5.0 Release、抖音 sign.js 离线化。
+
+## V0.5.0 正式版发布（2026-11-24）
+
+### 状态
+
+- 用户要求「发布新的 Release；更新 README 与产品页平台支持」。已完成：
+  - `README.md`：平台支持表更新为六平台（Twitch 改为原生 GQL+Usher（去广告 embed）/ yt-dlp 兜底；虎牙/斗鱼/抖音 账号登录改为 ✅ WebView2 登录 + Cookie 注入）；新增「近期版本亮点（V0.5 系列）」；快速开始登录提示改为六平台；打包示例版本改 `v0.5.0`。
+  - `docs/index.html`：平台支持区从「演进路线」改为「平台支持」，六张平台卡片全部 `ready` 并标注版本（YouTube V0.5-B，虎牙/斗鱼/抖音 V0.5-C，Twitch 标注原生通道已去广告）；特性区新增三张 V0.5 卡片（六平台插件热更新、主副屏与桌面全屏、Twitch 原生通道去广告）。
+  - 提交 `9b06446 docs: README 与产品页平台支持更新为六平台，并补充 V0.5 新特性` 并推送（`8776c1e..9b06446`）。
+- 重新打包（基于 HEAD `9b06446`）：`scripts/package-release.ps1 -Version v0.5.0 -SkipTests` → `artifacts/LimoClip-v0.5.0-win-x64.zip` **199,868,970B（190.61MB）**，SHA256 **`564e69e47dee49bd37128f32405524cbe3217fb8b5ea99b791718c24fc67ab76`**，zip 546 条目，含 `LiveMonitor.Plugins.{YouTube,Huya,Douyu,Douyin}.dll`，无 `sign.js`。
+- GitHub Release：`https://github.com/HeYiai02/LimoClip/releases/tag/v0.5.0`（正式版，`prerelease=false`、`make_latest=true`），tag 指向 `9b06446`；资产：`LimoClip-v0.5.0-win-x64.zip`（199,868,970B）+ `SHA256SUMS.txt`（95B）；旧 `v0.5.0-beta.1` 保留为 prerelease。发布脚本模板见 `.cache/create-release.ps1`，本次使用派生脚本并跑通。
+- 验证：GitHub API `/releases?per_page=1` 返回 `v0.5.0`；GitHub Pages 已部署新版（页面含「六平台全部内置」「V0.5-C」，无「规划中」）；发布说明中注明本次构建 875 个测试通过。
+
+### 新 session 首条消息（V0.5.0 发布后）
+
+- v0.5.0 正式版已发布（tag `v0.5.0`，Release 含 zip 199,868,970B + SHA256SUMS，产品页与 README 已同步六平台支持）；HEAD `9b06446`，全量测试 **875 全绿**。下一步可选：下载 Release 包做一次干净机器冒烟、Twitch 长时间播放观察、虎牙长时录制回归、抖音 sign.js 离线化。
