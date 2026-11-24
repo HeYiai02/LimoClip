@@ -110,6 +110,23 @@
     <Setter Property="BorderBrush" Value="{DynamicResource BrushAccentHover}" />
   </Style>
 
+  <!-- 危险操作按钮（删除类确认对话框） -->
+  <Style Selector="Button.danger-btn">
+    <Setter Property="Background" Value="{DynamicResource BrushDangerSoft}" />
+    <Setter Property="BorderBrush" Value="#66EF4444" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Padding" Value="10,4" />
+    <Setter Property="Foreground" Value="#FCA5A5" />
+    <Setter Property="FontSize" Value="11.5" />
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
+  <Style Selector="Button.danger-btn:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="#33EF4444" />
+    <Setter Property="BorderBrush" Value="#99EF4444" />
+    <Setter Property="Foreground" Value="#FEE2E2" />
+  </Style>
+
   <!-- 左侧分组筛选胶囊（保持 group-pill / active 类名兼容后台代码） -->
   <Style Selector="Button.group-pill">
     <Setter Property="Background" Value="{DynamicResource BrushBgElevated}" />
