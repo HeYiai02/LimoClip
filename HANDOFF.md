@@ -1,10 +1,10 @@
-# LiveMonitor 交接（截至 V0.5-H：桌面全屏沉浸模式 + Twitch embed 去广告；V0.5-G 侧栏分组/桌面全屏/主副屏布局 + Twitch 三层降级；V0.5-F 虎牙断流修复；V0.5-A/B/C 已完成并打包；含本机运行规避方案）
+# LiveMonitor 交接（截至 V0.5-I：插件大陆镜像方案 B；V0.5.0 正式版已发布；V0.5-H 桌面全屏沉浸模式 + Twitch embed 去广告；V0.5-G 侧栏分组/桌面全屏/主副屏布局 + Twitch 三层降级；V0.5-F 虎牙断流修复；V0.5-A/B/C 已完成并打包；含本机运行规避方案）
 
 ## 状态
 
-- 分支 `main`；**当前 HEAD 为 V0.5-H 收尾提交（桌面全屏沉浸模式 + Twitch embed 去广告；功能提交 `b18546d`、`5c40845`，本文档提交紧随其后）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避、波形修复、产品侧加固、V0.5-B 六次提交、V0.5-C Step6/Step7/Step8/Step9 各两次提交、V0.5-D 两次功能提交、V0.5-E 三次提交（虎牙 Cookie/线路/画质、斗鱼+抖音 Cookie、HANDOFF）、V0.5-F 一次提交（分段录制 + 重叠裁剪）、V0.5-G 两次功能提交（界面与布局、Twitch 去广告）、V0.5-H 两次功能提交（沉浸模式自动隐藏、Twitch embed 去广告），提交清单见文末各节。
+- 分支 `main`；**当前 HEAD 为 V0.5-I 收尾提交（插件大陆镜像方案 B）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避、波形修复、产品侧加固、V0.5-B 六次提交、V0.5-C Step6/Step7/Step8/Step9 各两次提交、V0.5-D 两次功能提交、V0.5-E 三次提交（虎牙 Cookie/线路/画质、斗鱼+抖音 Cookie、HANDOFF）、V0.5-F 一次提交（分段录制 + 重叠裁剪）、V0.5-G 两次功能提交（界面与布局、Twitch 去广告）、V0.5-H 两次功能提交（沉浸模式自动隐藏、Twitch embed 去广告）、V0.5.0 发布两次提交（`9b06446` 文档/产品页、`042aa87` HANDOFF）、V0.5-I 一次功能提交（插件镜像 + 工具链），提交清单见文末各节。
 - 构建：`dotnet build LiveMonitor.sln --no-restore` → **0 错误**，8~14 警告（MSB3277 / NU1803 / NU1900 等，均为本机环境既有告警，无新增代码告警）。
-- 测试：Data 37 / Platforms **453** / Danmaku 98 / Media **178** / Desktop **109** = **875 全绿**（V0.4 基线 471；V0.5-A +7 Media、+18 Desktop；产品侧加固 +17 Media；V0.5-B +125 Platforms、+2 Media；V0.5-C Step6 虎牙 +65 Platforms、Step7 斗鱼 +63 Platforms、Step8 抖音 +64 Platforms、http 流 ca_file 修复 +2 Media；V0.5-D +2 断流状态文案 +6 六平台登录配置；V0.5-E +11 Platforms（三平台 Cookie 接入）；V0.5-F +10 Media（分段录制 + 重叠裁剪 + 时长实测）；V0.5-G +5 Platforms（Twitch 去广告三层降级）+3 Desktop（主副屏布局单测））。
+- 测试：Data 37 / Platforms **457** / Danmaku 98 / Media **178** / Desktop **109** = **879 全绿**（V0.4 基线 471；V0.5-A +7 Media、+18 Desktop；产品侧加固 +17 Media；V0.5-B +125 Platforms、+2 Media；V0.5-C Step6 虎牙 +65 Platforms、Step7 斗鱼 +63 Platforms、Step8 抖音 +64 Platforms、http 流 ca_file 修复 +2 Media；V0.5-D +2 断流状态文案 +6 六平台登录配置；V0.5-E +11 Platforms（三平台 Cookie 接入）；V0.5-F +10 Media（分段录制 + 重叠裁剪 + 时长实测）；V0.5-G +5 Platforms（Twitch 去广告三层降级）+3 Desktop（主副屏布局单测）；V0.5-H 无新增测试；V0.5-I +4 Platforms（镜像字段解析/校验 + 主地址失败回退镜像下载））。
 - 验收：V0.4 GUI 端到端通过（脚本 `.cache/v04-acceptance2.ps1`，证据 `.cache/v04b-*.png`）；V0.5-A 完成真实 API 验证（55s 音频约 11s 返回，见「V0.5-A 增量」）；本机运行规避后完成真实 GUI 录制/打开目录/ASR 验证；**V0.5-B 阶段验收通过**（YouTube 添加/监控/录制 49.97s（含音频）/剪辑波形/双版导出（含音频）/ASR，见「V0.5-B 增量」）；V0.5-C Step6 虎牙：插件、协议单测与真实探针（拉流状态 + 20s 内 86 条弹幕）通过，但本机为海外出口、虎牙 CDN 对海外网络限流，GUI 播放/录制未能完整验证（见「V0.5-C 增量」）；V0.5-C Step7 斗鱼：插件、协议单测、真实探针与 **GUI 全链路验收通过**（真实录制 56.8s/11.4MB 含音频 + 72 条弹幕、剪辑台波形与混流、双版导出均含音频，见「V0.5-C 增量（Step7 斗鱼）」）。
 - 实现依据：`limoclip_v0_4.md`（V0.4）、`limoclip_v0_5_asr.md`（V0.5-A/B，已按实现修订 P0 偏差）；`code_artifact.md` 已更新为 v2.1。
 - **V0.5-B 已完成并通过阶段 B 验收；V0.5-C 已全部完成：Step6 虎牙、Step7 斗鱼、Step8 抖音（三个平台插件 + 单测 + 真实探针，斗鱼/抖音 GUI 全链路验收通过；虎牙 GUI 受本机海外网络限流未完整验证）、Step9 六平台联调与 v0.5.0 打包已完成**（`artifacts/LimoClip-v0.5.0-win-x64.zip` 190.58MB，SHA256 `0fda2c4e…1b43ed`，冒烟启动通过）。恢复开发先读本文件「新 session 首条消息」「V0.5-B 增量」「V0.5-C 增量」。多轨 NLE 只评估、不实现。
@@ -547,3 +547,19 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 ### 新 session 首条消息（V0.5.0 发布后）
 
 - v0.5.0 正式版已发布（tag `v0.5.0`，Release 含 zip 199,868,970B + SHA256SUMS，产品页与 README 已同步六平台支持）；HEAD `9b06446`，全量测试 **875 全绿**。下一步可选：下载 Release 包做一次干净机器冒烟、Twitch 长时间播放观察、虎牙长时录制回归、抖音 sign.js 离线化。
+
+## V0.5-I 增量（2026-11-24）：插件大陆镜像（方案 B）
+
+### 状态
+
+- 来源：用户要求按 Runbook 以「方案 B」落地插件大陆镜像（原 Runbook `C:\Users\Administrator\Downloads\plugin_hotfix_runbook.md` 已不在，按用户给出的镜像地址与既有实现落地）。
+- ① 清单镜像：`PluginTrust.ManifestMirrorUrl` 配置为 Gitee Raw 地址 `https://gitee.com/HeYiai/limoclip-plugins/raw/master/providers-manifest.json`（`ManifestUrls()` 顺序：GitHub Raw → Gitee Raw，逐个尝试、任一成功即用；每次尝试 12s 超时，避免被墙网络卡满 30s 总超时）。
+- ② 插件 DLL 镜像：`ProviderPluginEntry` 新增可选 `mirrorDownloadUrl`（https 绝对地址，`Validate()` 校验）；`PluginUpdateService.DownloadPluginPayloadAsync` 先试 `downloadUrl`、主地址失败自动回退 `mirrorDownloadUrl`（每次 30s 超时），全部失败抛出「下载插件失败：…」；SHA256 与 Ed25519 验签始终使用清单同一份条目值（镜像被替换会验签失败，不会被加载）。
+- ③ 工具链：`scripts/PluginSigner` 新增 `--mirror-download-url`，清单条目写入 `mirrorDownloadUrl`；`scripts/sign-plugin.ps1`、`scripts/build-plugins.ps1` 新增 `-MirrorDownloadUrl` 透传，并更新「下一步」提示（GitHub Release + Gitee 镜像 + 同步 Gitee 清单 + 提交清单）。
+- ④ 文档：`plugins/README.md` 清单示例补 `mirrorDownloadUrl`，新增「大陆镜像（方案 B）」章节（回退顺序、Gitee 仓库 `HeYiai/limoclip-plugins` 同结构、`/blob/` 与 `/raw/` 区别、签名安全边界）。
+- 验证：Gitee Raw 清单地址实测 HTTP 200 且内容与仓库空清单一致（HTTP 200）；Gitee 用户页 200；`dotnet build LiveMonitor.sln --no-restore` 0 错误 15 警告（既有）；`scripts/PluginSigner` Release 构建 0 错误 0 警告；五套测试 **879 全绿**（Data 37 / Platforms 457 / Danmaku 98 / Media 178 / Desktop 109；新增 4 个 Platforms 用例：镜像字段解析/校验 2 + 主地址失败回退/双失败 2）。
+- 注意：Data 测试必须用 `tests\LiveMonitor.Data.Tests\bin\Debug\net8.0-windows\LiveMonitor.Data.Tests.dll`（`net8.0` 下有 11/21 过期 dll 只有 8 个测试）。
+
+### 新 session 首条消息（V0.5-I 后）
+
+- V0.5-I 已完成：插件大陆镜像方案 B 落地（GitHub Raw 清单失败自动回退 Gitee Raw；插件 DLL 主地址失败回退 `mirrorDownloadUrl`；签名/验签沿用同一清单条目；工具链支持 `--mirror-download-url` / `-MirrorDownloadUrl`），全量测试 **879 全绿**，HEAD 为 V0.5-I 收尾提交（V0.5.0 正式版已发布于 tag `v0.5.0`）。下一步可选：发布首个真实签名插件并双端（GitHub/Gitee）同步、镜像回退真机联网验证（断网 GitHub 场景）、抖音 sign.js 离线化、Twitch 长时播放观察。
