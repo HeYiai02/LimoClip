@@ -26,10 +26,11 @@ public sealed class FreeformWorkspaceCanvas : Panel
 {
     private const double ResizeEdgeHitPx = 6;
     private const double ResizeCornerHitPx = 10;
-    private const double HeaderDragHeightPx = 30;
+    private const double DragThresholdPx = 3;
     private const double PinnedZBase = 1000;
     private const int NormalZMax = 999;
     private const int PinnedZMax = 1999;
+    private const int DraggingZIndex = 5000;
 
     private readonly Dictionary<string, FreeformTilePlacement> _placements = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ContentControl> _childByPaneId = new(StringComparer.Ordinal);
@@ -39,6 +40,9 @@ public sealed class FreeformWorkspaceCanvas : Panel
     private static readonly IDataTemplate TileTemplate = new FuncDataTemplate<RoomTileViewModel>(
         (tile, _) => tile is null ? null : new RoomTileView { DataContext = tile });
 
+    private string? _pendingPaneId;
+    private DragKind _pendingKind;
+    private ResizeEdge _pendingEdge;
     private string? _activePaneId;
     private FreeformTilePlacement? _activePlacement;
     private NormalizedRect _originRect;
@@ -46,12 +50,21 @@ public sealed class FreeformWorkspaceCanvas : Panel
     private DragKind _dragKind;
     private ResizeEdge _resizeEdge;
     private bool _isFirstArrange = true;
+    private bool _hasMoved;
+    private IPointer? _capturedPointer;
 
     public FreeformWorkspaceCanvas()
     {
         ClipToBounds = true;
         _overlay.ZIndex = 9999;
         Children.Add(_overlay);
+
+        // 用 Tunnel + handledEventsToo 接管指针：窗格内部控件（RoomTileView 的点击/双击处理）会
+        // 把事件标记为已处理，普通冒泡阶段收不到，拖动就会完全无反应。
+        AddHandler(PointerPressedEvent, OnCanvasPointerPressed, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerMovedEvent, OnCanvasPointerMoved, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerReleasedEvent, OnCanvasPointerReleased, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerCaptureLostEvent, OnCanvasCaptureLost, RoutingStrategies.Tunnel, handledEventsToo: true);
     }
 
     /// <summary>布局被拖动/缩放/层级调整后触发，供 ViewModel 标脏与保存。</summary>
@@ -226,65 +239,68 @@ public sealed class FreeformWorkspaceCanvas : Panel
         return finalSize;
     }
 
-    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    private void OnCanvasPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        base.OnPointerPressed(e);
-
         var point = e.GetCurrentPoint(this);
         if (!point.Properties.IsLeftButtonPressed && !point.Properties.IsRightButtonPressed)
         {
             return;
         }
 
-        if (IsInteractiveSource(e.Source))
+        if (IsInteractiveChildSource(e.Source))
         {
             return;
         }
 
-        var paneId = FindTopmostPaneAt(e.GetPosition(this));
+        var position = e.GetPosition(this);
+        var paneId = FindTopmostPaneAt(position);
         if (paneId is null || !_placements.TryGetValue(paneId, out var placement))
         {
             return;
         }
 
-        BringToFront(paneId);
-
         if (point.Properties.IsRightButtonPressed)
         {
-            ShowTileMenu(paneId, e.GetPosition(this));
+            ShowTileMenu(paneId, position);
             e.Handled = true;
             return;
         }
+
+        BringToFront(paneId);
 
         if (placement.IsLocked)
         {
             return;
         }
 
-        var position = e.GetPosition(this);
-        var edge = HitTestResizeEdge(placement, position);
-        if (edge != ResizeEdge.None)
-        {
-            BeginDrag(paneId, placement, DragKind.Resize, position);
-            _resizeEdge = edge;
-            e.Pointer.Capture(this);
-            e.Handled = true;
-            return;
-        }
-
-        if (IsHeaderDragZone(placement, position) || e.KeyModifiers.HasFlag(KeyModifiers.Alt))
-        {
-            BeginDrag(paneId, placement, DragKind.Move, position);
-            e.Pointer.Capture(this);
-            e.Handled = true;
-        }
+        // 延迟到指针真正移动超过阈值后才开始拖动：这样单击/双击仍然交给 RoomTileView 处理，
+        // 不会因为抢占指针而丢掉点击语义。
+        _pressPoint = position;
+        _pendingPaneId = paneId;
+        _pendingEdge = HitTestResizeEdge(placement, position);
+        _pendingKind = _pendingEdge == ResizeEdge.None ? DragKind.Move : DragKind.Resize;
+        _originRect = placement.ToRect();
     }
 
-    protected override void OnPointerMoved(PointerEventArgs e)
+    private void OnCanvasPointerMoved(object? sender, PointerEventArgs e)
     {
-        base.OnPointerMoved(e);
-
         var position = e.GetPosition(this);
+
+        if (_pendingPaneId is not null)
+        {
+            var dx = position.X - _pressPoint.X;
+            var dy = position.Y - _pressPoint.Y;
+            if (!_hasMoved && dx * dx + dy * dy < DragThresholdPx * DragThresholdPx)
+            {
+                return;
+            }
+
+            if (!_hasMoved)
+            {
+                BeginDrag(e.Pointer);
+            }
+        }
+
         if (_activePlacement is null || _activePaneId is null || _dragKind == DragKind.None)
         {
             UpdateCursor(position);
@@ -329,30 +345,69 @@ public sealed class FreeformWorkspaceCanvas : Panel
 
         _activePlacement.SetRect(result.Rect);
         _overlay.SetGuides(result.Guides);
+        _overlay.SetActiveRect(result.Rect);
+        _overlay.SetHud(BuildDragHud(result, width, height), new Point(position.X + 16, position.Y + 20));
+        Cursor = new Cursor(MapResizeCursor(_resizeEdge, _dragKind));
         InvalidateArrange();
         e.Handled = true;
     }
 
-    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    private void OnCanvasPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        base.OnPointerReleased(e);
-        EndDrag(e.Pointer);
+        if (_dragKind != DragKind.None)
+        {
+            EndDrag(e.Pointer);
+            e.Handled = true;
+            return;
+        }
+
+        ClearPending();
     }
 
-    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    private void OnCanvasCaptureLost(object? sender, PointerCaptureLostEventArgs e) => EndDrag(null);
+
+    /// <summary>当前是否正在拖动或缩放窗格（供 Esc 取消使用）。</summary>
+    public bool IsInteracting => _dragKind != DragKind.None;
+
+    /// <summary>取消当前拖动/缩放，恢复到按下前的几何位置。</summary>
+    public void CancelInteraction()
     {
-        base.OnPointerCaptureLost(e);
-        EndDrag(null);
+        if (_dragKind == DragKind.None)
+        {
+            return;
+        }
+
+        _activePlacement?.SetRect(_originRect);
+        _hasMoved = false;
+        EndDrag(_capturedPointer);
+        InvalidateArrange();
     }
 
-    private void BeginDrag(string paneId, FreeformTilePlacement placement, DragKind kind, Point position)
+    private void BeginDrag(IPointer pointer)
     {
-        _activePaneId = paneId;
+        if (_pendingPaneId is null || !_placements.TryGetValue(_pendingPaneId, out var placement))
+        {
+            return;
+        }
+
+        _activePaneId = _pendingPaneId;
         _activePlacement = placement;
-        _originRect = placement.ToRect();
-        _pressPoint = position;
-        _dragKind = kind;
-        _resizeEdge = ResizeEdge.None;
+        _dragKind = _pendingKind;
+        _resizeEdge = _pendingEdge;
+        _hasMoved = true;
+        _capturedPointer = pointer;
+        pointer.Capture(this);
+
+        if (_childByPaneId.TryGetValue(_activePaneId, out var child))
+        {
+            // 拖动中的窗格浮到最上层并轻微透明，明确“正在移动”的反馈。
+            child.Opacity = 0.92;
+            child.ZIndex = DraggingZIndex;
+        }
+
+        Cursor = new Cursor(MapResizeCursor(_resizeEdge, _dragKind));
+        _overlay.SetActiveRect(_originRect);
+        _overlay.SetHud("拖动中", new Point(_pressPoint.X + 16, _pressPoint.Y + 20));
     }
 
     private void EndDrag(IPointer? pointer)
@@ -362,15 +417,60 @@ public sealed class FreeformWorkspaceCanvas : Panel
             return;
         }
 
+        var committed = _hasMoved;
+        var paneId = _activePaneId;
+
         _dragKind = DragKind.None;
         _activePaneId = null;
         _activePlacement = null;
         _resizeEdge = ResizeEdge.None;
+        _hasMoved = false;
+        ClearPending();
+
+        if (paneId is not null && _childByPaneId.TryGetValue(paneId, out var child))
+        {
+            child.Opacity = 1.0;
+        }
+
+        ApplyZIndexes();
         _overlay.SetGuides(null);
-        pointer?.Capture(null);
+        _overlay.SetActiveRect(null);
+        _overlay.SetHud(null, default);
+        (pointer ?? _capturedPointer)?.Capture(null);
+        _capturedPointer = null;
         InvalidateArrange();
-        LayoutChanged?.Invoke(this, EventArgs.Empty);
+
+        if (committed)
+        {
+            LayoutChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
+
+    private void ClearPending()
+    {
+        _pendingPaneId = null;
+        _pendingKind = DragKind.None;
+        _pendingEdge = ResizeEdge.None;
+    }
+
+    private static string BuildDragHud(SnapResult result, double canvasWidth, double canvasHeight)
+    {
+        var rect = result.Rect;
+        var text = $"{Math.Round(rect.Width * canvasWidth):0} × {Math.Round(rect.Height * canvasHeight):0} px"
+            + $" · {rect.Width * 100:0}% × {rect.Height * 100:0}%";
+        return result.Guides.Count > 0 ? text + " · 已吸附" : text;
+    }
+
+    private static StandardCursorType MapResizeCursor(ResizeEdge edge, DragKind kind) => kind == DragKind.Move
+        ? StandardCursorType.SizeAll
+        : edge switch
+        {
+            ResizeEdge.Left or ResizeEdge.Right => StandardCursorType.SizeWestEast,
+            ResizeEdge.Top or ResizeEdge.Bottom => StandardCursorType.SizeNorthSouth,
+            ResizeEdge.TopLeft or ResizeEdge.BottomRight => StandardCursorType.TopLeftCorner,
+            ResizeEdge.TopRight or ResizeEdge.BottomLeft => StandardCursorType.TopRightCorner,
+            _ => StandardCursorType.SizeAll
+        };
 
     private ResizeEdge HitTestResizeEdge(FreeformTilePlacement placement, Point position)
     {
@@ -426,13 +526,6 @@ public sealed class FreeformWorkspaceCanvas : Panel
         }
 
         return nearBottom ? ResizeEdge.Bottom : ResizeEdge.None;
-    }
-
-    private bool IsHeaderDragZone(FreeformTilePlacement placement, Point position)
-    {
-        var (x, y, _, _) = placement.ToRect().ToPixels(Bounds.Width, Bounds.Height);
-        return position.Y >= y && position.Y <= y + HeaderDragHeightPx
-            && position.X >= x && position.X <= x + placement.ToRect().ToPixels(Bounds.Width, Bounds.Height).Width;
     }
 
     private string? FindTopmostPaneAt(Point position)
@@ -588,17 +681,10 @@ public sealed class FreeformWorkspaceCanvas : Panel
         }
 
         var edge = HitTestResizeEdge(placement, position);
-        Cursor = edge switch
-        {
-            ResizeEdge.Left or ResizeEdge.Right => new Cursor(StandardCursorType.SizeWestEast),
-            ResizeEdge.Top or ResizeEdge.Bottom => new Cursor(StandardCursorType.SizeNorthSouth),
-            ResizeEdge.TopLeft or ResizeEdge.BottomRight => new Cursor(StandardCursorType.TopLeftCorner),
-            ResizeEdge.TopRight or ResizeEdge.BottomLeft => new Cursor(StandardCursorType.TopRightCorner),
-            _ => Cursor.Default
-        };
+        Cursor = new Cursor(MapResizeCursor(edge, edge == ResizeEdge.None ? DragKind.Move : DragKind.Resize));
     }
 
-    private bool IsInteractiveSource(object? source)
+    private bool IsInteractiveChildSource(object? source)
     {
         for (var current = source as Visual; current is not null; current = current.GetVisualParent())
         {

@@ -680,6 +680,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (e.Key == Key.Escape && FreeformCanvas.IsInteracting)
+        {
+            FreeformCanvas.CancelInteraction();
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Escape
             && (viewModel.IsRecordingCenterVisible || viewModel.IsClipStudioVisible))
         {

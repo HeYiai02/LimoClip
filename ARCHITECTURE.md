@@ -499,8 +499,9 @@ Program.Main
   - `FreeformLayoutDocument`：`{"version":2,"mode":"freeform","tiles":[{paneId,liveRoomId,left,top,width,height,zIndex,isPinned,isLocked}]}`，复用 `LayoutProfiles.DockLayoutJson` 列；`LooksLikeFreeform`/`TryParse` 兼容旧 Dock JSON（旧方案按窗格数自动迁移）。
   - `FreeformLayoutPresets`：`AutoFit`（网格）、`Hero`（主画面 0.72 + 右侧纵列）、`PictureInPicture`（首路铺满 + 2~4 路 0.28×0.28 右下置顶）、`DefaultLanding`（新拖入房间居中错开落位）；`FreeformPreset` 枚举。
 - `Controls/` 交互层：
-  - `FreeformWorkspaceCanvas : Panel`：按归一化矩形 `Measure/Arrange` 窗格（`ContentControl` + 共享 `RoomTileView` 模板）；8px 边缘/10px 角缩放热区、标题栏 30px 或 Alt+左键拖动、右键菜单（置顶画中画/取消置顶、锁定/解锁、置顶/置底、贴合 16:9）、Z 轴普通层 1~999 与置顶层 1000~1999；`LayoutChanged` 事件回写文档。
-  - `SnapGuidesOverlay`：磁吸参考线浮层（蓝普通线 / 琥珀中心线，不参与命中测试）。
+  - `FreeformWorkspaceCanvas : Panel`：按归一化矩形 `Measure/Arrange` 窗格（`ContentControl` + 共享 `RoomTileView` 模板）；指针事件通过 `Tunnel + handledEventsToo` 接管（`RoomTileView` 自身会处理点击/双击，普通冒泡会被吞掉）；按下后移动超过 3px 阈值才进入拖动/缩放（单击/双击语义保留），命中 6px 边缘 / 10px 角进入缩放，其余区域进入移动；右键菜单（置顶画中画/取消置顶、锁定/解锁、置顶/置底、贴合 16:9）、Z 轴普通层 1~999 与置顶层 1000~1999；`LayoutChanged` 事件回写文档（仅在真正发生移动/缩放后触发）。
+  - 拖动反馈：拖动中窗格透明度降至 0.92 并临时升至最上层，浮层绘制蓝色落位框 + 跟随指针的尺寸/吸附 HUD（如 `1168 × 812 px · 100% × 100% · 已吸附`），光标切换为移动/缩放光标；拖动中按 `Esc` 取消并恢复按下前位置。
+  - `SnapGuidesOverlay`：磁吸参考线 + 落位框 + HUD 浮层（蓝普通线 1.5px / 琥珀虚线中心线 + 端帽，不参与命中测试）。
 - `MainWindowViewModel` 集成：`IsFreeformMode`/`FreeformDocument`/`WorkspaceTiles` 事件；`EnterFreeformMode`/`ToggleFreeformMode`/`ApplyFreeformPreset`/`UpdateFreeformDocument`；保存方案时自由布局写 v2 JSON（`SerializeCurrentLayout`），加载时自动识别并进入自由模式；`一键自适应排布` 自动退出自由模式。
 - 宿主切换：Dock 与画布互斥显示（`ShowDockWorkspace = !IsWorkspaceEmpty && !IsFreeformMode`）。播放器控件（`MpvPlayerView`）不能同时被两个 `ContentPresenter` 挂载，切换时先 `DetachWorkspacePlayers()`（停止+解绑旧控件）→ 切换宿主并等一轮布局 → `StartWorkspacePlayersAsync()` 重新创建并起播；Dock 在自由模式下保持 `Layout=null`。
 - 顶栏：`自由布局`（开/关，显示当前模式提示）、`画中画预设`（未进入自由布局时先进入再应用）；状态栏显示「已进入/退出自由布局」「已应用自由布局预设」。方案中的自由布局结构与平铺布局共用 `LayoutProfile`，保存/重启后可恢复。
