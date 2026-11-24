@@ -44,10 +44,20 @@
 - 客户端拉取清单时按顺序尝试：GitHub Raw 主地址 → Gitee Raw 镜像（`PluginTrust.ManifestMirrorUrl`，默认 `https://gitee.com/HeYiai/limoclip-plugins/raw/master/providers-manifest.json`）。任一地址可用即可检查更新。
 - 插件 DLL 下载同样支持回退：清单条目的 `mirrorDownloadUrl` 指向 Gitee 上的同字节 DLL；主地址失败时自动使用镜像。
 - 发布方需要做的事：
-  1. 在 Gitee 建公开仓库 `HeYiai/limoclip-plugins`，保持与 GitHub 相同的目录结构（`providers-manifest.json`、插件 DLL 放 `plugins/` 下）。
-  2. 每次发布插件后，把**同一份** `plugins/providers-manifest.json` 与 DLL 推送到 Gitee 仓库（Gitee 的 `/blob/` 是网页地址，清单必须用 `/raw/` 地址访问）。
-  3. 清单条目加 `mirrorDownloadUrl`：可用 `build-plugins.ps1 -MirrorDownloadUrl <地址>` / `sign-plugin.ps1 -MirrorDownloadUrl <地址>` 自动写入，或手工编辑。
+  1. 在 Gitee 建公开仓库（默认 `HeYiai/limoclip-plugins`），只放清单与已签名的小体积 DLL（30KB~150KB），不存完整源码。清单放在仓库根 `providers-manifest.json`；DLL 建议放 `plugins/bin/{pluginId}-{version}-plugin.dll`。
+  2. 每次发布插件后，把**同一份** `plugins/providers-manifest.json` 与 DLL 推送到 Gitee 仓库（Gitee 的 `/blob/` 是网页地址，清单与 DLL 都必须用 `/raw/` 直链访问，例如 `https://gitee.com/HeYiai/limoclip-plugins/raw/master/plugins/bin/douyu-1.0.1-plugin.dll`）。
+  3. 清单条目加 `mirrorDownloadUrl`：可用 `build-plugins.ps1 -MirrorDownloadUrl <地址>` / `sign-plugin.ps1 -MirrorDownloadUrl <地址>` 自动写入，或手工编辑。`mirrorDownloadUrl` 与主 `downloadUrl` 指向**同一字节**的 DLL，因此 `sha256` / `ed25519Signature` 只需维护一份。
+- **不要用 Gitee Release 附件做 DLL 下载地址**：Gitee 对公开仓库的 Release 附件匿名下载会强制跳登录页（返回 HTML 而非 DLL），客户端会 SHA256/验签失败。请统一使用 Gitee Raw 直链。
+- 发布后自检：`curl -I <Gitee Raw DLL 地址>` 应返回 `HTTP 200` 且 `Content-Type` 不是 `text/html`；清单地址同样应返回 200 与 JSON 内容。
 - 安全边界：镜像只承担「分发通道」，不承担信任；清单与插件仍由 Ed25519 验签，镜像被篡改会导致校验失败而不是被加载。
+
+## 热更新发布检查清单（红线）
+
+1. **单 DLL 依赖限制**：客户端热更新只落盘 `plugin.dll`，不携带第三方依赖。斗鱼/抖音依赖的 `Jint` 使用主程序自带副本；不要在纯热更新里新增主程序没有的 NuGet 包或跨大版本升级 `Jint`，否则必须随主程序发版并抬高 `minAppVersion`。
+2. **插件版本必须动态读取**：6 个 `*Plugin.cs` 的 `Version` 均为 `PluginVersionInfo.Resolve(typeof(...))`（读程序集元数据），`build-plugins.ps1 -Version` 通过 `-p:Version` 注入；不要写死版本号，否则客户端会判定不高于内置版本而拒载。
+3. **不改 `LiveMonitor.Core` 接口二进制兼容性**：`IPlatformPlugin` / `IPlatformProvider` / `IDanmakuClient` 与核心模型签名变更需随主程序发版，并抬高清单 `minAppVersion`。
+4. **Ed25519 私钥不进仓库**：私钥离线保存（建议 U 盘/密码管理器加密备份）；泄露或丢失只能换密钥对并发新版客户端。
+5. **只发布单个平台 DLL**：`build-plugins.ps1` 已按单主 DLL 打包；手工发布时切记不要混入 `LiveMonitor.Core.dll` 等共享程序集。
 
 ## 签名私钥（重要）
 
@@ -77,6 +87,7 @@ $env:LIVEMONITOR_PLUGIN_KEY = '<私钥 Base64>'
 
 # 2) 把 artifacts/plugins/youtube-dlp-1.0.0/plugin.dll 上传到 GitHub Release 资产，
 #    下载地址需与清单里的 downloadUrl 一致；然后提交 plugins/providers-manifest.json。
+#    若启用大陆镜像：同一 DLL 也提交到 Gitee 仓库，并用 -MirrorDownloadUrl <Gitee Raw 直链> 重新写入清单。
 ```
 
 只想给已有 DLL 签名、不重新构建：
