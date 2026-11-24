@@ -1,10 +1,10 @@
-# LiveMonitor 交接（截至 V0.5-F：虎牙断流修复（Cookie + 分段录制）；V0.5-A/B/C 已完成并打包；含本机运行规避方案）
+# LiveMonitor 交接（截至 V0.5-G：侧栏分组/桌面全屏/主副屏布局 + Twitch 去广告；V0.5-F 虎牙断流修复；V0.5-A/B/C 已完成并打包；含本机运行规避方案）
 
 ## 状态
 
-- 分支 `main`；**当前 HEAD 为 V0.5-F 收尾提交 `147be90`（虎牙分段录制）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避、波形修复、产品侧加固、V0.5-B 六次提交、V0.5-C Step6/Step7/Step8/Step9 各两次提交、V0.5-D 两次功能提交、V0.5-E 三次提交（虎牙 Cookie/线路/画质、斗鱼+抖音 Cookie、HANDOFF）、V0.5-F 一次提交（分段录制 + 重叠裁剪），提交清单见文末各节。
+- 分支 `main`；**当前 HEAD 为 V0.5-G 收尾提交（界面/布局与 Twitch 去广告；功能提交 `d2d1e49`、`95654ec`，本文档提交紧随其后）**，工作树干净。V0.4 按层提交、V0.5-A 三次提交、本机运行规避、波形修复、产品侧加固、V0.5-B 六次提交、V0.5-C Step6/Step7/Step8/Step9 各两次提交、V0.5-D 两次功能提交、V0.5-E 三次提交（虎牙 Cookie/线路/画质、斗鱼+抖音 Cookie、HANDOFF）、V0.5-F 一次提交（分段录制 + 重叠裁剪）、V0.5-G 两次功能提交（界面与布局、Twitch 去广告），提交清单见文末各节。
 - 构建：`dotnet build LiveMonitor.sln --no-restore` → **0 错误**，8~14 警告（MSB3277 / NU1803 / NU1900 等，均为本机环境既有告警，无新增代码告警）。
-- 测试：Data 37 / Platforms **448** / Danmaku 98 / Media **178** / Desktop **106** = **867 全绿**（V0.4 基线 471；V0.5-A +7 Media、+18 Desktop；产品侧加固 +17 Media；V0.5-B +125 Platforms、+2 Media；V0.5-C Step6 虎牙 +65 Platforms、Step7 斗鱼 +63 Platforms、Step8 抖音 +64 Platforms、http 流 ca_file 修复 +2 Media；V0.5-D +2 断流状态文案 +6 六平台登录配置；V0.5-E +11 Platforms（三平台 Cookie 接入）；V0.5-F +10 Media（分段录制 + 重叠裁剪 + 时长实测））。
+- 测试：Data 37 / Platforms **453** / Danmaku 98 / Media **178** / Desktop **109** = **875 全绿**（V0.4 基线 471；V0.5-A +7 Media、+18 Desktop；产品侧加固 +17 Media；V0.5-B +125 Platforms、+2 Media；V0.5-C Step6 虎牙 +65 Platforms、Step7 斗鱼 +63 Platforms、Step8 抖音 +64 Platforms、http 流 ca_file 修复 +2 Media；V0.5-D +2 断流状态文案 +6 六平台登录配置；V0.5-E +11 Platforms（三平台 Cookie 接入）；V0.5-F +10 Media（分段录制 + 重叠裁剪 + 时长实测）；V0.5-G +5 Platforms（Twitch 去广告三层降级）+3 Desktop（主副屏布局单测））。
 - 验收：V0.4 GUI 端到端通过（脚本 `.cache/v04-acceptance2.ps1`，证据 `.cache/v04b-*.png`）；V0.5-A 完成真实 API 验证（55s 音频约 11s 返回，见「V0.5-A 增量」）；本机运行规避后完成真实 GUI 录制/打开目录/ASR 验证；**V0.5-B 阶段验收通过**（YouTube 添加/监控/录制 49.97s（含音频）/剪辑波形/双版导出（含音频）/ASR，见「V0.5-B 增量」）；V0.5-C Step6 虎牙：插件、协议单测与真实探针（拉流状态 + 20s 内 86 条弹幕）通过，但本机为海外出口、虎牙 CDN 对海外网络限流，GUI 播放/录制未能完整验证（见「V0.5-C 增量」）；V0.5-C Step7 斗鱼：插件、协议单测、真实探针与 **GUI 全链路验收通过**（真实录制 56.8s/11.4MB 含音频 + 72 条弹幕、剪辑台波形与混流、双版导出均含音频，见「V0.5-C 增量（Step7 斗鱼）」）。
 - 实现依据：`limoclip_v0_4.md`（V0.4）、`limoclip_v0_5_asr.md`（V0.5-A/B，已按实现修订 P0 偏差）；`code_artifact.md` 已更新为 v2.1。
 - **V0.5-B 已完成并通过阶段 B 验收；V0.5-C 已全部完成：Step6 虎牙、Step7 斗鱼、Step8 抖音（三个平台插件 + 单测 + 真实探针，斗鱼/抖音 GUI 全链路验收通过；虎牙 GUI 受本机海外网络限流未完整验证）、Step9 六平台联调与 v0.5.0 打包已完成**（`artifacts/LimoClip-v0.5.0-win-x64.zip` 190.58MB，SHA256 `0fda2c4e…1b43ed`，冒烟启动通过）。恢复开发先读本文件「新 session 首条消息」「V0.5-B 增量」「V0.5-C 增量」。多轨 NLE 只评估、不实现。
@@ -152,7 +152,7 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 
 ## 新 session 首条消息（可直接复制）
 
-> 阅读 `HANDOFF.md`、`limoclip_v0_5_asr.md`，先核对 `git log --oneline -8` 与全量测试（build + 五套测试，应为 **867 全绿**）。V0.5-A、V0.5-B、产品侧加固均已完成并验收，V0.5-C 已全部完成（Step6 虎牙、Step7 斗鱼、Step8 抖音、Step9 六平台联调 + v0.5.0 打包），V0.5-D 已把「断流误显示未开播」改为重连态并补全六平台登录，**V0.5-E 已把虎牙/斗鱼/抖音 Cookie 接入 Provider 并修复虎牙播放（HS 线 + ratio 多档），V0.5-F 已把录制改为「分段录制 + concat 合并 + 重叠裁剪」，虎牙录制恢复可用（实测 84s 文件可播放）**。恢复开发前先读「V0.5-B 增量」「V0.5-A 增量」与「本机运行限制」；本机运行一律使用仓库启动器 `scripts/refresh-and-run.ps1`（桌面快捷方式也指向它），不要直接运行工作区内 bin 下的 exe。插件签名私钥不在仓库内，需向用户索取或使用环境变量 `LIVEMONITOR_PLUGIN_KEY`。
+> 阅读 `HANDOFF.md`、`limoclip_v0_5_asr.md`，先核对 `git log --oneline -8` 与全量测试（build + 五套测试，应为 **875 全绿**）。V0.5-A、V0.5-B、产品侧加固均已完成并验收，V0.5-C 已全部完成（Step6 虎牙、Step7 斗鱼、Step8 抖音、Step9 六平台联调 + v0.5.0 打包），V0.5-D 已把「断流误显示未开播」改为重连态并补全六平台登录，**V0.5-E 已把虎牙/斗鱼/抖音 Cookie 接入 Provider 并修复虎牙播放（HS 线 + ratio 多档），V0.5-F 已把录制改为「分段录制 + concat 合并 + 重叠裁剪」（实测 84s 文件可播放），V0.5-G 已加入侧栏分组换行滚动、桌面级全屏 F11/Esc、主副屏非对称布局（可保存/重启恢复）与 Twitch 去广告三层降级（代理模板 → GQL+Usher → yt-dlp，设置页可配代理）**。恢复开发前先读「V0.5-B 增量」「V0.5-A 增量」与「本机运行限制」；本机运行一律使用仓库启动器 `scripts/refresh-and-run.ps1`（桌面快捷方式也指向它），不要直接运行工作区内 bin 下的 exe。插件签名私钥不在仓库内，需向用户索取或使用环境变量 `LIVEMONITOR_PLUGIN_KEY`。
 
 ## V0.5-A 增量（2026-11-23）：剪辑台语音识别（ASR）
 
@@ -482,3 +482,29 @@ GUI 冒烟：`.cache/app-smoke.ps1`。V0.4 验收：`.cache/v04-acceptance2.ps1`
 ### 新 session 首条消息（V0.5-F 后）
 
 - 虎牙断流播放与录制均已修复（Cookie + HS 线 + ratio 多档 + 分段录制/concat 去重叠），全量测试 **867 全绿**，HEAD `147be90`。下一步可选：虎牙长时间录制稳定性回归（>10 分钟）、其它平台录制回归、发布 v0.5.0 Release、抖音 sign.js 离线化。
+
+## V0.5-G 增量（2026-11-24）：界面/布局改造 + Twitch 去广告
+
+### 状态
+
+- 来源：用户提供《LimoClip 功能改造方案文档》（附件路径 `C:\Users\Administrator\Downloads\LimoClip 功能改造方案文档.md`，实施时该文件已被删除，按当时记录的要点与标准 Twitch 接口实现）。
+- 4 项改造全部完成：① 左侧分组自动换行 + 限高滚动；② Windows 桌面级全屏（F11/Esc，隐藏顶栏/侧栏/状态栏，还原 Normal/Maximized）；③ 多屏非对称「主画面 70% + 右侧副屏纵向排列」布局模板，顶栏按钮接入，方案可保存/重启恢复，拖拽比例/恢复默认比例兼容；④ Twitch 去广告三层降级（外部 M3U8 代理模板 → 原生 GQL PlaybackAccessToken + Usher HLS → yt-dlp 兜底），设置页可填代理模板。
+- 校验：build 0 错误；五套测试 **875 全绿**（Data 37 / Platforms 453 / Danmaku 98 / Media 178 / Desktop 109；Platforms +5 = `TwitchProviderAdFreeTests`，Desktop +3 = `WorkspaceDockBuilderTests.CreateHeroAndSideColumn_*`）。
+- GUI 验收（`E:\LimoClip-v05-run`，pid 836 / 重启后 pid 9724）：
+  - 侧栏分组药丸正常换行（全部/MR/OW/vkg/vkg1 一行 + 狗队第二行），截图 `.cache/v05g-1-main.png`、`.cache/v05g-8-ow-loaded.png`。
+  - 「☷ 主副屏布局」在 2 路工作区时给出回退提示「房间不足 3 路，主副屏布局暂按单行排布」（`.cache/v05g-2-hero.png`）；载入含 5 窗格的「ow」方案后点击按钮：主画面（左，约 70%）+ 右侧 4 路副屏纵向排列，状态栏「已切换为主副屏布局（5 路）」、模式文本「主副屏」，截图 `.cache/v05g-9-hero-layout.png`。
+  - 保存后重启验证：`保存` → DB `LayoutProfiles.DockLayoutJson` 含 `workspace-hero`/`workspace-side-column`、5 slots → 退出并重启应用 → 选择「ow」方案 → 状态「已载入方案「ow」：布局结构变化，已重建 5 路」、底栏「工作区 主副屏（5 路）」，截图 `.cache/v05g-10-hero-after-restart.png`。
+  - 桌面全屏：F11 → 1920×1080、外壳隐藏、顶部提示浮层（`.cache/v05g-3-fullscreen.png`）；提示按钮「退出桌面全屏」→ 恢复 1440×900（`.cache/v05g-5-exit-via-button.png`）；F11 → 再 Esc → 恢复 1440×900（`.cache/v05g-6-esc-restore.png`）。
+- 已知限制：Twitch 去广告最终播放未在 GUI 连真实 Twitch 播放源验证（本机网络对 Twitch 播放链路的可达性未确认），原生 GQL/Usher 与回退路径由 5 个单测覆盖；代理模板依赖第三方可用性。
+
+### 实现要点
+
+- `src/LiveMonitor.Desktop/Views/MainWindow.axaml`：`GroupPills` 改为 `ScrollViewer MaxHeight=78` + `WrapPanel`；顶栏新增「☷ 主副屏布局」「⛶ 桌面全屏」按钮；焦点浮层新增「桌面全屏 (F11)」；新增桌面全屏提示浮层 `DesktopFullscreenHint`。`MainWindow.axaml.cs`：`RefreshGroupPills` 给药丸加 `Margin(0,0,4,4)`；`ApplyShellLayout` 支持 `_isDesktopFullscreen` 隐藏外壳；`ToggleDesktopFullscreen/ExitDesktopFullscreen`（记录并还原 WindowState）；`OnWindowKeyDown` 接入 F11 与 Esc 优先级（录制/剪辑 → 桌面全屏 → 焦点）；`OnHeroLayout`。
+- `src/LiveMonitor.Desktop/Services/WorkspaceDockBuilder.cs`：新增 `CreateHeroAndSideColumn(count, tileFactory, heroProportion=0.7)`（≤2 退化为单行；hero pane-1 Proportion clamp 0.3~0.85，右侧 `workspace-side-column` 纵向堆叠 pane-2..N，含 splitter）与 `ContainsDockId(root, id)`。
+- `src/LiveMonitor.Desktop/ViewModels/MainWindowViewModel.cs`：新增 `IsHeroLayout`、`ApplyHeroLayoutAsync`、`ApplyRebuiltLayoutAsync`、`SetHeroLayout`；`LayoutModeText`/`RoomCountText` 支持主副屏；`FitRoomsAsync` 复用统一重建流程；`LoadProfileAsync`/`RestoreCustomLayoutAsync` 通过 `ContainsDockId(...,"workspace-hero")` 恢复主副屏标记；`AutoFitAsync` 在主副屏时不走“只归位比例”分支。
+- `src/LiveMonitor.Platforms.Twitch/TwitchProvider.cs`：三层降级。代理层 `TryGetViaPlaylistProxyAsync`（模板 `{channel}` 替换，只带 UA/Referer）；原生层 `TryGetViaNativeApiAsync`（`ExtractAuthToken` 读 `auth-token`，GQL persisted query `PlaybackAccessToken`，`playerType=site/embed`，`BuildUsherUrl` 携带 `allow_source/fast_bread/player_backend/playlist_include_framerate/reassignments_supported/supported_codecs/p/sig/token`，Usher 404 → Offline）；yt-dlp 兜底 `GetViaYtDlpAsync`（保持原异常文案）。`ParseMasterM3u8` 解析 `#EXT-X-STREAM-INF` 的 RESOLUTION/FRAME-RATE/BANDWIDTH，按 (height,fps) 去重保留最高 BANDWIDTH。单参构造保持纯 yt-dlp，既有测试不联网。
+- 接线：`PlatformFactory.CreateDefault(httpClient, ytDlpPath, twitchPlaylistProxyTemplateProvider)`；`TwitchPlugin.CreateStreamProvider` 传入 `TwitchAdConfig.PlaylistProxyTemplateProvider`；`AppServices.CreateAsync` 提前创建 `pluginHttpClient` 与 `AppSettingsRepository`，读取 `AppSettingKeys.TwitchPlaylistProxyUrl` 并注入 `TwitchAdConfig`；设置页新增「Twitch 去广告（可选）」输入框（`SettingsWindow.axaml` + `LoadTwitchProxyAsync/OnSaveTwitchProxy/ApplyTwitchProxyTemplate`）。
+
+### 新 session 首条消息（V0.5-G 后）
+
+- V0.5-G 已完成并验收：侧栏分组换行滚动、桌面级全屏 F11/Esc、主副屏非对称布局（保存/重启恢复）、Twitch 去广告三层降级（设置页可配代理）；全量测试 **875 全绿**，HEAD 为 V0.5-G 收尾提交（功能提交 `d2d1e49`、`95654ec`）。下一步可选：Twitch 真实去广告播放验证（需可达 Twitch 的网络/代理）、其它平台长时录制回归、发布 v0.5.0 Release、抖音 sign.js 离线化。
