@@ -148,6 +148,66 @@ public sealed class WorkspaceDockBuilderTests
         Assert.Equal(2, row.VisibleDockables!.OfType<IProportionalDockSplitter>().Count());
     }
 
+    [Fact]
+    public void CreateHeroAndSideColumn_ThreeRooms_ProducesHeroPlusSideColumn()
+    {
+        var builder = new WorkspaceDockBuilder();
+
+        var layout = builder.CreateHeroAndSideColumn(3, Tile);
+
+        Assert.Equal("workspace-root", layout.Id);
+        var outer = Assert.IsType<ProportionalDock>(layout.VisibleDockables![0]);
+        Assert.Equal("workspace-hero", outer.Id);
+        Assert.Equal(Dock.Model.Core.Orientation.Horizontal, outer.Orientation);
+        Assert.Equal(3, outer.VisibleDockables!.Count);
+
+        var hero = Assert.IsType<ToolDock>(outer.VisibleDockables![0]);
+        Assert.Equal(0.7, hero.Proportion, 3);
+        Assert.Equal("pane-1", hero.ActiveDockable!.Id);
+
+        Assert.IsType<ProportionalDockSplitter>(outer.VisibleDockables[1]);
+
+        var side = Assert.IsType<ProportionalDock>(outer.VisibleDockables[2]);
+        Assert.Equal("workspace-side-column", side.Id);
+        Assert.Equal(Dock.Model.Core.Orientation.Vertical, side.Orientation);
+        Assert.Equal(0.3, side.Proportion, 3);
+        Assert.Equal(new[] { "pane-2", "pane-3" }, SidePaneIds(side));
+        Assert.Single(side.VisibleDockables!.OfType<IProportionalDockSplitter>());
+
+        Assert.True(WorkspaceDockBuilder.ContainsDockId(layout, "workspace-hero"));
+    }
+
+    [Fact]
+    public void CreateHeroAndSideColumn_FewerThanThreeRooms_FallsBackToSingleRow()
+    {
+        var builder = new WorkspaceDockBuilder();
+
+        var layout = builder.CreateHeroAndSideColumn(2, Tile);
+
+        Assert.False(WorkspaceDockBuilder.ContainsDockId(layout, "workspace-hero"));
+        Assert.Equal(new[] { 2 }, RowItemCounts(layout));
+    }
+
+    [Fact]
+    public void CreateHeroAndSideColumn_HeroProportionIsClamped()
+    {
+        var builder = new WorkspaceDockBuilder();
+
+        var layout = builder.CreateHeroAndSideColumn(4, Tile, heroProportion: 5.0);
+
+        var outer = Assert.IsType<ProportionalDock>(layout.VisibleDockables![0]);
+        var hero = Assert.IsType<ToolDock>(outer.VisibleDockables![0]);
+        var side = Assert.IsType<ProportionalDock>(outer.VisibleDockables[2]);
+        Assert.Equal(0.85, hero.Proportion, 3);
+        Assert.Equal(0.15000000000000002, side.Proportion, 3);
+    }
+
+    private static string[] SidePaneIds(ProportionalDock side)
+        => side.VisibleDockables!
+            .OfType<ToolDock>()
+            .Select(dock => dock.ActiveDockable!.Id)
+            .ToArray();
+
     private static ProportionalDock FirstRow(IRootDock layout)
     {
         var outer = (ProportionalDock)layout.VisibleDockables![0];

@@ -45,6 +45,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private int _gridRows = 2;
     private int _gridColumns = 2;
     private bool _isCustomLayout;
+    private bool _isHeroLayout;
     private string? _customLayoutSnapshotJson;
     private List<LayoutSlot>? _customLayoutSnapshotSlots;
     private bool _customLayoutSnapshotDirty;
@@ -266,7 +267,22 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string LayoutModeText => IsCustomLayout ? "自定义比例" : "自动适配";
+    public bool IsHeroLayout
+    {
+        get => _isHeroLayout;
+        private set
+        {
+            if (SetProperty(ref _isHeroLayout, value))
+            {
+                OnPropertyChanged(nameof(LayoutModeText));
+                OnPropertyChanged(nameof(RoomCountText));
+            }
+        }
+    }
+
+    public string LayoutModeText => IsHeroLayout
+        ? (IsCustomLayout ? "主副屏 · 自定义" : "主副屏")
+        : (IsCustomLayout ? "自定义比例" : "自动适配");
 
     /// <summary>点过一键自适应后，是否还能恢复上一次的自定义比例。</summary>
     public bool CanRestoreCustomLayout
@@ -311,7 +327,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public string FocusedTitle => _focusedTile?.DisplayTitle ?? string.Empty;
 
-    public string RoomCountText => $"主库 {Rooms.Count} 路 · 工作区 {GridRows}×{GridColumns}";
+    public string RoomCountText => IsHeroLayout
+        ? $"主库 {Rooms.Count} 路 · 工作区 主副屏（{WorkspaceDockBuilder.EnumerateTiles(Layout).Count(tile => tile.HasRoom)} 路）"
+        : $"主库 {Rooms.Count} 路 · 工作区 {GridRows}×{GridColumns}";
 
     /// <summary>高能事件面板是否展开；只影响主窗口叠加层，不写入方案 / Dock 布局。</summary>
     public bool IsHighlightPanelVisible
@@ -813,7 +831,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var allTiles = WorkspaceDockBuilder.EnumerateTiles(Layout).ToList();
         var currentRoomCount = allTiles.Count(tile => tile.HasRoom);
         // 有空格时必须重建：否则会把空窗格留在网格里，3 路无法收成“上 1 下 2”。
-        if (rooms.Count == currentRoomCount &&
+        // 主副屏布局的行列口径与网格不同，统一走重建，避免把主副屏当成“行列未变”的网格。
+        if (!IsHeroLayout &&
+            rooms.Count == currentRoomCount &&
             allTiles.Count == rooms.Count &&
             current.Rows == desiredRows &&
             current.Columns == desiredColumns &&
@@ -882,6 +902,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             if (snapshot is not null && WorkspaceDockBuilder.TryApplyProportions(Layout, snapshot))
             {
                 SetCustomLayout(true);
+                SetHeroLayout(WorkspaceDockBuilder.ContainsDockId(snapshot, "workspace-hero"));
                 IsDirty = _customLayoutSnapshotDirty;
                 ClearCustomLayoutSnapshot();
                 StatusText = "已恢复自定义比例";
@@ -1481,12 +1502,62 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return CreateRebuiltTile(paneId, room, playbackStates);
         });
 
+        await ApplyRebuiltLayoutAsync(layout, audioStates, status, startPlayback, isHero: false, ct)
+            .ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// 切到「主副屏」布局：第一路作为主画面，其余房间在右侧纵向排列。
+    /// 与一键自适应共用重建路径，房间顺序沿用当前工作区窗格顺序；播放器会重新起播以避免 OpenGL 控件搬运。
+    /// </summary>
+    public async Task ApplyHeroLayoutAsync(CancellationToken ct = default)
+    {
+        if (Layout is null)
+        {
+            return;
+        }
+
+        ExitFocus();
+        var rooms = WorkspaceDockBuilder.EnumerateTiles(Layout)
+            .Where(tile => tile.HasRoom)
+            .Select(tile => _roomById.GetValueOrDefault(tile.LiveRoomId))
+            .Where(room => room is not null)
+            .Select(room => room!)
+            .ToList();
+
+        var (playbackStates, audioStates) = CaptureRoomStates(Layout);
+        DisposePlayers(Layout);
+        DetachLayoutTracking();
+
+        var index = 0;
+        var layout = _dockBuilder.CreateHeroAndSideColumn(rooms.Count, paneId =>
+        {
+            var room = index < rooms.Count ? rooms[index++] : null;
+            return CreateRebuiltTile(paneId, room, playbackStates);
+        });
+
+        var status = rooms.Count <= 2
+            ? "房间不足 3 路，主副屏布局暂按单行排布"
+            : $"已切换为主副屏布局（{rooms.Count} 路）";
+        await ApplyRebuiltLayoutAsync(layout, audioStates, status, startPlayback: true, isHero: rooms.Count > 2, ct)
+            .ConfigureAwait(true);
+    }
+
+    private async Task ApplyRebuiltLayoutAsync(
+        IRootDock layout,
+        IReadOnlyDictionary<Guid, TileAudioSnapshot> audioStates,
+        string status,
+        bool startPlayback,
+        bool isHero,
+        CancellationToken ct)
+    {
         _suppressLayoutTracking = true;
         _dockBuilder.InitLayout(layout);
         Layout = layout;
         var dimensions = WorkspaceDockBuilder.GetGridDimensions(layout);
         GridRows = dimensions.Rows;
         GridColumns = dimensions.Columns;
+        SetHeroLayout(isHero);
         SetCustomLayout(false);
         IsDirty = true;
         _suppressLayoutTracking = false;
@@ -1572,6 +1643,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         IsCustomLayout = value;
         OnPropertyChanged(nameof(LayoutModeText));
+    }
+
+    private void SetHeroLayout(bool value)
+    {
+        if (_isHeroLayout == value)
+        {
+            return;
+        }
+
+        IsHeroLayout = value;
     }
 
     private void AttachLayoutTracking(IRootDock layout)
@@ -1865,6 +1946,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
             _loadedProfile = profile;
             SetCustomLayout(profile.IsCustomLayout);
+            SetHeroLayout(WorkspaceDockBuilder.ContainsDockId(previousLayout, "workspace-hero"));
             WireTileInteractions(previousLayout);
             var oldDimensions = WorkspaceDockBuilder.GetGridDimensions(previousLayout);
             GridRows = oldDimensions.Rows;
@@ -1894,6 +1976,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         GridRows = dimensions.Rows;
         GridColumns = dimensions.Columns;
         SetCustomLayout(profile.IsCustomLayout);
+        SetHeroLayout(WorkspaceDockBuilder.ContainsDockId(layout, "workspace-hero"));
         IsDirty = false;
         _suppressLayoutTracking = false;
         AttachLayoutTracking(layout);

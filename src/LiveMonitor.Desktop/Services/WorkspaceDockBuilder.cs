@@ -138,6 +138,108 @@ public sealed class WorkspaceDockBuilder : Factory
     }
 
     /// <summary>
+    /// 主副屏布局：左侧一路主画面（pane-1），右侧一列纵向排列剩余窗格（pane-2..N）。
+    /// 适合“一路重点关注 + 其余扫视”的观看习惯；结构与普通网格同为 ToolDock/ProportionalDock，
+    /// 保存/恢复比例/拖拽逻辑完全复用，仅比例不同。
+    /// </summary>
+    public IRootDock CreateHeroAndSideColumn(
+        int count,
+        Func<string, RoomTileViewModel> tileFactory,
+        double heroProportion = 0.7)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(count, 1);
+        ArgumentNullException.ThrowIfNull(tileFactory);
+
+        // 1~2 路没有“主副”意义，退化成单行，避免一块占满宽度的竖直侧栏。
+        if (count <= 2)
+        {
+            return CreateRows(new[] { count }, tileFactory);
+        }
+
+        var root = CreateRootDock();
+        root.Id = "workspace-root";
+
+        var hero = Math.Clamp(heroProportion, 0.3, 0.85);
+        var outer = new ProportionalDock
+        {
+            Id = "workspace-hero",
+            Orientation = Dock.Model.Core.Orientation.Horizontal,
+            IsCollapsable = false,
+            Proportion = 1
+        };
+
+        var heroDock = CreateToolDock(tileFactory("pane-1"));
+        heroDock.Proportion = hero;
+
+        var sideColumn = new ProportionalDock
+        {
+            Id = "workspace-side-column",
+            Orientation = Dock.Model.Core.Orientation.Vertical,
+            IsCollapsable = false,
+            Proportion = 1 - hero
+        };
+
+        var sidePanes = new List<IDockable>();
+        for (var index = 2; index <= count; index++)
+        {
+            if (sidePanes.Count > 0)
+            {
+                sidePanes.Add(CreateProportionalDockSplitter());
+            }
+
+            sidePanes.Add(CreateToolDock(tileFactory($"pane-{index}")));
+        }
+
+        sideColumn.VisibleDockables = CreateList<IDockable>(sidePanes.ToArray());
+        sideColumn.ActiveDockable = sidePanes.FirstOrDefault(d => d is ToolDock);
+
+        var outerChildren = new List<IDockable>
+        {
+            heroDock,
+            CreateProportionalDockSplitter(),
+            sideColumn
+        };
+        outer.VisibleDockables = CreateList<IDockable>(outerChildren.ToArray());
+        outer.ActiveDockable = heroDock;
+
+        root.VisibleDockables = CreateList<IDockable>(outer);
+        root.DefaultDockable = outer;
+        return root;
+    }
+
+    /// <summary>判断布局树的任意节点 Id 是否等于 <paramref name="id"/>（用于识别主副屏等特殊布局）。</summary>
+    public static bool ContainsDockId(IRootDock? root, string id)
+    {
+        if (root is null || string.IsNullOrEmpty(id))
+        {
+            return false;
+        }
+
+        return ContainsDockIdCore(root, id);
+    }
+
+    private static bool ContainsDockIdCore(IDockable dockable, string id)
+    {
+        if (string.Equals(dockable.Id, id, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (dockable is IDock dock)
+        {
+            foreach (var child in dock.VisibleDockables ?? Array.Empty<IDockable>())
+            {
+                if (ContainsDockIdCore(child, id))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// 复制布局结构（保留 PaneId、Proportion、行列拆分），把所有 Tool.Context 换成新的窗格模型。
     /// 用于保存 DockLayoutJson：既不序列化 PlayerView 控件，也不破坏 3+1 / 3+2 等非矩形结构。
     /// extraTile 不为空时，追加到最后一个横排行（自定义比例下新增房间）。

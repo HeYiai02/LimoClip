@@ -20,6 +20,8 @@ public partial class MainWindow : Window
     private AppServices? _services;
     private bool _initializing;
     private bool _sidebarVisible = true;
+    private bool _isDesktopFullscreen;
+    private WindowState _windowStateBeforeFullscreen = WindowState.Normal;
     private Guid? _lastRoomClickId;
     private DateTime _lastRoomClickAt;
 
@@ -244,16 +246,20 @@ public partial class MainWindow : Window
         var clipping = _viewModel.IsClipStudioVisible;
         var overlay = recording || clipping;
         var focused = !overlay && _viewModel.IsFocused;
-        var sidebarVisible = !overlay && !focused && _sidebarVisible;
+        // 桌面级全屏：与焦点模式类似地隐藏外壳，但保留整个工作区（多路窗格）而不是单路。
+        var fullscreenShell = !overlay && !focused && _isDesktopFullscreen;
+        var sidebarVisible = !overlay && !focused && !fullscreenShell && _sidebarVisible;
 
         Sidebar.IsVisible = sidebarVisible;
-        TopBar.IsVisible = !focused;
-        StatusBar.IsVisible = !overlay && !focused;
+        TopBar.IsVisible = !focused && !fullscreenShell;
+        StatusBar.IsVisible = !overlay && !focused && !fullscreenShell;
+        DesktopFullscreenHint.IsVisible = _isDesktopFullscreen;
         RootGrid.ColumnDefinitions[0].Width =
             sidebarVisible ? new GridLength(260) : new GridLength(0);
-        RootGrid.RowDefinitions[0].Height = focused ? new GridLength(0) : new GridLength(48);
+        RootGrid.RowDefinitions[0].Height =
+            focused || fullscreenShell ? new GridLength(0) : new GridLength(48);
         RootGrid.RowDefinitions[2].Height =
-            overlay || focused ? new GridLength(0) : new GridLength(28);
+            overlay || focused || fullscreenShell ? new GridLength(0) : new GridLength(28);
 
         WorkspaceTabButton.Classes.Set("active", !overlay);
         RecordingTabButton.Classes.Set("active", recording);
@@ -262,6 +268,75 @@ public partial class MainWindow : Window
         Dock.InvalidateMeasure();
         Dock.InvalidateArrange();
         Dock.UpdateLayout();
+    }
+
+    /// <summary>
+    /// 桌面级全屏：连同顶栏/侧栏/状态栏一起隐藏，只留工作区。
+    /// 与“焦点模式”不同，这里不改变 Dock 布局，多路窗格仍按当前方案显示。
+    /// </summary>
+    private void ToggleDesktopFullscreen()
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        if (_isDesktopFullscreen)
+        {
+            ExitDesktopFullscreen();
+            return;
+        }
+
+        _windowStateBeforeFullscreen = WindowState == WindowState.FullScreen
+            ? WindowState.Normal
+            : WindowState;
+        _isDesktopFullscreen = true;
+        WindowState = WindowState.FullScreen;
+        ApplyShellLayout();
+        _viewModel.SetStatus("已进入桌面全屏：F11 或 Esc 退出。");
+    }
+
+    private void ExitDesktopFullscreen()
+    {
+        if (!_isDesktopFullscreen)
+        {
+            return;
+        }
+
+        _isDesktopFullscreen = false;
+        var restore = _windowStateBeforeFullscreen == WindowState.FullScreen
+            ? WindowState.Normal
+            : _windowStateBeforeFullscreen;
+        WindowState = restore;
+        ApplyShellLayout();
+        _viewModel?.SetStatus("已退出桌面全屏。");
+    }
+
+    private void OnToggleDesktopFullscreen(object? sender, RoutedEventArgs e)
+    {
+        ToggleDesktopFullscreen();
+    }
+
+    private void OnExitDesktopFullscreen(object? sender, RoutedEventArgs e)
+    {
+        ExitDesktopFullscreen();
+    }
+
+    private async void OnHeroLayout(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _viewModel.ApplyHeroLayoutAsync();
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetStatus($"切换主副屏布局失败：{ex.Message}");
+        }
     }
 
     private void OnSwitchToWorkspace(object? sender, RoutedEventArgs e)
@@ -306,10 +381,24 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (e.Key == Key.F11)
+        {
+            ToggleDesktopFullscreen();
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Escape
             && (viewModel.IsRecordingCenterVisible || viewModel.IsClipStudioVisible))
         {
             viewModel.SwitchToWorkspaceCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Escape && _isDesktopFullscreen)
+        {
+            ExitDesktopFullscreen();
             e.Handled = true;
             return;
         }
@@ -599,6 +688,8 @@ public partial class MainWindow : Window
                 Content = group,
                 Tag = group,
                 Padding = new Thickness(9, 3),
+                // WrapPanel 没有 Spacing，用 Margin 控制换行后的间距。
+                Margin = new Thickness(0, 0, 4, 4),
                 FontSize = 10,
                 CornerRadius = new CornerRadius(12)
             };
