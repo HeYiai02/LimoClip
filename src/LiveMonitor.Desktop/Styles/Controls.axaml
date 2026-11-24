@@ -232,4 +232,19 @@
     <Setter Property="Background" Value="{DynamicResource BrushBgHover}" />
   </Style>
 
+  <!-- 右下角非阻塞 Toast 胶囊（2.5 秒自动消失） -->
+  <Style Selector="Border.toast">
+    <Setter Property="Background" Value="{DynamicResource BrushBgOverlay}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BrushBorderStrong}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="999" />
+    <Setter Property="Padding" Value="14,8" />
+    <Setter Property="BoxShadow" Value="0 8 24 0 #66000000" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="Opacity" Duration="0:0:0.16" />
+      </Transitions>
+    </Setter>
+  </Style>
+
 </Styles>

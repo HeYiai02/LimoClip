@@ -40,6 +40,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private IRootDock? _layout;
     private string _searchText = string.Empty;
     private string _statusText = "就绪";
+    private string _toastText = string.Empty;
+    private bool _isToastVisible;
+    private CancellationTokenSource? _toastCts;
     private bool _isDirty;
     private bool _suppressProfileLoad;
     private bool _initialized;
@@ -236,7 +239,68 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public string StatusText
     {
         get => _statusText;
-        private set => SetProperty(ref _statusText, value);
+        private set
+        {
+            if (SetProperty(ref _statusText, value))
+            {
+                ShowToast(value);
+            }
+        }
+    }
+
+    /// <summary>右下角非阻塞 Toast 文案，随 StatusText 一起更新（第 4 轮：替代打断式状态提示）。</summary>
+    public string ToastText
+    {
+        get => _toastText;
+        private set => SetProperty(ref _toastText, value);
+    }
+
+    public bool IsToastVisible
+    {
+        get => _isToastVisible;
+        private set => SetProperty(ref _isToastVisible, value);
+    }
+
+    /// <summary>显示 2.5 秒后自动消失的右下角 Toast；新消息会顶掉旧的。</summary>
+    private void ShowToast(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+
+        ToastText = message.Trim();
+        IsToastVisible = true;
+
+        _toastCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _toastCts = cts;
+        _ = HideToastAfterDelayAsync(cts);
+    }
+
+    private async Task HideToastAfterDelayAsync(CancellationTokenSource cts)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2.5), cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (_disposed || cts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!_disposed && ReferenceEquals(_toastCts, cts))
+            {
+                IsToastVisible = false;
+            }
+        });
     }
 
     public bool IsDirty
@@ -277,7 +341,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _isHeroLayout, value))
             {
                 OnPropertyChanged(nameof(LayoutModeText));
-                OnPropertyChanged(nameof(RoomCountText));
+                NotifyWorkspaceSummaryChanged();
             }
         }
     }
@@ -332,6 +396,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public string RoomCountText => IsHeroLayout
         ? $"主库 {Rooms.Count} 路 · 工作区 主副屏（{WorkspaceDockBuilder.EnumerateTiles(Layout).Count(tile => tile.HasRoom)} 路）"
         : $"主库 {Rooms.Count} 路 · 工作区 {GridRows}×{GridColumns}";
+
+    /// <summary>工作区当前没有任何已绑定直播间的窗格（空状态引导用）。</summary>
+    public bool IsWorkspaceEmpty => !WorkspaceDockBuilder.EnumerateTiles(Layout).Any(tile => tile.HasRoom);
+
+    /// <summary>布局/窗格变化后统一刷新状态栏文案与工作区空状态。</summary>
+    private void NotifyWorkspaceSummaryChanged()
+    {
+        OnPropertyChanged(nameof(RoomCountText));
+        OnPropertyChanged(nameof(IsWorkspaceEmpty));
+    }
 
     /// <summary>高能事件面板是否展开；只影响主窗口叠加层，不写入方案 / Dock 布局。</summary>
     public bool IsHighlightPanelVisible
@@ -1520,7 +1594,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         SyncDanmakuSubscriptions();
         IsDirty = true;
         StatusText = $"已移出 {title}";
-        OnPropertyChanged(nameof(RoomCountText));
+        NotifyWorkspaceSummaryChanged();
     }
 
     /// <summary>自动模式下，房间被删除/移出后立即按剩余房间重排；自定义比例保持原结构。</summary>
@@ -1680,7 +1754,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _suppressLayoutTracking = false;
         AttachLayoutTracking(layout);
         WireTileInteractions(layout);
-        OnPropertyChanged(nameof(RoomCountText));
+        NotifyWorkspaceSummaryChanged();
         StatusText = status;
 
         await Task.Yield();
@@ -1739,7 +1813,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _suppressLayoutTracking = false;
         AttachLayoutTracking(layout);
         WireTileInteractions(layout);
-        OnPropertyChanged(nameof(RoomCountText));
+        NotifyWorkspaceSummaryChanged();
         StatusText = $"已拆分新窗格并放入 {room.Alias}";
 
         await Task.Yield();
@@ -1842,6 +1916,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _disposed = true;
+        _toastCts?.Cancel();
         _healthTimer?.Stop();
         _healthTimer = null;
         _focusHintTimer?.Stop();
@@ -2098,7 +2173,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _suppressLayoutTracking = false;
         AttachLayoutTracking(layout);
         WireTileInteractions(layout);
-        OnPropertyChanged(nameof(RoomCountText));
+        NotifyWorkspaceSummaryChanged();
 
         // 差集只销毁被移除的房间；交集播放器已转移，不重新拉流。
         foreach (var roomId in diff.Removed)
@@ -2148,7 +2223,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         RefreshFilteredRooms();
         RebuildGroups();
-        OnPropertyChanged(nameof(RoomCountText));
+        NotifyWorkspaceSummaryChanged();
     }
 
     private void RefreshFilteredRooms()

@@ -261,7 +261,27 @@
     <!-- ==================== 3. 右侧平铺监控工作区 ==================== -->
     <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource BrushBgCanvas}" Padding="6">
       <Grid>
-        <dock:DockControl x:Name="Dock" Layout="{Binding Layout}" />
+        <dock:DockControl x:Name="Dock" Layout="{Binding Layout}"
+                          IsVisible="{Binding !IsWorkspaceEmpty}" />
+
+        <!-- 空状态引导：工作区还没有任何直播间窗格 -->
+        <StackPanel IsVisible="{Binding IsWorkspaceEmpty}"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Spacing="9">
+          <PathIcon Data="{DynamicResource IconMonitor}" Width="46" Height="46"
+                    HorizontalAlignment="Center"
+                    Foreground="{DynamicResource BrushTextMuted}" Opacity="0.35" />
+          <TextBlock Text="监控墙还是空的" FontSize="15" FontWeight="SemiBold"
+                     HorizontalAlignment="Center"
+                     Foreground="{DynamicResource BrushTextSecondary}" />
+          <TextBlock Text="从左侧双击任意直播间，把它加入监控墙开始监看。"
+                     FontSize="11.5"
+                     HorizontalAlignment="Center"
+                     Foreground="{DynamicResource BrushTextMuted}" />
+          <Button Classes="primary-btn" Content="添加直播间" Click="OnAddRoom"
+                  HorizontalAlignment="Center" Margin="0,6,0,0" />
+        </StackPanel>
 
         <!-- 高能事件悬浮抽屉（不写入 DockLayoutJson） -->
         <Border x:Name="HighlightPanel"
@@ -402,6 +422,23 @@
             Background="{DynamicResource BrushBgCanvas}"
             IsVisible="{Binding IsClipStudioVisible}">
       <views:ClipStudioView x:Name="ClipStudioViewHost" DataContext="{Binding ClipStudio}" />
+    </Border>
+
+    <!-- 右下角非阻塞 Toast：2.5 秒自动消失 -->
+    <Border Classes="toast"
+            Grid.Row="1" Grid.ColumnSpan="2"
+            IsVisible="{Binding IsToastVisible}"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Bottom"
+            Margin="0,0,24,42"
+            IsHitTestVisible="False">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Ellipse Width="6" Height="6" Fill="{DynamicResource BrushAccent}" VerticalAlignment="Center" />
+        <TextBlock Text="{Binding ToastText}" FontSize="11.5"
+                   Foreground="{DynamicResource BrushTextPrimary}"
+                   MaxWidth="420" TextTrimming="CharacterEllipsis"
+                   VerticalAlignment="Center" />
+      </StackPanel>
     </Border>
 
     <!-- ==================== 5. 底部状态栏 (28px，等宽数字) ==================== -->

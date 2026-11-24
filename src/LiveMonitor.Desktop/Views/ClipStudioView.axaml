@@ -321,7 +321,27 @@
                         CornerRadius="8"
                         BorderBrush="{DynamicResource BrushBorderSubtle}" BorderThickness="1"
                         ClipToBounds="True">
-                    <player:LocalClipPlayerView x:Name="Player" />
+                    <Grid>
+                        <player:LocalClipPlayerView x:Name="Player" />
+
+                        <!-- 空状态引导：还没载入录像时覆盖播放器占位 -->
+                        <Border IsVisible="{Binding !HasVideo}" Background="#0A0C10">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
+                                <PathIcon Data="{DynamicResource IconScissors}" Width="42" Height="42"
+                                          HorizontalAlignment="Center"
+                                          Foreground="{DynamicResource BrushTextMuted}" Opacity="0.35" />
+                                <TextBlock Text="还没有载入录像" FontSize="15" FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"
+                                           Foreground="{DynamicResource BrushTextSecondary}" />
+                                <TextBlock Text="从左侧选一段录像，或打开本地 mkv / mp4 文件开始剪辑。"
+                                           FontSize="11.5" HorizontalAlignment="Center"
+                                           Foreground="{DynamicResource BrushTextMuted}" />
+                                <Button Classes="primary-btn" Content="打开本地文件…"
+                                        Command="{Binding OpenLocalFileCommand}"
+                                        HorizontalAlignment="Center" Margin="0,6,0,0" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
                 </Border>
 
                 <!-- 播控条：左簇（-5s / 播放暂停 / +5s），中心时间码，右簇（倍速 / 音量 / 弹幕回放） -->
