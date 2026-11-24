@@ -1,7 +1,8 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using Avalonia.Controls;
+using ToolTip = Avalonia.Controls.ToolTip;
 using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -49,6 +50,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
     private StreamQuality? _quality;
     private bool _userStopped;
     private bool _muted;
+    private bool _paused;
     private DateTimeOffset _suppressEndUntil = DateTimeOffset.MinValue;
     private bool _compact;
     private bool _compactApplied;
@@ -112,6 +114,30 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
     /// <summary>失败或断流后由上层做 3/10/30s 退避重连；播放器自身不解析地址。</summary>
     public event EventHandler? ReconnectRequested;
 
+    /// <summary>用户点击“刷新”按钮：由上层立即重新解析地址并重连。</summary>
+    public event EventHandler? RefreshRequested;
+
+    /// <summary>是否处于暂停状态。</summary>
+    public bool IsPaused => _paused;
+
+    /// <summary>暂停 / 继续播放（只影响 mpv 播放，不影响弹幕与录制）。</summary>
+    public void TogglePause()
+    {
+        ThrowIfDisposed();
+        SetPaused(!_paused);
+    }
+
+    /// <summary>请求上层立即刷新播放（重新取流地址并重连）。</summary>
+    public void RequestRefresh() => RefreshRequested?.Invoke(this, EventArgs.Empty);
+
+    private void SetPaused(bool paused)
+    {
+        _paused = paused;
+        _context?.SetPropertyFlag("pause", paused);
+        PauseIcon.Text = paused ? "\uE768" : "\uE769";
+        ToolTip.SetTip(PauseButton, paused ? "继续播放" : "暂停播放");
+    }
+
     public string? RoomTitle
     {
         get => TitleText.Text;
@@ -143,6 +169,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
     private async Task PlayAsyncCore(StreamQuality quality, CancellationToken ct)
     {
         _userStopped = false;
+        SetPaused(false);
         _quality = quality;
         QualityLabel = $"{quality.DisplayName} · {quality.Fps}fps";
         SetState(PlayerState.Loading, "正在建立播放通道…");
@@ -1086,6 +1113,12 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
 
     private void OnMuteClick(object? sender, RoutedEventArgs e)
         => SetMute(!_muted);
+
+    private void OnPauseClick(object? sender, RoutedEventArgs e)
+        => TogglePause();
+
+    private void OnRefreshClick(object? sender, RoutedEventArgs e)
+        => RequestRefresh();
 
     private void OnCompactClick(object? sender, RoutedEventArgs e)
         => SetCompactMode(!_compact);

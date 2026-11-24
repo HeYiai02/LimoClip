@@ -96,6 +96,7 @@ public sealed class WorkspacePlayerManager : IDisposable
             OnPlayerStateChanged(tile, player);
         };
         player.ReconnectRequested += (_, _) => ScheduleRetry(tile);
+        player.RefreshRequested += (_, _) => _ = RefreshTileAsync(tile);
         player.SizeChanged += (_, _) => ScheduleQualityCheck(tile, player);
     }
 
@@ -484,6 +485,41 @@ public sealed class WorkspacePlayerManager : IDisposable
         }
 
         _parseGate.Dispose();
+    }
+
+    /// <summary>用户点击窗格“刷新”：清掉退避重试计时器，立即重新解析地址并起播。</summary>
+    private async Task RefreshTileAsync(RoomTileViewModel tile)
+    {
+        if (_disposed || !tile.HasRoom)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            _retryCounts.Remove(tile.PaneId);
+            if (_retryDelays.Remove(tile.PaneId, out var retryCts))
+            {
+                retryCts.Cancel();
+                retryCts.Dispose();
+            }
+
+            if (_offlinePolls.Remove(tile.PaneId, out var pollCts))
+            {
+                pollCts.Cancel();
+                pollCts.Dispose();
+            }
+        }
+
+        try
+        {
+            await StartAsync(tile);
+        }
+        catch (Exception ex) when (!_disposed)
+        {
+            tile.StateText = "播放失败";
+            tile.DetailText = ex.Message;
+        }
     }
 
     private void ScheduleRetry(RoomTileViewModel tile)

@@ -72,7 +72,7 @@
           <GradientStop Color="#4D070A10" Offset="1" />
         </LinearGradientBrush>
       </Border.Background>
-      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
+      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">
         <StackPanel Grid.Column="0"
                     Orientation="Horizontal"
                     Spacing="6"
@@ -103,7 +103,7 @@
                     VerticalAlignment="Center"
                     Margin="10,0,4,0">
           <controls:AudioLevelMeter x:Name="AudioMeter"
-                                    Width="56"
+                                    Width="40"
                                     Height="16"
                                     Margin="0,0,2,0"
                                     VerticalAlignment="Center" />
@@ -112,7 +112,7 @@
                      Foreground="{DynamicResource BrushTextMuted}"
                      VerticalAlignment="Center" />
           <Slider x:Name="VolumeSlider"
-                  Width="66"
+                  Width="48"
                   Minimum="0"
                   Maximum="100"
                   Value="100"
@@ -122,8 +122,39 @@
                   ValueChanged="OnVolumeChanged" />
         </StackPanel>
 
-        <Button x:Name="MuteButton"
+        <Button x:Name="PauseButton"
                 Grid.Column="2"
+                Classes="ghost-btn"
+                Width="24" Height="24"
+                Padding="0"
+                Margin="2,0,0,0"
+                ToolTip.Tip="暂停 / 继续播放"
+                Click="OnPauseClick">
+          <TextBlock x:Name="PauseIcon"
+                     Text="&#xE769;"
+                     FontFamily="Segoe Fluent Icons"
+                     FontSize="13"
+                     Foreground="{DynamicResource BrushTextSecondary}"
+                     VerticalAlignment="Center" />
+        </Button>
+
+        <Button x:Name="RefreshButton"
+                Grid.Column="3"
+                Classes="ghost-btn"
+                Width="24" Height="24"
+                Padding="0"
+                Margin="2,0,0,0"
+                ToolTip.Tip="刷新播放（重新获取直播地址并重连）"
+                Click="OnRefreshClick">
+          <TextBlock Text="&#xE72C;"
+                     FontFamily="Segoe Fluent Icons"
+                     FontSize="13"
+                     Foreground="{DynamicResource BrushTextSecondary}"
+                     VerticalAlignment="Center" />
+        </Button>
+
+        <Button x:Name="MuteButton"
+                Grid.Column="4"
                 Classes="ghost-btn"
                 Width="24" Height="24"
                 Padding="0"
@@ -139,7 +170,7 @@
         </Button>
 
         <ToggleButton x:Name="DanmakuButton"
-                      Grid.Column="3"
+                      Grid.Column="5"
                       Classes="ghost-btn"
                       Height="24"
                       MinWidth="24"
@@ -152,7 +183,7 @@
         </ToggleButton>
 
         <Button x:Name="CompactButton"
-                Grid.Column="4"
+                Grid.Column="6"
                 Classes="ghost-btn"
                 Height="24"
                 Padding="7,0"

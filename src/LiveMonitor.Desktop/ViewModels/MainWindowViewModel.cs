@@ -409,8 +409,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     /// <summary>工作区窗格集合变化（增删/方案切换/布局重建），供视图同步自由画布子项。</summary>
     public event EventHandler? WorkspaceTilesChanged;
 
+    /// <summary>自由布局/自定义比例下窗格结构被模型层修改（例如移出房间），视图需重建宿主。</summary>
+    public event EventHandler? LayoutStructureChanged;
+
     /// <summary>请求视图把自由布局文档应用到画布。</summary>
     public event EventHandler<FreeformLayoutDocument>? FreeformApplyRequested;
+
+    /// <summary>手动通知窗格集合变化（模型层移出窗格后由 ViewModel 主动触发）。</summary>
+    public void NotifyWorkspaceTilesChanged() => WorkspaceTilesChanged?.Invoke(this, EventArgs.Empty);
 
     /// <summary>自由布局切换时先停掉旧播放器并解除绑定（旧控件不能再挂到新宿主上）。</summary>
     public void DetachWorkspacePlayers()
@@ -1776,7 +1782,21 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         tile.ClearRoom();
-        await ReflowAutoAsync(CancellationToken.None).ConfigureAwait(true);
+
+        // 自由布局/自定义比例：从 Dock 模型里真正移除该窗格，避免留下空窗格；
+        // 自动模式仍走重排，保证格数随房间数收缩。
+        var removedFromModel = WorkspaceDockBuilder.RemovePane(Layout, tile.PaneId);
+        if (removedFromModel)
+        {
+            NotifyWorkspaceTilesChanged();
+            LayoutStructureChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        if (!IsCustomLayout && !IsFreeformMode)
+        {
+            await ReflowAutoAsync(CancellationToken.None).ConfigureAwait(true);
+        }
+
         SyncDanmakuSubscriptions();
         IsDirty = true;
         StatusText = $"已移出 {title}";

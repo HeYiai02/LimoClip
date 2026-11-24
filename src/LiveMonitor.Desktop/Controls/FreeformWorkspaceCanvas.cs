@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
@@ -11,6 +11,8 @@ using LiveMonitor.Desktop.ViewModels;
 using LiveMonitor.Desktop.Views;
 using ContextMenu = Avalonia.Controls.ContextMenu;
 using Cursor = Avalonia.Input.Cursor;
+using DragEventArgs = Avalonia.Input.DragEventArgs;
+using DragDropEffects = Avalonia.Input.DragDropEffects;
 using MenuItem = Avalonia.Controls.MenuItem;
 using Panel = Avalonia.Controls.Panel;
 using Point = Avalonia.Point;
@@ -27,6 +29,9 @@ public sealed class FreeformWorkspaceCanvas : Panel
     private const double ResizeEdgeHitPx = 6;
     private const double ResizeCornerHitPx = 10;
     private const double DragThresholdPx = 3;
+    private const string RoomDragFormat = "limoclip/room-id";
+    private const double DropDefaultWidth = 0.42;
+    private const double DropDefaultHeight = 0.42;
     private const double PinnedZBase = 1000;
     private const int NormalZMax = 999;
     private const int PinnedZMax = 1999;
@@ -65,13 +70,35 @@ public sealed class FreeformWorkspaceCanvas : Panel
         AddHandler(PointerMovedEvent, OnCanvasPointerMoved, RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(PointerReleasedEvent, OnCanvasPointerReleased, RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(PointerCaptureLostEvent, OnCanvasCaptureLost, RoutingStrategies.Tunnel, handledEventsToo: true);
+
+        // 接收从左侧直播间列表拖过来的房间。
+        DragDrop.SetAllowDrop(this, true);
+        AddHandler(DragDrop.DragOverEvent, OnDropDragOver);
+        AddHandler(DragDrop.DragLeaveEvent, OnDropDragLeave);
+        AddHandler(DragDrop.DropEvent, OnDropDrop);
     }
 
-    /// <summary>布局被拖动/缩放/层级调整后触发，供 ViewModel 标脏与保存。</summary>
+    /// <summary>房间被从左侧列表拖放到画布时触发，Rect 为建议的落位（归一化）。</summary>
+    public event EventHandler<RoomDropEventArgs>? RoomDropped;
+
+    /// <summary>拖动/缩放/层级调整后触发，供 ViewModel 标脏与保存。</summary>
     public event EventHandler? LayoutChanged;
 
     public IReadOnlyList<FreeformTilePlacement> PlacementsSnapshot =>
         _placements.Values.Select(placement => placement.Clone()).ToList();
+
+    /// <summary>直接指定某个窗格的归一化位置（拖放入口、外部预设用）。</summary>
+    public void SetPlacement(string paneId, NormalizedRect rect)
+    {
+        if (!_placements.TryGetValue(paneId, out var placement))
+        {
+            return;
+        }
+
+        placement.SetRect(rect.ClampToCanvas());
+        ApplyZIndexes();
+        InvalidateArrange();
+    }
 
     private enum DragKind
     {
@@ -708,6 +735,74 @@ public sealed class FreeformWorkspaceCanvas : Panel
         return false;
     }
 
+    private void OnDropDragOver(object? sender, DragEventArgs e)
+    {
+        if (!e.Data.Contains(RoomDragFormat))
+        {
+            return;
+        }
+
+        e.DragEffects = DragDropEffects.Copy;
+        var rect = ComputeDropRect(e.GetPosition(this));
+        _overlay.SetActiveRect(rect);
+        _overlay.SetHud("松开放入工作区", new Point(e.GetPosition(this).X + 16, e.GetPosition(this).Y + 20));
+        e.Handled = true;
+    }
+
+    private void OnDropDragLeave(object? sender, RoutedEventArgs e)
+    {
+        _overlay.SetActiveRect(null);
+        _overlay.SetHud(null, default);
+    }
+
+    private void OnDropDrop(object? sender, DragEventArgs e)
+    {
+        _overlay.SetActiveRect(null);
+        _overlay.SetHud(null, default);
+
+        if (!e.Data.Contains(RoomDragFormat)
+            || !Guid.TryParse(e.Data.Get(RoomDragFormat) as string, out var roomId))
+        {
+            return;
+        }
+
+        e.DragEffects = DragDropEffects.Copy;
+        e.Handled = true;
+        RoomDropped?.Invoke(this, new RoomDropEventArgs(roomId, ComputeDropRect(e.GetPosition(this))));
+    }
+
+    private NormalizedRect ComputeDropRect(Point position)
+    {
+        const double width = DropDefaultWidth;
+        const double height = DropDefaultHeight;
+        if (Bounds.Width <= 0 || Bounds.Height <= 0)
+        {
+            return new NormalizedRect(0.3, 0.3, width, height);
+        }
+
+        var left = position.X / Bounds.Width - width / 2;
+        var top = position.Y / Bounds.Height - height / 2;
+        return new NormalizedRect(
+            Math.Clamp(left, 0, 1 - width),
+            Math.Clamp(top, 0, 1 - height),
+            width,
+            height);
+    }
+
     private static double AspectOf(Size size) =>
         size.Width > 0 && size.Height > 0 ? size.Width / size.Height : 16.0 / 9.0;
+}
+
+/// <summary>房间从左侧列表拖放到自由画布时的事件参数。</summary>
+public sealed class RoomDropEventArgs : EventArgs
+{
+    public RoomDropEventArgs(Guid roomId, NormalizedRect rect)
+    {
+        RoomId = roomId;
+        Rect = rect;
+    }
+
+    public Guid RoomId { get; }
+
+    public NormalizedRect Rect { get; }
 }

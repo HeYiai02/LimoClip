@@ -523,6 +523,98 @@ public sealed class WorkspaceDockBuilder : Factory
         }
     }
 
+    /// <summary>
+    /// 从布局模型中移除指定 pane 的 ToolDock，并清理空行与多余 splitter。
+    /// 返回是否实际移除；若移除后布局将不再有任何窗格则返回 false（保持原布局，由调用方决定重建）。
+    /// </summary>
+    public static bool RemovePane(IRootDock? layout, string paneId)
+    {
+        if (layout?.VisibleDockables is null || string.IsNullOrWhiteSpace(paneId))
+        {
+            return false;
+        }
+
+        var outer = layout.VisibleDockables.OfType<ProportionalDock>().FirstOrDefault();
+        if (outer?.VisibleDockables is null)
+        {
+            return false;
+        }
+
+        ProportionalDock? ownerRow = null;
+        ToolDock? target = null;
+        foreach (var row in outer.VisibleDockables.OfType<ProportionalDock>())
+        {
+            target = row.VisibleDockables?.OfType<ToolDock>().FirstOrDefault(pane =>
+                string.Equals(pane.Id, $"dock-{paneId}", StringComparison.Ordinal)
+                || (pane.VisibleDockables?.OfType<Tool>().Any(tool =>
+                        string.Equals(tool.Id, paneId, StringComparison.Ordinal)) ?? false));
+            if (target is not null)
+            {
+                ownerRow = row;
+                break;
+            }
+        }
+
+        if (ownerRow?.VisibleDockables is null || target is null)
+        {
+            return false;
+        }
+
+        var rowChildren = ownerRow.VisibleDockables;
+        var paneIndex = rowChildren.IndexOf(target);
+        if (paneIndex < 0)
+        {
+            return false;
+        }
+
+        rowChildren.RemoveAt(paneIndex);
+        TrimSplitters(rowChildren);
+
+        if (!rowChildren.OfType<ToolDock>().Any())
+        {
+            var rowIndex = outer.VisibleDockables.IndexOf(ownerRow);
+            if (rowIndex >= 0)
+            {
+                outer.VisibleDockables.RemoveAt(rowIndex);
+                TrimSplitters(outer.VisibleDockables);
+            }
+        }
+
+        var remainingRows = outer.VisibleDockables.OfType<ProportionalDock>()
+            .Where(row => row.VisibleDockables?.OfType<ToolDock>().Any() == true)
+            .ToList();
+        if (remainingRows.Count == 0)
+        {
+            // 最后一个窗格：不把布局清空，交由调用方决定重建（例如自动模式重排）。
+            return false;
+        }
+
+        outer.ActiveDockable = remainingRows[0];
+        layout.DefaultDockable = outer;
+        return true;
+    }
+
+    private static void TrimSplitters(IList<IDockable> children)
+    {
+        while (children.Count > 0 && children[0] is IProportionalDockSplitter)
+        {
+            children.RemoveAt(0);
+        }
+
+        while (children.Count > 0 && children[^1] is IProportionalDockSplitter)
+        {
+            children.RemoveAt(children.Count - 1);
+        }
+
+        for (var i = children.Count - 1; i > 0; i--)
+        {
+            if (children[i] is IProportionalDockSplitter && children[i - 1] is IProportionalDockSplitter)
+            {
+                children.RemoveAt(i);
+            }
+        }
+    }
+
     private static ToolDock CreateToolDock(RoomTileViewModel tile)
     {
         var tool = new Tool

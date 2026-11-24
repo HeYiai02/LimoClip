@@ -458,7 +458,7 @@ Program.Main
   - 自适应排布按钮：结构变化走重建（`FitRoomsAsync`），仅比例变化则 `ResetProportions` 原地归位；
   - 主副屏按钮：`ApplyHeroLayoutAsync` → `CreateHeroAndSideColumn` 重建 + 记忆 `IsHeroLayout`（模式文本、底栏房间数展示不同）；
   - 拖拽/分割条变化 → `SetCustomLayout(true)`（`LayoutModeText` 显示「自定义比例 / 主副屏 · 自定义」），保存/恢复快照 `Capture/RestoreCustomLayoutAsync`；
-  - 窗格增删（双击房间、关闭窗格）与 `AppendPaneAsync`。
+  - 窗格增删（双击房间、关闭窗格）与 `AppendPaneAsync`；关闭窗格在自由布局/自定义比例下走 `WorkspaceDockBuilder.RemovePane` 从模型中真正移除（不留空窗格，见 §10.6）。
 
 ### 10.3 播放器与监控
 
@@ -467,7 +467,8 @@ Program.Main
   - 失败处理：`ReconnectPolicy`（3s/10s/30s 退避，最多 3 次）→ 60s 失败复检；主播离线时定时轮询（60s）；
   - 播放器状态 → 窗格状态文本（`PlayerStateText`：连接中/直播中/已停止/重连中/播放失败）；
   - 焦点模式：双击窗格进入单窗格全屏（`IsFocused` + 静音策略 + 恢复原布局）、Esc 退出；
-  - 音频/弹幕开关、音量、静音与全局主静音联动。
+  - 锚点/未开播文字与状态同步：`SetDanmakuEnabled` 控制清流弹幕按钮显隐；
+  - 底部控制条：音量/静音、弹幕开关、紧凑模式，以及 V0.7 新增的「暂停/继续」（`TogglePause`，同步 mpv `pause` 属性并切换 ⏸/▶ 图标）与「刷新播放」（`RequestRefresh` → `RefreshRequested` → `WorkspacePlayerManager.RefreshTileAsync`，清空退避/离线计时器后立即重新解析地址并起播）。
 - `QualityPolicy`：按 Height/Fps 降序；大窗/焦点取最高；紧凑模式上限 480p；普通窗口优先 ≤720p，取第一个满足者。
 - `MpvPlayerView`（libmpv 封装）：
   - 初始化选项：`hwdec=auto-safe`、`vo=libmpv`、`gpu-api=opengl`、`cache=yes`、`demuxer-max-bytes`（按分辨率 3M/4M/8M）、`network-timeout=10`、`audio-buffer=0.8`、`audio-stream-silence=yes`、关闭 OSC/默认快捷键（键位由应用处理）；
@@ -503,6 +504,8 @@ Program.Main
   - 拖动反馈：拖动中窗格透明度降至 0.92 并临时升至最上层，浮层绘制蓝色落位框 + 跟随指针的尺寸/吸附 HUD（如 `1168 × 812 px · 100% × 100% · 已吸附`），光标切换为移动/缩放光标；拖动中按 `Esc` 取消并恢复按下前位置。
   - `SnapGuidesOverlay`：磁吸参考线 + 落位框 + HUD 浮层（蓝普通线 1.5px / 琥珀虚线中心线 + 端帽，不参与命中测试）。
 - `MainWindowViewModel` 集成：`IsFreeformMode`/`FreeformDocument`/`WorkspaceTiles` 事件；`EnterFreeformMode`/`ToggleFreeformMode`/`ApplyFreeformPreset`/`UpdateFreeformDocument`；保存方案时自由布局写 v2 JSON（`SerializeCurrentLayout`），加载时自动识别并进入自由模式；`一键自适应排布` 自动退出自由模式。
+- 拖拽放入：左侧列表按下拖动（`DataObject` 键 `limoclip/room-id`，移动 >4px 才算拖拽）→ 画布 `DragOver` 实时显示落位框/HUD → 松手：已在画布则 `SetPlacement`，否则 `AddRoomToWorkspaceAsync` 后落到指针处（默认 0.42×0.42 居中并 clamp），并更新自由布局文档。
+- 移出窗格：自由布局删除文档 placement；自定义比例下 `WorkspaceDockBuilder.RemovePane` 从 Dock 模型移除窗格并剪掉空行/多余分割条；`LayoutStructureChanged` 驱动视图刷新，画布模式同步 `SyncFreeformTiles`，不留空窗格。
 - 宿主切换：Dock 与画布互斥显示（`ShowDockWorkspace = !IsWorkspaceEmpty && !IsFreeformMode`）。播放器控件（`MpvPlayerView`）不能同时被两个 `ContentPresenter` 挂载，切换时先 `DetachWorkspacePlayers()`（停止+解绑旧控件）→ 切换宿主并等一轮布局 → `StartWorkspacePlayersAsync()` 重新创建并起播；Dock 在自由模式下保持 `Layout=null`。
 - 顶栏：`自由布局`（开/关，显示当前模式提示）、`画中画预设`（未进入自由布局时先进入再应用）；状态栏显示「已进入/退出自由布局」「已应用自由布局预设」。方案中的自由布局结构与平铺布局共用 `LayoutProfile`，保存/重启后可恢复。
 
@@ -511,7 +514,7 @@ Program.Main
 ## 11. 关键运行链路
 
 1. **添加房间**：`AddRoomWindow` → 平台解析（`PlatformFactory.CanHandle` 遍历）→ `ExtractRoomId` → 入 `LiveRooms` → 分配显示序号。
-2. **打开监控**：双击房间 → `MainWindowViewModel` 找空窗格（或新建/重建布局）→ `WorkspacePlayerManager.StartAsync` → 弹幕 `Acquire`。
+2. **打开监控**：双击房间或从左侧列表拖拽到工作区指定位置 → `MainWindowViewModel` 找空窗格/在指针处新建（自由布局）/重建布局 → `WorkspacePlayerManager.StartAsync` → 弹幕 `Acquire`。
 3. **方案切换**：`LoadProfileAsync` → 反序列化 Dock 布局 → 差量计算 → 保留播放器重挂载（`Dock.Layout` 设置）→ 新增窗格启动 / 移除窗格释放。
 4. **手动/自动录制**：录制中心「立即开录」或轮询发现开播 → `RecordingManager.StartAsync` → FFmpeg 分段录制 → 断流续段 → 停止/离线合并 → 会话 Completed；录制期间弹幕写 JSONL、高能事件关联会话。
 5. **剪辑导出**：剪辑台选场次 → probe/波形/弹幕加载 → 选区 → 无损切段 + ASS 烧录双版导出 → 进度回显。

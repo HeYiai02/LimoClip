@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
@@ -12,9 +12,13 @@ using Dock.Model.Controls;
 using Dock.Model.Core;
 using Dock.Settings;
 using Dock.Model.Mvvm.Controls;
+using LiveMonitor.Desktop.Controls;
 using LiveMonitor.Desktop.Services;
 using LiveMonitor.Desktop.ViewModels;
 using DockControl = Dock.Avalonia.Controls.DockControl;
+using Point = Avalonia.Point;
+using DataObject = Avalonia.Input.DataObject;
+using DragDropEffects = Avalonia.Input.DragDropEffects;
 
 namespace LiveMonitor.Desktop.Views;
 
@@ -32,6 +36,10 @@ public partial class MainWindow : Window
     private bool _isImmersiveActive;
     private DateTime _lastFullscreenToggleAt;
     private IRootDock? _savedDockLayout;
+    private RoomListItemViewModel? _roomDragCandidate;
+    private Point _roomDragStart;
+    private bool _roomDragArmed;
+    private bool _roomDragActive;
 
     public MainWindow()
     {
@@ -41,6 +49,8 @@ public partial class MainWindow : Window
         Dock.SizeChanged += OnDockSizeChanged;
         Dock.AddHandler(InputElement.PointerPressedEvent, OnDockPointerPressed, RoutingStrategies.Tunnel);
         RoomList.AddHandler(InputElement.PointerPressedEvent, OnRoomPointerPressed, RoutingStrategies.Tunnel);
+        RoomList.AddHandler(InputElement.PointerMovedEvent, OnRoomPointerMoved, RoutingStrategies.Tunnel);
+        RoomList.AddHandler(InputElement.PointerReleasedEvent, OnRoomPointerReleased, RoutingStrategies.Tunnel, handledEventsToo: true);
         KeyDown += OnWindowKeyDown;
         PointerMoved += OnWindowPointerActivity;
         PointerPressed += OnWindowPointerActivity;
@@ -245,6 +255,8 @@ public partial class MainWindow : Window
             _viewModel.ProportionsRestored += (_, _) => SyncVisualProportions();
             _viewModel.Groups.CollectionChanged += (_, _) => RefreshGroupPills();
             _viewModel.WorkspaceTilesChanged += (_, _) => SyncFreeformTiles();
+            _viewModel.LayoutStructureChanged += (_, _) => RefreshWorkspaceHost();
+            FreeformCanvas.RoomDropped += OnFreeformRoomDropped;
             _viewModel.FreeformApplyRequested += (_, document) =>
             {
                 FreeformCanvas.ApplyDocument(document);
@@ -543,6 +555,60 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>窗格结构被模型层修改（例如把房间移出工作区）后重建宿主，避免留下空窗格。</summary>
+    private void RefreshWorkspaceHost()
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        if (_viewModel.IsFreeformMode)
+        {
+            SyncFreeformTiles();
+            _viewModel.UpdateFreeformDocument(FreeformCanvas.CaptureDocument());
+            return;
+        }
+
+        // Dock 绑定已被本地赋值覆盖，这里直接重建布局并补齐分隔条模板。
+        Dock.Layout = null;
+        Dock.Layout = _viewModel.Layout;
+        EnsureSplitterTemplate();
+        Dock.UpdateLayout();
+    }
+
+    /// <summary>左侧房间被拖到自由画布：已加入则移动位置，否则先加入工作区再落到指定位置。</summary>
+    private async void OnFreeformRoomDropped(object? sender, RoomDropEventArgs e)
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var tile = _viewModel.WorkspaceTiles.FirstOrDefault(t => t.LiveRoomId == e.RoomId);
+            if (tile is null)
+            {
+                await _viewModel.AddRoomToWorkspaceAsync(e.RoomId);
+                tile = _viewModel.WorkspaceTiles.FirstOrDefault(t => t.LiveRoomId == e.RoomId);
+            }
+
+            if (tile is null)
+            {
+                return;
+            }
+
+            FreeformCanvas.SetPlacement(tile.PaneId, e.Rect);
+            _viewModel.UpdateFreeformDocument(FreeformCanvas.CaptureDocument());
+            _viewModel.SetStatus($"已把「{tile.DisplayTitle}」放到指定位置");
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetStatus($"拖入工作区失败：{ex.Message}");
+        }
+    }
+
     private async void OnToggleFreeformLayout(object? sender, RoutedEventArgs e)
     {
         if (_viewModel is null || _initializing)
@@ -820,6 +886,59 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void OnRoomPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_roomDragActive || _roomDragCandidate is null || _viewModel is null)
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(RoomList);
+        if (!point.Properties.IsLeftButtonPressed)
+        {
+            _roomDragCandidate = null;
+            _roomDragArmed = false;
+            return;
+        }
+
+        var position = e.GetPosition(RoomList);
+        var deltaX = position.X - _roomDragStart.X;
+        var deltaY = position.Y - _roomDragStart.Y;
+        if (!_roomDragArmed)
+        {
+            if (Math.Abs(deltaX) < 4 && Math.Abs(deltaY) < 4)
+            {
+                return;
+            }
+
+            _roomDragArmed = true;
+        }
+
+        var room = _roomDragCandidate.Room;
+        _roomDragActive = true;
+        try
+        {
+            var data = new DataObject();
+            data.Set("limoclip/room-id", room.Id.ToString());
+            await DragDrop.DoDragDrop(e, data, DragDropEffects.Copy);
+        }
+        finally
+        {
+            _roomDragActive = false;
+            _roomDragCandidate = null;
+            _roomDragArmed = false;
+        }
+    }
+
+    private void OnRoomPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!_roomDragActive)
+        {
+            _roomDragCandidate = null;
+            _roomDragArmed = false;
+        }
+    }
+
     private async void OnRoomPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (_viewModel is null)
@@ -832,6 +951,14 @@ public partial class MainWindow : Window
         if (item is null)
         {
             return;
+        }
+
+        // 左键按下先记为拖拽候选，移动超过 4px 后进入拖放（拖到自由画布可指定落位）。
+        if (e.GetCurrentPoint(RoomList).Properties.IsLeftButtonPressed)
+        {
+            _roomDragCandidate = item;
+            _roomDragStart = e.GetPosition(RoomList);
+            _roomDragArmed = false;
         }
 
         var now = DateTime.UtcNow;
