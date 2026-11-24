@@ -10,7 +10,7 @@ namespace LiveMonitor.Media.Recording;
 /// <summary>
 /// 全程录制器：调用 ffmpeg 以 <c>-c copy</c> 把直播流零重编码写入 <c>.mkv</c>。
 /// <para>
-/// 关键行为（见 limoclip_v0_3.md §2）：停录时向 stdin 写 <c>q</c> 等待优雅退出（超时才 Kill），
+/// 关键行为（见 ARCHITECTURE.md「9.1 录制」）：停录时向 stdin 写 <c>q</c> 等待优雅退出（超时才 Kill），
 /// 保证 matroska 收尾写入索引；通过 <see cref="ProcessJobGuard"/> 防止宿主崩溃后残留 ffmpeg；
 /// 以 <c>-progress pipe:1</c> 的第一个非零 <c>out_time_us</c> 反推首帧锚点，
 /// 供弹幕 jsonl 计算相对录屏起点的毫秒偏移。

@@ -119,7 +119,7 @@ dotnet run --project src/LiveMonitor.Desktop/LiveMonitor.Desktop.csproj
 powershell -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Version v0.5.0
 ```
 
-> 历史架构与各阶段设计文档已整理归档，详见仓库中的 `code_artifact.md`、`limoclip_v0_*.md` 与 `HANDOFF.md`。
+> 项目架构与各模块实现方式见根目录 `ARCHITECTURE.md`；历史阶段设计文档已归档到 `docs/archive/`，仅用于追溯。
 
 ---
 

@@ -4,7 +4,7 @@ using LiveMonitor.Core.Entities;
 namespace LiveMonitor.Media.Recording;
 
 /// <summary>
-/// 录制产出文件的命名规则（limoclip_v0_3.md §4）：
+/// 录制产出文件的命名规则（见 ARCHITECTURE.md「9.1 录制」）：
 /// 视频与弹幕伴随文件同一基础名，形如 <c>20261123_200130_#3_晚风游戏室_21452505.mkv/.jsonl</c>。
 /// 断流续录会按新的开始时间生成新的一对文件，不覆盖既有文件。
 /// </summary>
