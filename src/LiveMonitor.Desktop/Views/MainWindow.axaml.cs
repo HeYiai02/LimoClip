@@ -1,17 +1,20 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
+using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Dock.Controls.ProportionalStackPanel;
+using Dock.Model.Controls;
 using Dock.Model.Core;
 using Dock.Settings;
 using Dock.Model.Mvvm.Controls;
 using LiveMonitor.Desktop.Services;
 using LiveMonitor.Desktop.ViewModels;
+using DockControl = Dock.Avalonia.Controls.DockControl;
 
 namespace LiveMonitor.Desktop.Views;
 
@@ -28,6 +31,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _immersiveIdleTimer;
     private bool _isImmersiveActive;
     private DateTime _lastFullscreenToggleAt;
+    private IRootDock? _savedDockLayout;
 
     public MainWindow()
     {
@@ -240,11 +244,24 @@ public partial class MainWindow : Window
             DataContext = _viewModel;
             _viewModel.ProportionsRestored += (_, _) => SyncVisualProportions();
             _viewModel.Groups.CollectionChanged += (_, _) => RefreshGroupPills();
+            _viewModel.WorkspaceTilesChanged += (_, _) => SyncFreeformTiles();
+            _viewModel.FreeformApplyRequested += (_, document) =>
+            {
+                FreeformCanvas.ApplyDocument(document);
+            };
+            FreeformCanvas.LayoutChanged += (_, _) =>
+            {
+                _viewModel.UpdateFreeformDocument(FreeformCanvas.CaptureDocument());
+            };
             _viewModel.PropertyChanged += (_, args) =>
             {
                 if (args.PropertyName == nameof(MainWindowViewModel.Layout))
                 {
-                    Dock.Layout = _viewModel.Layout;
+                    // 自由布局模式下由画布承载窗格，Dock 保持空布局，避免控件被两个宿主同时挂载。
+                    if (!_viewModel.IsFreeformMode)
+                    {
+                        Dock.Layout = _viewModel.Layout;
+                    }
                 }
                 else if (args.PropertyName == nameof(MainWindowViewModel.IsFocused))
                 {
@@ -267,8 +284,19 @@ public partial class MainWindow : Window
             RefreshGroupPills();
             _viewModel.Metrics.Start();
             _viewModel.SetWorkspaceAspect(Dock.Bounds.Width, Dock.Bounds.Height);
-            Dock.Layout = _viewModel.Layout;
+            if (_viewModel.IsFreeformMode)
+            {
+                // 载入的是自由布局方案：Dock 不承载窗格，只保留结构用于恢复平铺。
+                _savedDockLayout = _viewModel.Layout;
+                Dock.Layout = null;
+            }
+            else
+            {
+                Dock.Layout = _viewModel.Layout;
+            }
+
             EnsureSplitterTemplate();
+            SyncFreeformTiles();
         }
         catch (Exception ex)
         {
@@ -498,6 +526,99 @@ public partial class MainWindow : Window
         {
             _viewModel.SetStatus($"切换主副屏布局失败：{ex.Message}");
         }
+    }
+
+    /// <summary>把当前工作区窗格同步给自由画布（窗格增减/房间变化时调用）。</summary>
+    private void SyncFreeformTiles()
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        FreeformCanvas.SetTiles(_viewModel.WorkspaceTiles);
+        if (_viewModel.FreeformDocument is { } document)
+        {
+            FreeformCanvas.ApplyDocument(document);
+        }
+    }
+
+    private async void OnToggleFreeformLayout(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null || _initializing)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_viewModel.IsFreeformMode)
+            {
+                // 退出自由布局：先清空画布并等一轮布局，确保旧窗格视图不再绑定 PlayerView，
+                // 再恢复 Dock 结构、重新创建播放器（PlayerView 不能在两个宿主之间复用）。
+                FreeformCanvas.SetTiles(Array.Empty<RoomTileViewModel>());
+                FreeformCanvas.IsVisible = false;
+                FreeformCanvas.UpdateLayout();
+                await Task.Delay(120);
+
+                _viewModel.DetachWorkspacePlayers();
+                _viewModel.ToggleFreeformMode();
+                Dock.Layout = _savedDockLayout;
+                Dock.Bind(DockControl.LayoutProperty,
+                    new Avalonia.Data.Binding(nameof(MainWindowViewModel.Layout)));
+                Dock.IsVisible = !_viewModel.IsWorkspaceEmpty;
+                EnsureSplitterTemplate();
+                Dock.UpdateLayout();
+                await Task.Delay(120);
+                await _viewModel.StartWorkspacePlayersAsync();
+            }
+            else
+            {
+                // 进入自由布局：先拆 Dock 树并等旧窗格视图释放，再解绑播放器、挂到画布，最后起播。
+                _savedDockLayout = _viewModel.Layout;
+                Dock.Layout = null;
+                Dock.IsVisible = false;
+                Dock.UpdateLayout();
+                await Task.Delay(120);
+
+                _viewModel.DetachWorkspacePlayers();
+                _viewModel.ToggleFreeformMode();
+                FreeformCanvas.IsVisible = true;
+                FreeformCanvas.SetTiles(_viewModel.WorkspaceTiles);
+                if (_viewModel.FreeformDocument is { } document)
+                {
+                    FreeformCanvas.ApplyDocument(document);
+                }
+
+                FreeformCanvas.UpdateLayout();
+                await Task.Delay(120);
+                await _viewModel.StartWorkspacePlayersAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _viewModel.SetStatus($"切换自由布局失败：{ex.Message}");
+        }
+    }
+
+    private async void OnFreeformPipPreset(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null || _initializing)
+        {
+            return;
+        }
+
+        if (!_viewModel.IsFreeformMode)
+        {
+            OnToggleFreeformLayout(sender, e);
+            await Task.Delay(200);
+            if (!_viewModel.IsFreeformMode)
+            {
+                return;
+            }
+        }
+
+        _viewModel.ApplyFreeformPreset(FreeformPreset.PictureInPicture);
     }
 
     private void OnSwitchToWorkspace(object? sender, RoutedEventArgs e)

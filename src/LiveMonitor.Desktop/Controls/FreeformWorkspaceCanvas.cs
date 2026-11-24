@@ -1,0 +1,627 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Templates;
+using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.Media;
+using Avalonia.VisualTree;
+using LiveMonitor.Desktop.Services;
+using LiveMonitor.Desktop.ViewModels;
+using LiveMonitor.Desktop.Views;
+using ContextMenu = Avalonia.Controls.ContextMenu;
+using Cursor = Avalonia.Input.Cursor;
+using MenuItem = Avalonia.Controls.MenuItem;
+using Panel = Avalonia.Controls.Panel;
+using Point = Avalonia.Point;
+using Size = Avalonia.Size;
+
+namespace LiveMonitor.Desktop.Controls;
+
+/// <summary>
+/// 自由画布：所有直播窗格都是同一个画布的子项，按归一化矩形定位，用 ZIndex 表达叠放。
+/// 取代 Dock.Avalonia 的二叉树平铺（Dock 无法表达画中画重叠）。
+/// </summary>
+public sealed class FreeformWorkspaceCanvas : Panel
+{
+    private const double ResizeEdgeHitPx = 6;
+    private const double ResizeCornerHitPx = 10;
+    private const double HeaderDragHeightPx = 30;
+    private const double PinnedZBase = 1000;
+    private const int NormalZMax = 999;
+    private const int PinnedZMax = 1999;
+
+    private readonly Dictionary<string, FreeformTilePlacement> _placements = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ContentControl> _childByPaneId = new(StringComparer.Ordinal);
+    private readonly SnapGuidesOverlay _overlay = new();
+
+    /// <summary>窗格内容模板：与 Dock 一致，用 RoomTileView 显示标题/播放器/控制条。</summary>
+    private static readonly IDataTemplate TileTemplate = new FuncDataTemplate<RoomTileViewModel>(
+        (tile, _) => tile is null ? null : new RoomTileView { DataContext = tile });
+
+    private string? _activePaneId;
+    private FreeformTilePlacement? _activePlacement;
+    private NormalizedRect _originRect;
+    private Point _pressPoint;
+    private DragKind _dragKind;
+    private ResizeEdge _resizeEdge;
+    private bool _isFirstArrange = true;
+
+    public FreeformWorkspaceCanvas()
+    {
+        ClipToBounds = true;
+        _overlay.ZIndex = 9999;
+        Children.Add(_overlay);
+    }
+
+    /// <summary>布局被拖动/缩放/层级调整后触发，供 ViewModel 标脏与保存。</summary>
+    public event EventHandler? LayoutChanged;
+
+    public IReadOnlyList<FreeformTilePlacement> PlacementsSnapshot =>
+        _placements.Values.Select(placement => placement.Clone()).ToList();
+
+    private enum DragKind
+    {
+        None,
+        Move,
+        Resize
+    }
+
+    /// <summary>按窗格列表增量同步子项：复用已有窗格、删除多余、缺失的创建并落到默认位置。</summary>
+    public void SetTiles(IEnumerable<RoomTileViewModel> tiles)
+    {
+        ArgumentNullException.ThrowIfNull(tiles);
+
+        var incoming = tiles.ToList();
+        var incomingIds = new HashSet<string>(incoming.Select(tile => tile.PaneId), StringComparer.Ordinal);
+
+        foreach (var stale in _childByPaneId.Keys.Where(paneId => !incomingIds.Contains(paneId)).ToList())
+        {
+            var child = _childByPaneId[stale];
+            Children.Remove(child);
+            _childByPaneId.Remove(stale);
+            _placements.Remove(stale);
+        }
+
+        var ordered = incoming.OrderBy(tile => tile.PaneId, StringComparer.Ordinal).ToList();
+        var count = Math.Max(1, ordered.Count);
+        var autoRects = FreeformLayoutPresets.AutoFit(count, AspectOf(Bounds.Size))
+            .Select(placement => placement.ToRect())
+            .ToList();
+
+        for (var index = 0; index < ordered.Count; index++)
+        {
+            var tile = ordered[index];
+            if (_childByPaneId.TryGetValue(tile.PaneId, out var existing))
+            {
+                existing.Content = tile;
+                continue;
+            }
+
+            var child = new ContentControl
+            {
+                Content = tile,
+                ContentTemplate = TileTemplate,
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch
+            };
+            Children.Add(child);
+            _childByPaneId[tile.PaneId] = child;
+
+            if (!_placements.TryGetValue(tile.PaneId, out var placement))
+            {
+                var rect = index < autoRects.Count
+                    ? autoRects[index]
+                    : FreeformLayoutPresets.DefaultLanding(index, tile.PaneId).ToRect();
+                placement = FreeformTilePlacement.Create(tile.PaneId, rect, zIndex: index + 1);
+                _placements[tile.PaneId] = placement;
+            }
+
+            child.ZIndex = placement.EffectiveZIndex;
+        }
+
+        _overlay.ZIndex = 9999;
+        InvalidateMeasure();
+        InvalidateArrange();
+        InvalidateVisual();
+    }
+
+    /// <summary>应用归一化布局文档；缺失窗格按默认落点兜底，多余放置项忽略。</summary>
+    public void ApplyDocument(FreeformLayoutDocument? document)
+    {
+        if (document is null)
+        {
+            return;
+        }
+
+        var index = 0;
+        foreach (var paneId in _childByPaneId.Keys.OrderBy(id => id, StringComparer.Ordinal).ToList())
+        {
+            var placement = document.Tiles.FirstOrDefault(item => string.Equals(item.PaneId, paneId, StringComparison.Ordinal));
+            var rect = placement?.ToRect() ?? FreeformLayoutPresets.DefaultLanding(index, paneId).ToRect();
+            var target = placement ?? FreeformTilePlacement.Create(paneId, rect);
+            target.PaneId = paneId;
+            target.SetRect(rect);
+            _placements[paneId] = target;
+            if (_childByPaneId.TryGetValue(paneId, out var child))
+            {
+                child.ZIndex = target.EffectiveZIndex;
+            }
+
+            index++;
+        }
+
+        _isFirstArrange = false;
+        InvalidateMeasure();
+        InvalidateArrange();
+        InvalidateVisual();
+    }
+
+    /// <summary>导出当前布局文档。</summary>
+    public FreeformLayoutDocument? CaptureDocument()
+    {
+        if (_placements.Count == 0)
+        {
+            return null;
+        }
+
+        var placements = _placements.Values
+            .OrderBy(placement => placement.PaneId, StringComparer.Ordinal)
+            .Select(placement => placement.Clone())
+            .ToList();
+        return FreeformLayoutDocument.FromPlacements(placements);
+    }
+
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        foreach (var child in _childByPaneId.Values)
+        {
+            child.Measure(availableSize);
+        }
+
+        _overlay.Measure(availableSize);
+        return availableSize;
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        if (finalSize.Width <= 0 || finalSize.Height <= 0)
+        {
+            return finalSize;
+        }
+
+        if (_isFirstArrange && _placements.Count > 0 && _childByPaneId.Count > 0)
+        {
+            var autoRects = FreeformLayoutPresets.AutoFit(_childByPaneId.Count, AspectOf(finalSize))
+                .Select(item => item.ToRect())
+                .ToList();
+            var index = 0;
+            foreach (var paneId in _childByPaneId.Keys.OrderBy(id => id, StringComparer.Ordinal))
+            {
+                var placement = _placements[paneId];
+                if (index < autoRects.Count)
+                {
+                    placement.SetRect(autoRects[index]);
+                }
+
+                index++;
+            }
+        }
+
+        _isFirstArrange = false;
+
+        foreach (var (paneId, child) in _childByPaneId)
+        {
+            if (!_placements.TryGetValue(paneId, out var placement))
+            {
+                continue;
+            }
+
+            var (x, y, width, height) = placement.ToRect().ToPixels(finalSize.Width, finalSize.Height);
+            // 留 1px 视觉缝，避免相邻窗格同底色时糊在一起（Panel.Render 在 Avalonia 11 是 sealed，不能自绘边框）。
+            child.Arrange(new Rect(x + 1, y + 1, Math.Max(0, width - 2), Math.Max(0, height - 2)));
+        }
+
+        _overlay.Arrange(new Rect(finalSize));
+        return finalSize;
+    }
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+
+        var point = e.GetCurrentPoint(this);
+        if (!point.Properties.IsLeftButtonPressed && !point.Properties.IsRightButtonPressed)
+        {
+            return;
+        }
+
+        if (IsInteractiveSource(e.Source))
+        {
+            return;
+        }
+
+        var paneId = FindTopmostPaneAt(e.GetPosition(this));
+        if (paneId is null || !_placements.TryGetValue(paneId, out var placement))
+        {
+            return;
+        }
+
+        BringToFront(paneId);
+
+        if (point.Properties.IsRightButtonPressed)
+        {
+            ShowTileMenu(paneId, e.GetPosition(this));
+            e.Handled = true;
+            return;
+        }
+
+        if (placement.IsLocked)
+        {
+            return;
+        }
+
+        var position = e.GetPosition(this);
+        var edge = HitTestResizeEdge(placement, position);
+        if (edge != ResizeEdge.None)
+        {
+            BeginDrag(paneId, placement, DragKind.Resize, position);
+            _resizeEdge = edge;
+            e.Pointer.Capture(this);
+            e.Handled = true;
+            return;
+        }
+
+        if (IsHeaderDragZone(placement, position) || e.KeyModifiers.HasFlag(KeyModifiers.Alt))
+        {
+            BeginDrag(paneId, placement, DragKind.Move, position);
+            e.Pointer.Capture(this);
+            e.Handled = true;
+        }
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+
+        var position = e.GetPosition(this);
+        if (_activePlacement is null || _activePaneId is null || _dragKind == DragKind.None)
+        {
+            UpdateCursor(position);
+            return;
+        }
+
+        var width = Bounds.Width;
+        var height = Bounds.Height;
+        if (width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        var deltaX = (position.X - _pressPoint.X) / width;
+        var deltaY = (position.Y - _pressPoint.Y) / height;
+        var bypassSnap = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+        var lockAspect = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        var others = _placements
+            .Where(pair => !string.Equals(pair.Key, _activePaneId, StringComparison.Ordinal))
+            .Select(pair => pair.Value.ToRect())
+            .ToList();
+
+        SnapResult result;
+        if (_dragKind == DragKind.Move)
+        {
+            var raw = _originRect.WithPosition(_originRect.Left + deltaX, _originRect.Top + deltaY);
+            result = FreeformSnapEngine.SnapMove(raw, others, width, height, bypassSnap: bypassSnap);
+        }
+        else
+        {
+            result = FreeformSnapEngine.SnapResize(
+                _originRect,
+                _resizeEdge,
+                deltaX,
+                deltaY,
+                others,
+                width,
+                height,
+                bypassSnap: bypassSnap,
+                lockAspect16By9: lockAspect);
+        }
+
+        _activePlacement.SetRect(result.Rect);
+        _overlay.SetGuides(result.Guides);
+        InvalidateArrange();
+        e.Handled = true;
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        EndDrag(e.Pointer);
+    }
+
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        EndDrag(null);
+    }
+
+    private void BeginDrag(string paneId, FreeformTilePlacement placement, DragKind kind, Point position)
+    {
+        _activePaneId = paneId;
+        _activePlacement = placement;
+        _originRect = placement.ToRect();
+        _pressPoint = position;
+        _dragKind = kind;
+        _resizeEdge = ResizeEdge.None;
+    }
+
+    private void EndDrag(IPointer? pointer)
+    {
+        if (_dragKind == DragKind.None)
+        {
+            return;
+        }
+
+        _dragKind = DragKind.None;
+        _activePaneId = null;
+        _activePlacement = null;
+        _resizeEdge = ResizeEdge.None;
+        _overlay.SetGuides(null);
+        pointer?.Capture(null);
+        InvalidateArrange();
+        LayoutChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private ResizeEdge HitTestResizeEdge(FreeformTilePlacement placement, Point position)
+    {
+        var (x, y, width, height) = placement.ToRect().ToPixels(Bounds.Width, Bounds.Height);
+        var right = x + width;
+        var bottom = y + height;
+
+        var nearLeft = Math.Abs(position.X - x) <= ResizeEdgeHitPx;
+        var nearRight = Math.Abs(position.X - right) <= ResizeEdgeHitPx;
+        var nearTop = Math.Abs(position.Y - y) <= ResizeEdgeHitPx;
+        var nearBottom = Math.Abs(position.Y - bottom) <= ResizeEdgeHitPx;
+
+        var insideX = position.X >= x - ResizeEdgeHitPx && position.X <= right + ResizeEdgeHitPx;
+        var insideY = position.Y >= y - ResizeEdgeHitPx && position.Y <= bottom + ResizeEdgeHitPx;
+        if (!insideX || !insideY)
+        {
+            return ResizeEdge.None;
+        }
+
+        if (nearLeft && nearTop)
+        {
+            return ResizeEdge.TopLeft;
+        }
+
+        if (nearRight && nearTop)
+        {
+            return ResizeEdge.TopRight;
+        }
+
+        if (nearLeft && nearBottom)
+        {
+            return ResizeEdge.BottomLeft;
+        }
+
+        if (nearRight && nearBottom)
+        {
+            return ResizeEdge.BottomRight;
+        }
+
+        if (nearLeft)
+        {
+            return ResizeEdge.Left;
+        }
+
+        if (nearRight)
+        {
+            return ResizeEdge.Right;
+        }
+
+        if (nearTop)
+        {
+            return ResizeEdge.Top;
+        }
+
+        return nearBottom ? ResizeEdge.Bottom : ResizeEdge.None;
+    }
+
+    private bool IsHeaderDragZone(FreeformTilePlacement placement, Point position)
+    {
+        var (x, y, _, _) = placement.ToRect().ToPixels(Bounds.Width, Bounds.Height);
+        return position.Y >= y && position.Y <= y + HeaderDragHeightPx
+            && position.X >= x && position.X <= x + placement.ToRect().ToPixels(Bounds.Width, Bounds.Height).Width;
+    }
+
+    private string? FindTopmostPaneAt(Point position)
+    {
+        var width = Bounds.Width;
+        var height = Bounds.Height;
+        if (width <= 0 || height <= 0)
+        {
+            return null;
+        }
+
+        foreach (var placement in _placements.Values.OrderByDescending(item => item.EffectiveZIndex))
+        {
+            var (x, y, w, h) = placement.ToRect().ToPixels(width, height);
+            if (position.X >= x && position.X <= x + w && position.Y >= y && position.Y <= y + h)
+            {
+                return placement.PaneId;
+            }
+        }
+
+        return null;
+    }
+
+    private void BringToFront(string paneId)
+    {
+        if (!_placements.TryGetValue(paneId, out var placement))
+        {
+            return;
+        }
+
+        var pinned = placement.IsPinned;
+        var maxZ = _placements.Values
+            .Where(item => item.IsPinned == pinned && !string.Equals(item.PaneId, paneId, StringComparison.Ordinal))
+            .Select(item => item.ZIndex)
+            .DefaultIfEmpty(pinned ? 0 : 1)
+            .Max();
+        placement.ZIndex = pinned ? Math.Min(PinnedZMax - (int)PinnedZBase, maxZ + 1) : Math.Min(NormalZMax, maxZ + 1);
+        ApplyZIndexes();
+    }
+
+    private void SendToBack(string paneId)
+    {
+        if (!_placements.TryGetValue(paneId, out var placement))
+        {
+            return;
+        }
+
+        var pinned = placement.IsPinned;
+        var minZ = _placements.Values
+            .Where(item => item.IsPinned == pinned && !string.Equals(item.PaneId, paneId, StringComparison.Ordinal))
+            .Select(item => item.ZIndex)
+            .DefaultIfEmpty(pinned ? 1 : 1)
+            .Min();
+        placement.ZIndex = Math.Max(1, minZ - 1);
+        ApplyZIndexes();
+    }
+
+    private void ApplyZIndexes()
+    {
+        foreach (var (paneId, child) in _childByPaneId)
+        {
+            if (_placements.TryGetValue(paneId, out var placement))
+            {
+                child.ZIndex = placement.EffectiveZIndex;
+            }
+        }
+
+        InvalidateVisual();
+    }
+
+    private void ShowTileMenu(string paneId, Point position)
+    {
+        var placement = _placements[paneId];
+        var menu = new ContextMenu
+        {
+            PlacementTarget = this,
+            Placement = PlacementMode.Pointer
+        };
+        menu.Items.Add(CreateMenuItem(
+            placement.IsPinned ? "取消置顶（退出画中画）" : "📌 置顶（画中画）",
+            () => TogglePinned(paneId)));
+        menu.Items.Add(CreateMenuItem(
+            placement.IsLocked ? "解锁位置" : "🔒 锁定位置",
+            () => ToggleLocked(paneId)));
+        menu.Items.Add(new Separator());
+        menu.Items.Add(CreateMenuItem("置于顶层", () => BringToFront(paneId)));
+        menu.Items.Add(CreateMenuItem("置于底层", () => SendToBack(paneId)));
+        menu.Items.Add(new Separator());
+        menu.Items.Add(CreateMenuItem("贴合 16:9", () => FitTo16By9(paneId)));
+        menu.Open(this);
+    }
+
+    private MenuItem CreateMenuItem(string header, Action action)
+    {
+        var item = new MenuItem { Header = header };
+        item.Click += (_, _) => action();
+        return item;
+    }
+
+    private void TogglePinned(string paneId)
+    {
+        var placement = _placements[paneId];
+        placement.IsPinned = !placement.IsPinned;
+        placement.ZIndex = placement.IsPinned ? 1 : Math.Min(NormalZMax, placement.ZIndex);
+        ApplyZIndexes();
+        InvalidateArrange();
+        LayoutChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void ToggleLocked(string paneId)
+    {
+        var placement = _placements[paneId];
+        placement.IsLocked = !placement.IsLocked;
+        InvalidateArrange();
+        LayoutChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void FitTo16By9(string paneId)
+    {
+        var placement = _placements[paneId];
+        var height = Bounds.Height;
+        if (height <= 0)
+        {
+            return;
+        }
+
+        var rect = placement.ToRect();
+        var widthPx = rect.Width * Bounds.Width;
+        var desiredHeightNorm = widthPx * 9.0 / 16.0 / height;
+        placement.Height = Math.Clamp(desiredHeightNorm, 0.05, 1.0);
+        if (placement.Top + placement.Height > 1.0)
+        {
+            placement.Top = Math.Max(0, 1.0 - placement.Height);
+        }
+
+        InvalidateArrange();
+        LayoutChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void UpdateCursor(Point position)
+    {
+        var paneId = FindTopmostPaneAt(position);
+        if (paneId is null || !_placements.TryGetValue(paneId, out var placement))
+        {
+            Cursor = Cursor.Default;
+            return;
+        }
+
+        if (placement.IsLocked)
+        {
+            Cursor = Cursor.Default;
+            return;
+        }
+
+        var edge = HitTestResizeEdge(placement, position);
+        Cursor = edge switch
+        {
+            ResizeEdge.Left or ResizeEdge.Right => new Cursor(StandardCursorType.SizeWestEast),
+            ResizeEdge.Top or ResizeEdge.Bottom => new Cursor(StandardCursorType.SizeNorthSouth),
+            ResizeEdge.TopLeft or ResizeEdge.BottomRight => new Cursor(StandardCursorType.TopLeftCorner),
+            ResizeEdge.TopRight or ResizeEdge.BottomLeft => new Cursor(StandardCursorType.TopRightCorner),
+            _ => Cursor.Default
+        };
+    }
+
+    private bool IsInteractiveSource(object? source)
+    {
+        for (var current = source as Visual; current is not null; current = current.GetVisualParent())
+        {
+            if (current is Avalonia.Controls.Button
+                or Avalonia.Controls.Primitives.ToggleButton
+                or Avalonia.Controls.TextBox
+                or Avalonia.Controls.ComboBox
+                or Avalonia.Controls.Slider
+                or Avalonia.Controls.Primitives.ScrollBar
+                or Avalonia.Controls.MenuItem)
+            {
+                return true;
+            }
+
+            if (ReferenceEquals(current, this))
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    private static double AspectOf(Size size) =>
+        size.Width > 0 && size.Height > 0 ? size.Width / size.Height : 16.0 / 9.0;
+}

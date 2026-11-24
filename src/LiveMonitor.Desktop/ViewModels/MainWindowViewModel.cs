@@ -202,7 +202,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     public IRootDock? Layout
     {
         get => _layout;
-        private set => SetProperty(ref _layout, value);
+        private set
+        {
+            if (SetProperty(ref _layout, value))
+            {
+                WorkspaceTilesChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
     }
 
     public string SearchText
@@ -354,9 +360,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string LayoutModeText => IsHeroLayout
-        ? (IsCustomLayout ? "主副屏 · 自定义" : "主副屏")
-        : (IsCustomLayout ? "自定义比例" : "自动适配");
+    public string LayoutModeText => IsFreeformMode
+        ? "自由布局"
+        : IsHeroLayout
+            ? (IsCustomLayout ? "主副屏 · 自定义" : "主副屏")
+            : (IsCustomLayout ? "自定义比例" : "自动适配");
 
     /// <summary>点过一键自适应后，是否还能恢复上一次的自定义比例。</summary>
     public bool CanRestoreCustomLayout
@@ -364,6 +372,164 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         get => _canRestoreCustomLayout;
         private set => SetProperty(ref _canRestoreCustomLayout, value);
     }
+
+    // V0.7：自由画布模式。平铺 Dock 树继续作为「窗格槽位 + 焦点模式 + 录制」的底层模型，
+    // 画布只负责渲染与归一化摆放；两者通过 Layout 与 FreeformLayoutDocument 同步。
+    private bool _isFreeformMode;
+    private FreeformLayoutDocument? _freeformDocument;
+
+    public bool IsFreeformMode
+    {
+        get => _isFreeformMode;
+        private set
+        {
+            if (SetProperty(ref _isFreeformMode, value))
+            {
+                OnPropertyChanged(nameof(LayoutModeText));
+                OnPropertyChanged(nameof(FreeformModeButtonText));
+                OnPropertyChanged(nameof(FreeformModeHint));
+                OnPropertyChanged(nameof(ShowDockWorkspace));
+            }
+        }
+    }
+
+    /// <summary>自由布局模式下由画布承载窗格，Dock 宿主必须隐藏，避免同一播放器控件被两个宿主同时挂载。</summary>
+    public bool ShowDockWorkspace => !IsWorkspaceEmpty && !IsFreeformMode;
+    public string FreeformModeButtonText => IsFreeformMode ? "自由布局：开" : "自由布局：关";
+
+    public string FreeformModeHint => IsFreeformMode
+        ? "拖动窗格标题或 Alt+拖动画面移动，边缘/角缩放；右键可置顶画中画或锁定。"
+        : "开启后可用自由画布摆放窗格，支持磁吸、缩放与画中画置顶。";
+
+    public FreeformLayoutDocument? FreeformDocument => _freeformDocument;
+
+    public IReadOnlyList<RoomTileViewModel> WorkspaceTiles =>
+        WorkspaceDockBuilder.EnumerateTiles(Layout).ToList();
+
+    /// <summary>工作区窗格集合变化（增删/方案切换/布局重建），供视图同步自由画布子项。</summary>
+    public event EventHandler? WorkspaceTilesChanged;
+
+    /// <summary>请求视图把自由布局文档应用到画布。</summary>
+    public event EventHandler<FreeformLayoutDocument>? FreeformApplyRequested;
+
+    /// <summary>自由布局切换时先停掉旧播放器并解除绑定（旧控件不能再挂到新宿主上）。</summary>
+    public void DetachWorkspacePlayers()
+    {
+        foreach (var tile in WorkspaceTiles.Where(tile => tile.HasRoom))
+        {
+            _players.Stop(tile.PaneId);
+            tile.PlayerView = null;
+        }
+    }
+
+    /// <summary>在画布/Dock 窗格重新挂好之后创建播放器（PlayAsync 需要控件已在视觉树上渲染就绪）。</summary>
+    public async Task StartWorkspacePlayersAsync(CancellationToken ct = default)
+    {
+        foreach (var tile in WorkspaceTiles.Where(tile => tile.HasRoom).ToList())
+        {
+            await _players.StartAsync(tile, ct).ConfigureAwait(true);
+        }
+    }
+
+    /// <summary>画布拖动/缩放/层级变化后由视图回写最新文档。</summary>
+    public void UpdateFreeformDocument(FreeformLayoutDocument? document)
+    {
+        _freeformDocument = document;
+        if (document is not null && IsFreeformMode)
+        {
+            IsDirty = true;
+        }
+    }
+
+    /// <summary>切换自由画布模式。</summary>
+    public void ToggleFreeformMode()
+    {
+        if (IsFreeformMode)
+        {
+            IsFreeformMode = false;
+            StatusText = "已退出自由布局：恢复平铺布局。";
+            return;
+        }
+
+        EnterFreeformMode(FreeformPreset.AutoFit);
+    }
+
+    /// <summary>进入自由布局并应用指定预设。</summary>
+    public void ApplyFreeformPreset(FreeformPreset preset)
+    {
+        if (!IsFreeformMode)
+        {
+            EnterFreeformMode(preset);
+            return;
+        }
+
+        var document = BuildFreeformDocument(preset);
+        _freeformDocument = document;
+        FreeformApplyRequested?.Invoke(this, document);
+        IsDirty = true;
+        StatusText = preset switch
+        {
+            FreeformPreset.Hero => "已应用自由布局预设：主副屏。",
+            FreeformPreset.PictureInPicture => "已应用自由布局预设：画中画。",
+            _ => "已应用自由布局预设：自动平铺。"
+        };
+    }
+
+    private void EnterFreeformMode(FreeformPreset preset)
+    {
+        if (WorkspaceTiles.Count == 0)
+        {
+            StatusText = "工作区还没有窗格：先双击左侧直播间加入工作区。";
+            return;
+        }
+
+        IsFreeformMode = true;
+        var document = BuildFreeformDocument(preset);
+        _freeformDocument = document;
+        FreeformApplyRequested?.Invoke(this, document);
+        IsDirty = true;
+        StatusText = preset switch
+        {
+            FreeformPreset.Hero => "已进入自由布局（主副屏）：拖动/缩放窗格，右键设置画中画。",
+            FreeformPreset.PictureInPicture => "已进入自由布局（画中画）：拖动/缩放窗格，右键可置顶。",
+            _ => "已进入自由布局：拖动/缩放窗格，右键设置画中画。"
+        };
+    }
+
+    private FreeformLayoutDocument BuildFreeformDocument(FreeformPreset preset)
+    {
+        var tiles = WorkspaceTiles.OrderBy(tile => tile.PaneId, StringComparer.Ordinal).ToList();
+        var count = Math.Max(1, tiles.Count);
+        var sources = preset switch
+        {
+            FreeformPreset.Hero => FreeformLayoutPresets.Hero(count),
+            FreeformPreset.PictureInPicture => FreeformLayoutPresets.PictureInPicture(count),
+            _ => FreeformLayoutPresets.AutoFit(count, _workspaceAspect)
+        };
+
+        var document = new FreeformLayoutDocument();
+        for (var index = 0; index < tiles.Count; index++)
+        {
+            var tile = tiles[index];
+            var source = index < sources.Count
+                ? sources[index]
+                : FreeformLayoutPresets.DefaultLanding(index, tile.PaneId);
+            document.Tiles.Add(FreeformTilePlacement.Create(
+                tile.PaneId,
+                source.ToRect(),
+                tile.HasRoom ? tile.LiveRoomId : null,
+                source.ZIndex,
+                source.IsPinned,
+                source.IsLocked));
+        }
+
+        return document;
+    }
+
+    private string SerializeCurrentLayout(IRootDock layout) =>
+        IsFreeformMode && _freeformDocument is not null
+            ? _freeformDocument.Serialize()
+            : SerializeLayout(layout);
 
     public bool IsFocused => _focusedTile is not null;
 
@@ -413,6 +579,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(RoomCountText));
         OnPropertyChanged(nameof(IsWorkspaceEmpty));
+        OnPropertyChanged(nameof(ShowDockWorkspace));
     }
 
     /// <summary>高能事件面板是否展开；只影响主窗口叠加层，不写入方案 / Dock 布局。</summary>
@@ -963,6 +1130,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (IsFreeformMode)
+        {
+            IsFreeformMode = false;
+            _freeformDocument = null;
+        }
+
         CaptureCustomLayoutSnapshot();
 
         var rooms = WorkspaceDockBuilder.EnumerateTiles(Layout)
@@ -1107,8 +1280,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         GridRows = dimensions.Rows;
         GridColumns = dimensions.Columns;
         var profile = SelectedProfile ?? new LayoutProfile { Name = "默认方案" };
-        profile.IsCustomLayout = IsCustomLayout;
-        profile.DockLayoutJson = SerializeLayout(Layout);
+        profile.IsCustomLayout = IsCustomLayout || IsFreeformMode;
+        profile.DockLayoutJson = SerializeCurrentLayout(Layout);
         profile.Slots.Clear();
 
         foreach (var tile in WorkspaceDockBuilder.EnumerateTiles(Layout).Where(tile => tile.HasRoom))
@@ -1151,8 +1324,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             throw new ArgumentException("方案名不能为空。", nameof(name));
         }
 
-        var profile = new LayoutProfile { Name = name.Trim(), IsCustomLayout = IsCustomLayout };
-        profile.DockLayoutJson = SerializeLayout(Layout);
+        var profile = new LayoutProfile
+        {
+            Name = name.Trim(),
+            IsCustomLayout = IsCustomLayout || IsFreeformMode
+        };
+        profile.DockLayoutJson = SerializeCurrentLayout(Layout);
 
         foreach (var tile in WorkspaceDockBuilder.EnumerateTiles(Layout).Where(tile => tile.HasRoom))
         {
@@ -2047,6 +2224,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         ExitFocus();
+        // V0.7：自由布局方案以 version=2 JSON 存在同一列，先识别再决定是否走 Dock 反序列化。
+        var freeformDocument = FreeformLayoutDocument.LooksLikeFreeform(profile.DockLayoutJson)
+            ? FreeformLayoutDocument.TryParse(profile.DockLayoutJson)
+            : null;
+        IsFreeformMode = freeformDocument is not null;
+        _freeformDocument = freeformDocument;
         var previousLayout = Layout;
         var previousTiles = WorkspaceDockBuilder.EnumerateTiles(previousLayout)
             .Where(tile => tile.HasRoom)
@@ -2058,7 +2241,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         IRootDock? layout = null;
 
-        if (!string.IsNullOrWhiteSpace(profile.DockLayoutJson))
+        if (freeformDocument is null && !string.IsNullOrWhiteSpace(profile.DockLayoutJson))
         {
             try
             {
@@ -2150,12 +2333,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _loadedProfile = profile;
             SetCustomLayout(profile.IsCustomLayout);
             SetHeroLayout(WorkspaceDockBuilder.ContainsDockId(previousLayout, "workspace-hero"));
+            if (freeformDocument is not null)
+            {
+                FreeformApplyRequested?.Invoke(this, freeformDocument);
+            }
+
             WireTileInteractions(previousLayout);
             var oldDimensions = WorkspaceDockBuilder.GetGridDimensions(previousLayout);
             GridRows = oldDimensions.Rows;
             GridColumns = oldDimensions.Columns;
             IsDirty = false;
-            StatusText = $"已载入方案「{profile.Name}」：窗格结构一致，播放器原地保留。";
+            StatusText = freeformDocument is not null
+                ? $"已载入方案「{profile.Name}」：自由布局，播放器原地保留。"
+                : $"已载入方案「{profile.Name}」：窗格结构一致，播放器原地保留。";
             SyncDanmakuSubscriptions();
             return;
         }
@@ -2180,6 +2370,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         GridColumns = dimensions.Columns;
         SetCustomLayout(profile.IsCustomLayout);
         SetHeroLayout(WorkspaceDockBuilder.ContainsDockId(layout, "workspace-hero"));
+        if (freeformDocument is not null)
+        {
+            FreeformApplyRequested?.Invoke(this, freeformDocument);
+        }
+
         IsDirty = false;
         _suppressLayoutTracking = false;
         AttachLayoutTracking(layout);

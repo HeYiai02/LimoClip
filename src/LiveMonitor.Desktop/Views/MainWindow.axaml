@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:dock="using:Dock.Avalonia.Controls"
         xmlns:views="using:LiveMonitor.Desktop.Views"
+        xmlns:controls="using:LiveMonitor.Desktop.Controls"
         x:Class="LiveMonitor.Desktop.Views.MainWindow"
         Icon="avares://LiveMonitor.Desktop/Assets/AppIcon.ico"
         Title="LimoClip"
@@ -152,6 +153,18 @@
             <PathIcon Data="{DynamicResource IconHeroLayout}" Width="13" Height="13" />
           </Button>
 
+          <!-- 自由布局（V0.7）：拖动/缩放/磁吸/Z 轴画中画 -->
+          <Button Classes="ghost-btn" Click="OnToggleFreeformLayout" Height="28" Padding="8,3"
+                  ToolTip.Tip="{Binding FreeformModeHint}">
+            <TextBlock Text="{Binding FreeformModeButtonText}" FontSize="11" VerticalAlignment="Center" />
+          </Button>
+
+          <!-- 画中画预设 -->
+          <Button Classes="ghost-btn" Click="OnFreeformPipPreset" Width="28" Height="28" Padding="0"
+                  ToolTip.Tip="画中画预设：一路铺满 + 其余窗格置顶浮层">
+            <PathIcon Data="{DynamicResource IconHeroLayout}" Width="13" Height="13" />
+          </Button>
+
           <!-- 恢复自定义比例 -->
           <Button Classes="ghost-btn" Click="OnRestoreCustomLayout" Width="28" Height="28" Padding="0"
                   IsVisible="{Binding CanRestoreCustomLayout}"
@@ -263,7 +276,13 @@
     <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource BrushBgCanvas}" Padding="6">
       <Grid>
         <dock:DockControl x:Name="Dock" Layout="{Binding Layout}"
-                          IsVisible="{Binding !IsWorkspaceEmpty}" />
+                          IsVisible="{Binding ShowDockWorkspace}" />
+
+        <!-- 自由布局画布（V0.7）：与平铺 Dock 互斥显示，支持拖动/缩放/磁吸/画中画 -->
+        <controls:FreeformWorkspaceCanvas x:Name="FreeformCanvas"
+                                          IsVisible="{Binding IsFreeformMode}"
+                                          Background="{DynamicResource BrushBgCanvas}" />
+
 
         <!-- 空状态引导：工作区还没有任何直播间窗格 -->
         <StackPanel IsVisible="{Binding IsWorkspaceEmpty}"
