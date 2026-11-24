@@ -825,7 +825,7 @@
       monitor: {
         title: "自由平铺的多屏监控工作区",
         desc: "告别浏览器多标签页卡顿。支持按直播间数量自动计算最优排版，也支持直接拖拽分割线自由调整主副屏大小，保存多套监控方案随时切换。",
-        img: "images/monitor.png",
+        img: "images/monitor.webp",
         bullets: [
           "直播间主库统一按「#编号 主播名」管理，粘贴链接自动识别平台",
           "双击任意分屏进入全屏焦点原画模式，退出瞬间还原原布局与静音状态",
@@ -879,7 +879,7 @@
       record: {
         title: "与监控区彻底解耦的独立录制中心",
         desc: "哪怕监控工作区一个画面都不开，录制中心也能在后台 60 秒轮询开播并自动直录原画流；切换监控方案或关闭分屏绝不打断正在进行的录像。",
-        img: "images/recording.png",
+        img: "images/recording.webp",
         bullets: [
           "按主播自由勾选「开播自动录制」或一键手动开停录，支持单主播自定义保存目录",
           "零重编码直录 .mkv + 同名伴随 .jsonl 弹幕，断流自动分段收尾不毁旧档",
@@ -904,7 +904,7 @@
       studio: {
         title: "双波形剪辑台 + 云端语音转写",
         desc: "在录制历史里点击「去剪辑」直接载入整场录播。沿着弹幕热力波峰定位高能片段，点一下转写看文字确认内容，一键导出无弹幕与有弹幕双版 MP4。",
-        img: "images/studio.png",
+        img: "images/studio.webp",
         bullets: [
           "1x~60x 滚轮锚点缩放双波形时间轴，支持 Space / I / O / 方向键快捷剪裁",
           "高能卡片一键调用云端 ASR 转写文字并本地缓存，支持点击单句精准跳转",
@@ -929,7 +929,7 @@
       const root = document.getElementById("showcaseContent");
       root.innerHTML = `
         <div class="showcase-visual" id="visualHost">
-          <img src="${data.img}" alt="${data.title}" onerror="this.style.display='none'; document.getElementById('fallbackHost').style.display='block';" />
+          <img src="${data.img}" alt="${data.title}" width="1442" height="932" loading="lazy" decoding="async" onerror="this.style.display='none'; document.getElementById('fallbackHost').style.display='block';" />
           <div id="fallbackHost" style="display:none;">${data.fallbackHtml}</div>
         </div>
         <div class="showcase-info">
