@@ -20,8 +20,8 @@ namespace LiveMonitor.Desktop.Controls;
 
 /// <summary>
 /// 弹幕渲染层：只负责把已通过过滤的弹幕画出来，不持有连接、不做统计。
-/// 上层（DanmakuManager）可以按 50ms 批量推送；本控件由共享的 60fps 帧循环推进
-/// （<see cref="DanmakuRenderTicker"/>，多屏时共用一个定时器），
+/// 上层（DanmakuManager）可以按 50ms 批量推送；本控件由共享的 vsync 帧循环推进
+/// （<see cref="DanmakuRenderTicker"/>，多屏时共用一个合成器帧回调），
 /// 轨道/同屏容量满了直接丢弃渲染（统计与高能检测不受影响）。
 /// 控件本身 IsHitTestVisible=false，不会吃掉窗格的双击与拖拽。
 /// </summary>
@@ -186,6 +186,17 @@ public sealed class DanmakuOverlay : Control
                 _blocked = true;
                 Clear();
             }
+        }
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+
+        // 首次注册时可能还没挂到窗口（TopLevel 为空），挂载后补注册。
+        if (!_blocked && IsVisible && (_items.Count > 0 || _pending.Count > 0))
+        {
+            DanmakuRenderTicker.Register(this);
         }
     }
 
