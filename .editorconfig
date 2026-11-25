@@ -1,0 +1,29 @@
+root = true
+
+# 基础格式约定（与现有代码一致，不强制重排存量文件）
+[*]
+charset = utf-8
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = true
+
+[*.{axaml,json,yml,yaml,props,targets,csproj}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.ps1]
+indent_size = 4
+
+# 代码风格诊断：显式降级为 suggestion/silent，不把存量差异升级为构建警告；
+# 待相关文件被触碰时再逐步收紧（见 docs/limoclip 架构行动清单阶段一 1.4 / 阶段三）。
+[*.cs]
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+dotnet_style_qualification_for_event = false:suggestion
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = false:silent
+csharp_style_var_elsewhere = false:suggestion

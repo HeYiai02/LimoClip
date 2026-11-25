@@ -20,7 +20,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 
 | 层 | 选型 |
 | --- | --- |
-| 运行环境 | .NET 8（`net8.0` 类库 / `net8.0-windows` 桌面与媒体层），Windows 10/11 x64 |
+| 运行环境 | .NET 8（`net8.0` 类库；`Data`/`Media`/`Desktop` 及其测试工程为 `net8.0-windows`），Windows 10/11 x64 |
 | UI | Avalonia 11（Fluent + Semi.Avalonia 主题）、CommunityToolkit.Mvvm、Dock.Avalonia（可拖拽/序列化的布局系统） |
 | 播放 | libmpv（LibMpv.Avalonia）进程内渲染，硬件解码自动降级 |
 | 录制/转码 | 独立 FFmpeg 进程（随包 `tools/ffmpeg`），`-c copy` 不转码 |
@@ -30,7 +30,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | WebView 登录 | WebView2（临时用户目录，登录后采集 Cookie） |
 | 平台解析 | 各家 HTTP API + Jint（斗鱼签名、抖音 sign.js）；yt-dlp 作为 YouTube/Twitch 兜底 |
 | 插件签名 | Ed25519（BouncyCastle）+ SHA256 清单校验 |
-| 测试 | xUnit（6 个测试工程，当前共 983 个用例） |
+| 测试 | xUnit（6 个测试工程，当前共 998 个用例） |
 
 ### 平台支持矩阵
 
@@ -121,6 +121,8 @@ Desktop ──► Media ──► Core
 | `LiveMonitor.Media` | 录制管理器与 FFmpeg 进程控制、分段合并去重、剪辑导出（无损/硬编）、波形/探针/硬编探测、云端 ASR 实现 |
 | `LiveMonitor.Desktop` | 主窗口壳与四类视图（监控/录制中心/剪辑台/设置）、Dock 布局系统、播放器控件、服务装配与生命周期 |
 
+> **命名契约（冻结）**：`LiveMonitor.*` 是内核与插件共享的程序集契约名（`LiveMonitor.Core`、`LiveMonitor.Platforms.Common` 等），插件 ALC 按简单程序集名共享加载，改名会破坏插件 ABI，v1.0 前不再变动。面向用户的品牌名只体现在外层 `AssemblyName`（`LimoClip`、`LimoClip.PluginSigner`）与发布产物。项目为 Windows 桌面应用（`Data`/`Media`/`Desktop` 为 `net8.0-windows`），如未来需要按平台拆分或做跨平台分析/测试，再按需补 `[SupportedOSPlatform("windows")]`，不引入平台条件编译分支。
+
 ---
 
 ## 4. 启动与依赖装配
@@ -163,7 +165,7 @@ Program.Main
 9. `AsrSettingsStore` + `OpenAiCompatibleAsrProvider`；
 10. `PlatformPluginHost`（注入平台工厂/弹幕工厂/HttpClient/yt-dlp 路径），注册内置插件并加载已安装外部插件；`PluginUpdateService`、`CliUpdater`。
 
-释放顺序与创建**相反**（先停录制与弹幕，再停播放器，最后释放数据库），由 `AppServices.DisposeAsync` 与 `MainWindow.Closing` 保证。
+释放顺序与创建**相反**（先停录制与弹幕，再停播放器，最后释放数据库），由 `MainWindowViewModel.Dispose`（`Window.Closing` 触发）编排；`AppServices` 自身未实现 `IDisposable`，仅提供 `DisposeClipExportResources()` / `DisposePluginResources()` 两个局部释放方法。`LiveMonitorDatabase` 不持有长连接（每次操作 `OpenConnection()` 创建短生命周期连接、由 Microsoft.Data.Sqlite 连接池托管），无需显式关闭。
 
 ---
 
@@ -482,6 +484,7 @@ Program.Main
   - 焦点模式：双击窗格进入单窗格全屏（`IsFocused` + 静音策略 + 恢复原布局）、Esc 退出；
   - 锚点/未开播文字与状态同步：`SetDanmakuEnabled` 控制清流弹幕按钮显隐；
   - 底部控制条：音量/静音、弹幕开关、紧凑模式，以及 V0.7 新增的「暂停/继续」（`TogglePause`，同步 mpv `pause` 属性并切换 ⏸/▶ 图标）与「刷新播放」（`RequestRefresh` → `RefreshRequested` → `WorkspacePlayerManager.RefreshTileAsync`，清空退避/离线计时器后立即重新解析地址并起播）；刷新按钮图标使用 `Icons.axaml` 的 `IconRefresh` PathIcon（矢量绘制，避免字体码点被裁切）。
+- 播放器控件创建/复用/销毁归属：`WorkspacePlayerManager.EnsurePlayer` 为窗格创建 `MpvPlayerView`，并在替换槽位时销毁被替换的旧实例；Dock 布局整树重建或窗格移除时由 `MainWindowViewModel.DisposePlayers`（`:2850-2863`）统一 `Stop + PlayerView.Dispose()`；`WorkspacePlayerManager.Stop` / `Dispose` 本身只停止播放并清理内部映射，不销毁控件。
 - `QualityPolicy`：按 Height/Fps 降序；大窗/焦点取最高；紧凑模式上限 480p；普通窗口优先 ≤720p，取第一个满足者。
 - `MpvPlayerView`（libmpv 封装）：
   - 初始化选项：`hwdec=auto-safe`、`vo=libmpv`、`gpu-api=opengl`、`cache=yes`、`demuxer-max-bytes`（按分辨率 3M/4M/8M）、`network-timeout=10`、`audio-buffer=0.8`、`audio-stream-silence=yes`、关闭 OSC/默认快捷键（键位由应用处理）；
@@ -569,10 +572,10 @@ Program.Main
 dotnet build LiveMonitor.sln --no-restore
 ```
 
-- 工程目标框架：除 `Desktop`/`Media` 为 `net8.0-windows` 外均为 `net8.0`；测试工程对应同目标框架。
+- 工程目标框架：`Data`、`Media`、`Desktop` 为 `net8.0-windows`，其余类库为 `net8.0`；测试工程对应同目标框架（`Data`/`Media`/`Desktop` 测试为 `net8.0-windows`，`Platforms`/`Danmaku` 测试为 `net8.0`）。
 - 需要 `tools/` 下的 ffmpeg/mpv 才能运行应用（`scripts/fetch-tools.ps1` 自动下载并校验）。
 
-### 13.2 测试（当前 983 个用例）
+### 13.2 测试（当前 998 个用例）
 
 | 测试工程 | 覆盖范围 | 用例数 |
 | --- | --- | --- |
@@ -580,7 +583,9 @@ dotnet build LiveMonitor.sln --no-restore
 | `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退、自定义清流 Provider | 483 |
 | `tests/LiveMonitor.Danmaku.Tests` | 过滤器、高能检测、会话管理 | 98 |
 | `tests/LiveMonitor.Media.Tests` | 录制状态机、分段合并、剪辑导出、波形、增量波形/增量弹幕读取、FFmpeg 参数协议分支 | 198 |
-| `tests/LiveMonitor.Desktop.Tests` | ViewModel、Dock/自由画布布局、登录配置、播放状态文本、录制目标排序、边录边剪剪辑台 | 166 |
+| `tests/LiveMonitor.Desktop.Tests` | ViewModel、Dock/自由画布布局、登录配置、播放状态文本、录制目标排序、边录边剪剪辑台、自由布局命中与宿主切换 | 181 |
+
+合计 **998** 个用例，五套全部通过（0 失败 0 跳过）。
 
 运行方式（使用已构建的测试 dll，避免重复构建）：
 
