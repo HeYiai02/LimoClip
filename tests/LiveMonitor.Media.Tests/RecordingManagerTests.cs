@@ -820,6 +820,50 @@ public sealed class RecordingManagerTests
     }
 
     [Fact]
+    public async Task StopAsync_WhileRecorderIsStarting_DoesNotResurrectSession()
+    {
+        await using var harness = CreateHarness();
+        await harness.InitializeAsync();
+        var room = harness.AddRoom();
+        harness.SetLive();
+
+        var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        harness.NextRecorderStartHook = async () =>
+        {
+            entered.TrySetResult(true);
+            await release.Task.ConfigureAwait(false);
+        };
+
+        var startTask = Task.Run(() => harness.Manager.StartAsync(room));
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(harness.Manager.IsRecording(room.Id));
+
+        // 启动窗口内立刻请求停止：StopAsync 必须与启动串行化，不能先把会话收尾成 Completed，
+        // 再被 StartCore 的后续代码重新置为 Recording 并补发 SessionStarted。
+        var stopTask = Task.Run(() => harness.Manager.StopAsync(room.Id));
+        await Task.Delay(200);
+        release.TrySetResult(true);
+
+        await startTask.WaitAsync(TimeSpan.FromSeconds(10));
+        await stopTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Single(harness.Sessions.Snapshot);
+        var stored = Assert.Single(harness.Sessions.Snapshot);
+        Assert.Equal(RecordingStatus.Completed, stored.Status);
+        Assert.NotNull(stored.EndedAt);
+        Assert.Null(stored.ErrorMessage);
+
+        // 一次成功启动恰好对应一次开始与一次结束事件，且终态不再有活动录制。
+        Assert.Single(harness.Started);
+        Assert.Single(harness.Completed);
+        Assert.Equal(1, harness.Recorder.DisposeCount);
+        Assert.False(harness.Manager.IsRecording(room.Id));
+        Assert.Empty(harness.Manager.GetActiveRecordings());
+        Assert.Null(harness.Manager.GetActiveSessionId(room.Id));
+    }
+
+    [Fact]
     public async Task ConcurrentStopAsync_SameRoom_FinalizesOnce()
     {
         await using var harness = CreateHarness();
