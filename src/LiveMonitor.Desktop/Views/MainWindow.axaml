@@ -4,6 +4,7 @@
         xmlns:views="using:LiveMonitor.Desktop.Views"
         xmlns:controls="using:LiveMonitor.Desktop.Controls"
         xmlns:vm="using:LiveMonitor.Desktop.ViewModels"
+        xmlns:entities="using:LiveMonitor.Core.Entities"
         x:Class="LiveMonitor.Desktop.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Icon="avares://LimoClip/Assets/AppIcon.ico"
@@ -92,12 +93,15 @@
         </StackPanel>
 
         <!-- 方案切换与保存 -->
-        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="8,0,0,0">
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="8,0,0,0"
+                    DataContext="{Binding LayoutProfiles}"
+                    x:CompileBindings="True"
+                    x:DataType="vm:WorkspaceLayoutProfileViewModel">
           <ComboBox x:Name="ProfileBox" Width="132" Height="28"
                     ItemsSource="{Binding Profiles}"
                     SelectedItem="{Binding SelectedProfile}">
             <ComboBox.ItemTemplate>
-              <DataTemplate>
+              <DataTemplate x:DataType="entities:LayoutProfile">
                 <TextBlock Text="{Binding Name}" FontSize="11.5" />
               </DataTemplate>
             </ComboBox.ItemTemplate>
@@ -211,6 +215,9 @@
 
     <!-- ==================== 2. 左侧直播间主库 (260px) ==================== -->
     <Border Grid.Row="1" Grid.Column="0" x:Name="Sidebar"
+            DataContext="{Binding RoomCatalog}"
+            x:CompileBindings="True"
+            x:DataType="vm:RoomCatalogViewModel"
             Background="{DynamicResource BrushBgBase}"
             BorderBrush="{DynamicResource BrushBorderSubtle}"
             BorderThickness="0,0,1,0"
@@ -252,7 +259,7 @@
                  Background="Transparent"
                  BorderThickness="0">
           <ListBox.ItemTemplate>
-            <DataTemplate>
+            <DataTemplate x:DataType="vm:RoomListItemViewModel">
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <Border Grid.Column="0" Background="{Binding PlatformBadgeBackground}" CornerRadius="4"
                         Padding="5,2" VerticalAlignment="Center" Margin="0,0,8,0">

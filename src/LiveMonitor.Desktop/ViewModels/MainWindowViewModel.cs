@@ -25,7 +25,7 @@ namespace LiveMonitor.Desktop.ViewModels;
 /// Step 6 主窗口：左侧主库、方案工具栏、Dock 工作区。
 /// 所有仓储调用都走 AppServices，ViewModel 不直接接触 SQLite。
 /// </summary>
-public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
+public sealed partial class MainWindowViewModel : ObservableObject, IDisposable, IRoomCatalogHost, IWorkspaceLayoutProfileHost
 {
     private readonly AppServices _services;
     private readonly WorkspacePlayerManager _players;
@@ -34,17 +34,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     /// <summary>恢复比例后触发，让视图把模型 Proportion 重新同步到可见的 ContentPresenter。</summary>
     public event EventHandler? ProportionsRestored;
-    private readonly Dictionary<Guid, LiveRoom> _roomById = new();
 
-    private LayoutProfile? _selectedProfile;
-    private LayoutProfile? _loadedProfile;
     private IRootDock? _layout;
-    private string _searchText = string.Empty;
     private string _toastText = string.Empty;
     private bool _isToastVisible;
     private CancellationTokenSource? _toastCts;
-    private bool _isDirty;
-    private bool _suppressProfileLoad;
     private bool _initialized;
     private bool _disposed;
     private int _gridRows = 2;
@@ -61,24 +55,20 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private double _workspaceAspect = 16.0 / 9.0;
     // 按窗格实例记录，不能用 PaneId：重建布局会复用 pane-1/pane-2，旧 ID 会挡住新实例的事件订阅。
     private readonly HashSet<RoomTileViewModel> _wiredTiles = new(ReferenceEqualityComparer.Instance);
-    // 主库在线状态缓存：null=未知，true=直播中，false=未开播/失败。
-    private readonly ConcurrentDictionary<Guid, bool?> _knownLiveStatus = new();
     private RoomTileViewModel? _focusedTile;
     private MpvPlayerView? _focusPlayer;
     private Dictionary<string, bool>? _focusMuteSnapshot;
     private Dictionary<string, bool>? _masterMuteSnapshot;
     private bool _isMasterMuted;
-    private string _groupFilter = "全部";
     private DispatcherTimer? _healthTimer;
     private DispatcherTimer? _focusHintTimer;
     private bool _isFocusHintVisible;
 
     // V0.6：侧栏主播开播状态独立轮询。工作区只覆盖当前打开的房间，
     // 未放入工作区的房间也要能显示直播/未开播，不能一直停在「状态未知」。
+    // 计时器（Avalonia DispatcherTimer）留在窗口层，查询/缓存/应用由 RoomCatalog 子 VM 负责。
     private DispatcherTimer? _roomStatusTimer;
-    private bool _roomStatusRefreshing;
     private static readonly TimeSpan RoomStatusPollInterval = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan RoomStatusCheckTimeout = TimeSpan.FromSeconds(10);
 
     /// <summary>V0.3：true 表示顶栏切到「录制中心」视图；监控工作区仍保留在视觉树中。</summary>
     [ObservableProperty]
@@ -86,6 +76,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     /// <summary>底部状态栏只读子视图模型；主 VM 在指标 / 健康 / 工作区计数更新处写入，并向窗口转发变更。</summary>
     public SystemStatusBarViewModel SystemStatus { get; } = new();
+
+    /// <summary>左侧直播间主库子视图模型；主 VM 把房间集合/筛选/增删交给它，并转发属性变更。</summary>
+    public RoomCatalogViewModel RoomCatalog { get; }
+
+    /// <summary>顶部布局方案子视图模型；主 VM 把 Profiles/保存/切换交给它，并转发属性变更。</summary>
+    public WorkspaceLayoutProfileViewModel LayoutProfiles { get; }
 
     /// <summary>右侧高能事件面板只读子视图模型；主 VM 在事件入库 / 回填 / 清空处写入。</summary>
     public HighlightFeedViewModel HighlightFeed { get; } = new();
@@ -109,13 +105,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         _services = services;
         _players = new WorkspacePlayerManager(services);
+        RoomCatalog = new RoomCatalogViewModel(services.Rooms, services.Platforms, services.Credentials, this);
+        LayoutProfiles = new WorkspaceLayoutProfileViewModel(services.Profiles, CreateDefaultProfileLayoutJson, this);
 
-        // 两个子视图模型对外只读；主 VM 订阅其变更并转发为窗口级 PropertyChanged，
+        // 四个子视图模型对外只读；主 VM 订阅其变更并转发为窗口级 PropertyChanged，
         // 使既有绑定、代码后置与测试无需改动。转发在子 VM 的原始线程（UI 线程）同步完成。
         SystemStatus.PropertyChanged += OnSystemStatusPropertyChanged;
         HighlightFeed.PropertyChanged += OnHighlightFeedPropertyChanged;
+        RoomCatalog.PropertyChanged += OnRoomCatalogPropertyChanged;
+        LayoutProfiles.PropertyChanged += OnLayoutProfilesPropertyChanged;
         SystemStatus.UpdateWorkspaceSummary(
-            Rooms.Count,
+            RoomCatalog.Rooms.Count,
             IsHeroLayout,
             WorkspaceLayoutCoordinator.CountOccupiedPanes(Layout),
             GridRows,
@@ -141,29 +141,42 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    public ObservableCollection<RoomListItemViewModel> Rooms { get; } = new();
+    private void OnRoomCatalogPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        // 主库子 VM 的属性名与主 VM 转发属性同名（SearchText/GroupFilter），直接按名转发，
+        // 让代码后置的分组胶囊刷新与既有绑定继续生效。
+        OnPropertyChanged(e.PropertyName);
+    }
 
-    public ObservableCollection<RoomListItemViewModel> FilteredRooms { get; } = new();
+    private void OnLayoutProfilesPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        // 方案子 VM 的 SelectedProfile / IsDirty 由主 VM 同名转发，顶栏脏点与方案框继续绑定主 VM。
+        OnPropertyChanged(e.PropertyName);
+    }
+
+    // 主库目录 / 布局方案两个子 VM 对外只暴露稳定集合实例，主 VM 只做属性转发，
+    // 既有绑定路径、代码后置与测试保持原样。
+    public ObservableCollection<RoomListItemViewModel> Rooms => RoomCatalog.Rooms;
+
+    public ObservableCollection<RoomListItemViewModel> FilteredRooms => RoomCatalog.FilteredRooms;
 
     /// <summary>侧栏分组 pills，第一项固定为「全部」，其余按现有房间的分组动态生成。</summary>
-    public ObservableCollection<string> Groups { get; } = new();
+    public ObservableCollection<string> Groups => RoomCatalog.Groups;
 
-    public ObservableCollection<LayoutProfile> Profiles { get; } = new();
+    public ObservableCollection<LayoutProfile> Profiles => LayoutProfiles.Profiles;
 
     public LayoutProfile? SelectedProfile
     {
-        get => _selectedProfile;
-        set
-        {
-            if (SetProperty(ref _selectedProfile, value) && !_suppressProfileLoad && _initialized)
-            {
-                _ = SelectProfileAsync(value);
-            }
-        }
+        get => LayoutProfiles.SelectedProfile;
+        set => LayoutProfiles.SelectedProfile = value;
     }
 
     /// <summary>由 View 注入：脏方案切换时弹「保存并切换/放弃修改/取消」。</summary>
-    public Func<Task<ProfileSwitchChoice>>? ConfirmProfileSwitchAsync { get; set; }
+    public Func<Task<ProfileSwitchChoice>>? ConfirmProfileSwitchAsync
+    {
+        get => LayoutProfiles.ConfirmProfileSwitchAsync;
+        set => LayoutProfiles.ConfirmProfileSwitchAsync = value;
+    }
 
     /// <summary>由 View 注入：删除历史录像前弹确认窗，返回 true 表示确认删除。</summary>
     public Func<RecordingHistoryItemViewModel, Task<bool>>? ConfirmRecordingDeleteAsync { get; set; }
@@ -190,8 +203,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         center.PickDirectoryAsync = () =>
             PickRecordingDirectoryAsync?.Invoke() ?? Task.FromResult<string?>(null);
         center.OpenClipStudioAsync = OpenClipStudioAsync;
-        center.TryGetLiveStatus = roomId =>
-            _knownLiveStatus.TryGetValue(roomId, out var live) ? live : null;
+        center.TryGetLiveStatus = RoomCatalog.TryGetLiveStatus;
         return center;
     }
 
@@ -244,26 +256,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public string SearchText
     {
-        get => _searchText;
-        set
-        {
-            if (SetProperty(ref _searchText, value))
-            {
-                RefreshFilteredRooms();
-            }
-        }
+        get => RoomCatalog.SearchText;
+        set => RoomCatalog.SearchText = value;
     }
 
     public string GroupFilter
     {
-        get => _groupFilter;
-        set
-        {
-            if (SetProperty(ref _groupFilter, value))
-            {
-                RefreshFilteredRooms();
-            }
-        }
+        get => RoomCatalog.GroupFilter;
+        set => RoomCatalog.GroupFilter = value;
     }
 
     /// <summary>解码健康摘要文案（顶栏健康胶囊与状态栏共用 SystemStatus 的数据）。</summary>
@@ -341,11 +341,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         });
     }
 
-    public bool IsDirty
-    {
-        get => _isDirty;
-        private set => SetProperty(ref _isDirty, value);
-    }
+    public bool IsDirty => LayoutProfiles.IsDirty;
 
     public int GridRows
     {
@@ -492,7 +488,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _freeformDocument = document;
         if (document is not null && IsFreeformMode)
         {
-            IsDirty = true;
+            LayoutProfiles.MarkDirty();
         }
     }
 
@@ -521,7 +517,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var document = WorkspaceLayoutCoordinator.BuildFreeformDocument(WorkspaceTiles, preset, _workspaceAspect);
         _freeformDocument = document;
         FreeformApplyRequested?.Invoke(this, document);
-        IsDirty = true;
+        LayoutProfiles.MarkDirty();
         StatusText = preset switch
         {
             FreeformPreset.Hero => "已应用自由布局预设：主副屏。",
@@ -542,7 +538,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var document = WorkspaceLayoutCoordinator.BuildFreeformDocument(WorkspaceTiles, preset, _workspaceAspect);
         _freeformDocument = document;
         FreeformApplyRequested?.Invoke(this, document);
-        IsDirty = true;
+        LayoutProfiles.MarkDirty();
         StatusText = preset switch
         {
             FreeformPreset.Hero => "已进入自由布局（主副屏）：拖动/缩放窗格，右键设置画中画。",
@@ -659,10 +655,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public void ClearHighlightEvents() => HighlightFeed.Clear();
 
-    private string? ResolveRoomTitle(string roomId) =>
-        _roomById.Values.FirstOrDefault(room =>
-            string.Equals(room.RoomId, roomId, StringComparison.OrdinalIgnoreCase)
-            && !string.IsNullOrWhiteSpace(room.Alias))?.Alias;
+    private string? ResolveRoomTitle(string roomId) => RoomCatalog.ResolveRoomAlias(roomId);
 
     /// <summary>工作区实际宽高比，用于 Auto-Fit 计算最接近 16:9 的行列数。</summary>
     public void SetWorkspaceAspect(double width, double height)
@@ -686,23 +679,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await ReloadRoomsAsync(ct).ConfigureAwait(true);
-
-        var profiles = await _services.Profiles.GetAllAsync(ct).ConfigureAwait(true);
-        if (profiles.Count == 0)
-        {
-            var layout = _dockBuilder.CreateGrid(2, 2, paneId => new RoomTileViewModel(paneId, null));
-            var profile = new LayoutProfile { Name = "默认方案" };
-            profile.DockLayoutJson = SerializeLayout(layout);
-            await _services.Profiles.SaveAsync(profile, ct).ConfigureAwait(true);
-            profiles = await _services.Profiles.GetAllAsync(ct).ConfigureAwait(true);
-        }
-
-        Profiles.Clear();
-        foreach (var profile in profiles)
-        {
-            Profiles.Add(profile);
-        }
+        await RoomCatalog.ReloadRoomsAsync(ct).ConfigureAwait(true);
+        await LayoutProfiles.InitializeAsync(ct).ConfigureAwait(true);
 
         _initialized = true;
 
@@ -710,13 +688,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         // 若管理器尚未 Initialize，Acquire 会抛 "请先 InitializeAsync"（启动报错窗口的根因）。
         await InitializeDanmakuAsync(ct).ConfigureAwait(true);
 
-        _suppressProfileLoad = true;
-        SelectedProfile = Profiles[0];
-        _suppressProfileLoad = false;
-        await LoadProfileAsync(SelectedProfile).ConfigureAwait(true);
+        await LayoutProfiles.LoadInitialProfileAsync(ct).ConfigureAwait(true);
         StartHealthMonitor();
         StartRoomStatusMonitor();
-        _loadedProfile = SelectedProfile;
     }
 
     /// <summary>
@@ -970,7 +944,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public Task<RoomListItemViewModel> AddRoomAsync(string url, string? groupTag = null, CancellationToken ct = default)
     {
-        return AddRoomCoreAsync(url, groupTag, customStream: false, referer: null, userAgent: null, ct);
+        return RoomCatalog.AddRoomAsync(url, groupTag, ct);
     }
 
     /// <summary>
@@ -985,89 +959,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         string? userAgent,
         CancellationToken ct = default)
     {
-        return AddRoomCoreAsync(url, groupTag, customStream, referer, userAgent, ct);
-    }
-
-    private async Task<RoomListItemViewModel> AddRoomCoreAsync(
-        string url,
-        string? groupTag,
-        bool customStream,
-        string? referer,
-        string? userAgent,
-        CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            throw new ArgumentException("请粘贴直播间链接或房间号。", nameof(url));
-        }
-
-        IPlatformProvider provider;
-        string parsedRoomId;
-        string? cookie;
-        RoomStatus status;
-        string? customHeadersJson = null;
-        var trimmedUrl = url.Trim();
-
-        if (customStream || _services.Platforms.GetProvider(trimmedUrl) is CustomStreamProvider)
-        {
-            // 识别为直链/清流时一律按自定义清流处理（UI 自动勾选之外的第二道防线），
-            // 因为清流没有房间号概念，走平台房间查询会得到不存在的 roomId。
-            if (!CustomStreamProvider.IsSupportedDirectUrl(trimmedUrl))
-            {
-                throw new ArgumentException("自定义清流需要 http(s) / rtmp(s) / rtsp(s) / srt 或 mms 绝对地址。", nameof(url));
-            }
-
-            provider = _services.Platforms.GetProvider(PlatformType.CustomStream);
-            if (provider is not CustomStreamProvider customProvider)
-            {
-                throw new InvalidOperationException("自定义清流 Provider 未注册，无法添加。");
-            }
-
-            parsedRoomId = customProvider.ExtractRoomId(trimmedUrl);
-            cookie = null;
-            // 直接把完整 URL 作为 roomId 传进去可绕过数据库查询，添加阶段无需先落库。
-            status = await customProvider.GetRoomStatusAsync(trimmedUrl, null, ct).ConfigureAwait(true);
-            customHeadersJson = CustomStreamProvider.BuildHeadersJson(referer, userAgent);
-            customStream = true;
-        }
-        else
-        {
-            provider = _services.Platforms.GetProvider(trimmedUrl);
-            parsedRoomId = provider.ExtractRoomId(trimmedUrl);
-            cookie = await _services.Credentials.GetCookieAsync(provider.Platform, ct).ConfigureAwait(true);
-            status = await provider.GetRoomStatusAsync(parsedRoomId, cookie, ct).ConfigureAwait(true);
-        }
-
-        var canonicalRoomId = customStream
-            ? parsedRoomId
-            : string.IsNullOrWhiteSpace(status.RoomId) ? parsedRoomId : status.RoomId;
-
-        if (await _services.Rooms.ExistsAsync(provider.Platform, canonicalRoomId, ct).ConfigureAwait(true))
-        {
-            throw new InvalidOperationException("这个直播间已经在主库中，不能重复添加。");
-        }
-
-        var room = new LiveRoom
-        {
-            DisplayNumber = await _services.Rooms.GetNextDisplayNumberAsync(ct).ConfigureAwait(true),
-            Platform = provider.Platform,
-            RoomId = canonicalRoomId,
-            RawUrl = trimmedUrl,
-            Alias = string.IsNullOrWhiteSpace(status.AnchorName)
-                ? $"{provider.Platform}_{canonicalRoomId}"
-                : status.AnchorName,
-            GroupTag = string.IsNullOrWhiteSpace(groupTag) ? null : groupTag.Trim(),
-            CustomHeadersJson = customHeadersJson,
-            CreatedAt = DateTime.UtcNow
-        };
-
-        _knownLiveStatus[room.Id] = status.IsLive;
-        await _services.Rooms.AddAsync(room, ct).ConfigureAwait(true);
-        await ReloadRoomsAsync(ct).ConfigureAwait(true);
-        StatusText = $"已添加 {room.Alias}";
-
-        var item = Rooms.FirstOrDefault(candidate => candidate.Id == room.Id);
-        return item ?? new RoomListItemViewModel(room);
+        return RoomCatalog.AddRoomAsync(url, groupTag, customStream, referer, userAgent, ct);
     }
 
     public async Task AddRoomToWorkspaceAsync(Guid roomId, CancellationToken ct = default, bool startPlayback = true)
@@ -1085,15 +977,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (!_roomById.TryGetValue(roomId, out var room))
+        var room = await RoomCatalog.GetRoomOrLoadAsync(roomId, ct).ConfigureAwait(true);
+        if (room is null)
         {
-            room = await _services.Rooms.GetByIdAsync(roomId, ct).ConfigureAwait(true);
-            if (room is null)
-            {
-                throw new InvalidOperationException("房间不存在。");
-            }
-
-            _roomById[room.Id] = room;
+            throw new InvalidOperationException("房间不存在。");
         }
 
         // 自动适配模式：按“已有房间 + 新房间”的数量重算最优网格。
@@ -1101,7 +988,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             var rooms = tiles
                 .Where(tile => tile.HasRoom)
-                .Select(tile => _roomById.GetValueOrDefault(tile.LiveRoomId))
+                .Select(tile => RoomCatalog.RoomsById.GetValueOrDefault(tile.LiveRoomId))
                 .Where(roomItem => roomItem is not null)
                 .Select(roomItem => roomItem!)
                 .ToList();
@@ -1116,7 +1003,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (empty is not null)
         {
             empty.Assign(room);
-            IsDirty = true;
+            LayoutProfiles.MarkDirty();
             StatusText = $"已放入 {empty.DisplayTitle}";
             if (startPlayback)
             {
@@ -1147,7 +1034,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         var rooms = WorkspaceDockBuilder.EnumerateTiles(Layout)
             .Where(tile => tile.HasRoom)
-            .Select(tile => _roomById.GetValueOrDefault(tile.LiveRoomId))
+            .Select(tile => RoomCatalog.RoomsById.GetValueOrDefault(tile.LiveRoomId))
             .Where(room => room is not null)
             .Select(room => room!)
             .ToList();
@@ -1172,7 +1059,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             WorkspaceDockBuilder.ResetProportions(Layout))
         {
             SetCustomLayout(false);
-            IsDirty = true;
+            LayoutProfiles.MarkDirty();
             StatusText = rooms.Count == 0 ? "已重置为自动适配" : $"已自适应 {rooms.Count} 路（比例已归位）";
             ProportionsRestored?.Invoke(this, EventArgs.Empty);
             return;
@@ -1194,7 +1081,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _customLayoutSnapshotSlots = WorkspaceLayoutCoordinator.CreateLayoutSlots(
             WorkspaceDockBuilder.EnumerateTiles(Layout),
             Guid.Empty);
-        _customLayoutSnapshotDirty = IsDirty;
+        _customLayoutSnapshotDirty = LayoutProfiles.IsDirty;
         CanRestoreCustomLayout = true;
     }
 
@@ -1228,7 +1115,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             {
                 SetCustomLayout(true);
                 SetHeroLayout(WorkspaceDockBuilder.ContainsDockId(snapshot, "workspace-hero"));
-                IsDirty = _customLayoutSnapshotDirty;
+                LayoutProfiles.RestoreDirty(_customLayoutSnapshotDirty);
                 ClearCustomLayoutSnapshot();
                 StatusText = "已恢复自定义比例";
                 ProportionsRestored?.Invoke(this, EventArgs.Empty);
@@ -1264,7 +1151,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         await LoadProfileAsync(profile).ConfigureAwait(true);
         SetCustomLayout(true);
-        IsDirty = _customLayoutSnapshotDirty;
+        LayoutProfiles.RestoreDirty(_customLayoutSnapshotDirty);
         ClearCustomLayoutSnapshot();
         StatusText = "已恢复自定义比例（播放器已重建）";
         ProportionsRestored?.Invoke(this, EventArgs.Empty);
@@ -1278,71 +1165,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         CanRestoreCustomLayout = false;
     }
 
-    public async Task SaveAsync(CancellationToken ct = default)
-    {
-        if (Layout is null)
-        {
-            return;
-        }
+    public Task SaveAsync(CancellationToken ct = default) => LayoutProfiles.SaveAsync(ct);
 
-        var dimensions = WorkspaceDockBuilder.GetGridDimensions(Layout);
-        GridRows = dimensions.Rows;
-        GridColumns = dimensions.Columns;
-        var profile = SelectedProfile ?? new LayoutProfile { Name = "默认方案" };
-        profile.IsCustomLayout = IsCustomLayout || IsFreeformMode;
-        profile.DockLayoutJson = SerializeCurrentLayout(Layout);
-        profile.Slots.Clear();
-        profile.Slots.AddRange(WorkspaceLayoutCoordinator.CreateLayoutSlots(
-            WorkspaceDockBuilder.EnumerateTiles(Layout),
-            profile.Id));
+    public Task SaveAsAsync(string name, CancellationToken ct = default) => LayoutProfiles.SaveAsAsync(name, ct);
 
-        await _services.Profiles.SaveAsync(profile, ct).ConfigureAwait(true);
-        if (!Profiles.Contains(profile))
-        {
-            Profiles.Add(profile);
-        }
-
-        _suppressProfileLoad = true;
-        SelectedProfile = profile;
-        _loadedProfile = profile;
-        _suppressProfileLoad = false;
-        IsDirty = false;
-        StatusText = $"已保存方案「{profile.Name}」";
-    }
-
-    public async Task SaveAsAsync(string name, CancellationToken ct = default)
-    {
-        if (Layout is null)
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            throw new ArgumentException("方案名不能为空。", nameof(name));
-        }
-
-        var profile = new LayoutProfile
-        {
-            Name = name.Trim(),
-            IsCustomLayout = IsCustomLayout || IsFreeformMode
-        };
-        profile.DockLayoutJson = SerializeCurrentLayout(Layout);
-        profile.Slots.AddRange(WorkspaceLayoutCoordinator.CreateLayoutSlots(
-            WorkspaceDockBuilder.EnumerateTiles(Layout),
-            profile.Id));
-
-        await _services.Profiles.SaveAsync(profile, ct).ConfigureAwait(true);
-        Profiles.Add(profile);
-        _suppressProfileLoad = true;
-        SelectedProfile = profile;
-        _loadedProfile = profile;
-        _suppressProfileLoad = false;
-        IsDirty = false;
-        StatusText = $"已另存方案「{profile.Name}」";
-    }
-
-    public void MarkDirty() => IsDirty = true;
+    public void MarkDirty() => LayoutProfiles.MarkDirty();
 
     public void SetStatus(string message) => StatusText = message;
 
@@ -1378,8 +1205,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (!_roomById.TryGetValue(source.LiveRoomId, out var sourceRoom) ||
-            !_roomById.TryGetValue(target.LiveRoomId, out var targetRoom))
+        if (!RoomCatalog.RoomsById.TryGetValue(source.LiveRoomId, out var sourceRoom) ||
+            !RoomCatalog.RoomsById.TryGetValue(target.LiveRoomId, out var targetRoom))
         {
             return;
         }
@@ -1396,7 +1223,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _players.StartAsync(source),
             _players.StartAsync(target)).ConfigureAwait(true);
 
-        IsDirty = true;
+        LayoutProfiles.MarkDirty();
         StatusText = $"已交换 {source.DisplayTitle} 与 {target.DisplayTitle}";
         SyncDanmakuSubscriptions();
     }
@@ -1633,37 +1460,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         string? userAgent,
         CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(alias))
-        {
-            throw new ArgumentException("显示名称不能为空。", nameof(alias));
-        }
-
-        if (displayNumber <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(displayNumber), "序号必须大于 0。");
-        }
-
-        var room = await _services.Rooms.GetByIdAsync(roomId, ct).ConfigureAwait(true)
-                   ?? throw new InvalidOperationException("直播间不存在。");
-        room.Alias = alias.Trim();
-        room.GroupTag = string.IsNullOrWhiteSpace(groupTag) ? null : groupTag.Trim();
-        room.DisplayNumber = displayNumber;
-
-        var streamUrlChanged = false;
-        if (room.Platform == PlatformType.CustomStream && rawUrl is not null)
-        {
-            var trimmedUrl = rawUrl.Trim();
-            if (!CustomStreamProvider.IsSupportedDirectUrl(trimmedUrl))
-            {
-                throw new ArgumentException("清流地址必须是 http(s) / rtmp(s) / rtsp(s) / srt 或 mms 绝对地址。", nameof(rawUrl));
-            }
-
-            streamUrlChanged = !string.Equals(room.RawUrl, trimmedUrl, StringComparison.Ordinal);
-            room.RawUrl = trimmedUrl;
-            room.CustomHeadersJson = CustomStreamProvider.BuildHeadersJson(referer, userAgent);
-        }
-
-        await _services.Rooms.UpdateAsync(room, ct).ConfigureAwait(true);
+        var (room, streamUrlChanged) = await RoomCatalog.UpdateRoomRecordAsync(
+            roomId, alias, groupTag, displayNumber, rawUrl, referer, userAgent, ct).ConfigureAwait(true);
 
         if (Layout is not null)
         {
@@ -1683,56 +1481,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
-        await ReloadRoomsAsync(ct).ConfigureAwait(true);
+        await RoomCatalog.ReloadRoomsAsync(ct).ConfigureAwait(true);
+
         StatusText = $"已更新 {room.Alias}";
     }
 
-    public async Task DeleteRoomAsync(Guid roomId, CancellationToken ct = default)
+    public Task DeleteRoomAsync(Guid roomId, CancellationToken ct = default)
     {
-        var room = await _services.Rooms.GetByIdAsync(roomId, ct).ConfigureAwait(true);
-        if (room is null)
-        {
-            return;
-        }
-
-        // 删除直播间前先停止该房间的录制：历史录像保留（LiveRoomId 由外键置空），
-        // 但不允许在直播间被删除后仍有一个正在写入的录制会话。
-        if (_services.Recordings.IsRecording(roomId))
-        {
-            try
-            {
-                await _services.Recordings.StopAsync(roomId, ct).ConfigureAwait(true);
-                SetStatus($"已停止 {room.Alias} 的录制。");
-            }
-            catch (Exception ex)
-            {
-                SetStatus($"停止录制失败，已取消删除：{ex.Message}");
-                return;
-            }
-        }
-
-        if (Layout is not null)
-        {
-            foreach (var tile in WorkspaceDockBuilder.EnumerateTiles(Layout).Where(tile => tile.LiveRoomId == roomId).ToList())
-            {
-                if (_focusedTile == tile)
-                {
-                    ExitFocus();
-                }
-
-                _players.RemovePlayer(tile);
-                tile.ClearRoom();
-            }
-        }
-
-        await _services.Rooms.DeleteAsync(roomId, ct).ConfigureAwait(true);
-        _roomById.Remove(roomId);
-        _knownLiveStatus.TryRemove(roomId, out _);
-        await ReloadRoomsAsync(ct).ConfigureAwait(true);
-        await ReflowAutoAsync(ct).ConfigureAwait(true);
-        SyncDanmakuSubscriptions();
-        MarkDirty();
-        StatusText = $"已从主库删除 {room.Alias}";
+        return RoomCatalog.DeleteRoomAsync(roomId, ct);
     }
 
     public async Task RemoveRoomFromWorkspaceAsync(RoomTileViewModel tile)
@@ -1763,7 +1519,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             SyncDanmakuSubscriptions();
-            IsDirty = true;
+            LayoutProfiles.MarkDirty();
             StatusText = $"已移出 {title}";
             NotifyWorkspaceSummaryChanged();
             return;
@@ -1781,7 +1537,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             .Where(candidate => candidate.HasRoom && !ReferenceEquals(candidate, tile))
             .ToList();
         var rooms = remainingTiles
-            .Select(candidate => _roomById.GetValueOrDefault(candidate.LiveRoomId))
+            .Select(candidate => RoomCatalog.RoomsById.GetValueOrDefault(candidate.LiveRoomId))
             .Where(room => room is not null)
             .Select(room => room!)
             .ToList();
@@ -1815,7 +1571,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             rebuilt = _dockBuilder.CloneStructure(Layout, paneId =>
             {
                 var old = tileByPaneId.GetValueOrDefault(paneId);
-                var room = old is null ? null : _roomById.GetValueOrDefault(old.LiveRoomId);
+                var room = old is null ? null : RoomCatalog.RoomsById.GetValueOrDefault(old.LiveRoomId);
                 return CreateRebuiltTile(paneId, room, playbackStates);
             });
 
@@ -1865,7 +1621,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         var rooms = WorkspaceDockBuilder.EnumerateTiles(Layout)
             .Where(tile => tile.HasRoom)
-            .Select(tile => _roomById.GetValueOrDefault(tile.LiveRoomId))
+            .Select(tile => RoomCatalog.RoomsById.GetValueOrDefault(tile.LiveRoomId))
             .Where(room => room is not null)
             .Select(room => room!)
             .ToList();
@@ -1972,7 +1728,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         ExitFocus();
         var rooms = WorkspaceDockBuilder.EnumerateTiles(Layout)
             .Where(tile => tile.HasRoom)
-            .Select(tile => _roomById.GetValueOrDefault(tile.LiveRoomId))
+            .Select(tile => RoomCatalog.RoomsById.GetValueOrDefault(tile.LiveRoomId))
             .Where(room => room is not null)
             .Select(room => room!)
             .ToList();
@@ -2012,7 +1768,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         GridColumns = dimensions.Columns;
         SetHeroLayout(isHero);
         SetCustomLayout(customLayout);
-        IsDirty = true;
+        LayoutProfiles.MarkDirty();
         _suppressLayoutTracking = false;
         AttachLayoutTracking(layout);
         WireTileInteractions(layout);
@@ -2056,7 +1812,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             var old = existingTiles.FirstOrDefault(tile => tile.PaneId == paneId);
-            _roomById.TryGetValue(old?.LiveRoomId ?? Guid.Empty, out var existingRoom);
+            RoomCatalog.RoomsById.TryGetValue(old?.LiveRoomId ?? Guid.Empty, out var existingRoom);
             return CreateRebuiltTile(paneId, existingRoom, playbackStates);
         }
 
@@ -2071,7 +1827,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var dimensions = WorkspaceDockBuilder.GetGridDimensions(layout);
         GridRows = dimensions.Rows;
         GridColumns = dimensions.Columns;
-        IsDirty = true;
+        LayoutProfiles.MarkDirty();
         _suppressLayoutTracking = false;
         AttachLayoutTracking(layout);
         WireTileInteractions(layout);
@@ -2151,7 +1907,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         SetCustomLayout(true);
-        IsDirty = true;
+        LayoutProfiles.MarkDirty();
         StatusText = "已切换为自定义比例；新增房间只追加，不会重排";
     }
 
@@ -2168,6 +1924,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _healthTimer = null;
         _roomStatusTimer?.Stop();
         _roomStatusTimer = null;
+        RoomCatalog.Dispose();
         _focusHintTimer?.Stop();
         _focusHintTimer = null;
         ReleaseDanmakuSubscriptions();
@@ -2201,38 +1958,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         // 由组合根按与创建相反的顺序统一释放，ViewModel 只负责视图态退订与播放器控件销毁。
         // AppServices.Dispose 内部幂等且各步骤不抛异常，不会阻塞窗口关闭。
         _services.Dispose();
-    }
-
-    private async Task SelectProfileAsync(LayoutProfile? profile)
-    {
-        if (profile is null || ReferenceEquals(profile, _loadedProfile))
-        {
-            return;
-        }
-
-        if (IsDirty && !_suppressProfileLoad)
-        {
-            var choice = ConfirmProfileSwitchAsync is null
-                ? ProfileSwitchChoice.Cancel
-                : await ConfirmProfileSwitchAsync().ConfigureAwait(true);
-
-            if (choice == ProfileSwitchChoice.Cancel)
-            {
-                _suppressProfileLoad = true;
-                SetProperty(ref _selectedProfile, _loadedProfile, nameof(SelectedProfile));
-                _suppressProfileLoad = false;
-                return;
-            }
-
-            if (choice == ProfileSwitchChoice.Save)
-            {
-                await SaveAsync().ConfigureAwait(true);
-            }
-        }
-
-        await LoadProfileAsync(profile).ConfigureAwait(true);
-        _loadedProfile = profile;
-        ClearCustomLayoutSnapshot();
     }
 
     private async Task LoadProfileAsync(LayoutProfile? profile)
@@ -2286,7 +2011,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             layout = _dockBuilder.CreateAutoFit(count, _workspaceAspect, paneId =>
             {
                 var slot = profile.Slots.FirstOrDefault(candidate => candidate.PaneId == paneId);
-                _roomById.TryGetValue(slot?.LiveRoomId ?? Guid.Empty, out var room);
+                RoomCatalog.RoomsById.TryGetValue(slot?.LiveRoomId ?? Guid.Empty, out var room);
                 return new RoomTileViewModel(paneId, room)
                 {
                     IsDanmakuVisible = slot?.DefaultDanmakuVisible ?? false
@@ -2315,7 +2040,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         WorkspaceDockBuilder.BindTiles(layout, paneId =>
         {
             var slot = profile.Slots.FirstOrDefault(candidate => candidate.PaneId == paneId);
-            _roomById.TryGetValue(slot?.LiveRoomId ?? Guid.Empty, out var room);
+            RoomCatalog.RoomsById.TryGetValue(slot?.LiveRoomId ?? Guid.Empty, out var room);
             return new RoomTileViewModel(paneId, room)
             {
                 IsDanmakuVisible = slot?.DefaultDanmakuVisible ?? false
@@ -2334,7 +2059,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             foreach (var oldTile in WorkspaceDockBuilder.EnumerateTiles(previousLayout))
             {
                 slotsByPane.TryGetValue(oldTile.PaneId, out var slot);
-                _roomById.TryGetValue(slot?.LiveRoomId ?? Guid.Empty, out var room);
+                RoomCatalog.RoomsById.TryGetValue(slot?.LiveRoomId ?? Guid.Empty, out var room);
                 oldTile.IsDanmakuVisible = slot?.DefaultDanmakuVisible ?? false;
                 if (oldTile.LiveRoomId == (room?.Id ?? Guid.Empty))
                 {
@@ -2359,7 +2084,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 _ = _players.StartAsync(oldTile);
             }
 
-            _loadedProfile = profile;
+            LayoutProfiles.NotifyProfileLoaded(profile);
             SetCustomLayout(profile.IsCustomLayout);
             SetHeroLayout(WorkspaceDockBuilder.ContainsDockId(previousLayout, "workspace-hero"));
             if (freeformDocument is not null)
@@ -2371,7 +2096,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             var oldDimensions = WorkspaceDockBuilder.GetGridDimensions(previousLayout);
             GridRows = oldDimensions.Rows;
             GridColumns = oldDimensions.Columns;
-            IsDirty = false;
+            LayoutProfiles.MarkClean();
             StatusText = freeformDocument is not null
                 ? $"已载入方案「{profile.Name}」：自由布局，播放器原地保留。"
                 : $"已载入方案「{profile.Name}」：窗格结构一致，播放器原地保留。";
@@ -2404,7 +2129,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             FreeformApplyRequested?.Invoke(this, freeformDocument);
         }
 
-        IsDirty = false;
+        LayoutProfiles.MarkClean();
         _suppressLayoutTracking = false;
         AttachLayoutTracking(layout);
         WireTileInteractions(layout);
@@ -2434,55 +2159,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         SyncDanmakuSubscriptions();
-    }
-
-    private async Task ReloadRoomsAsync(CancellationToken ct)
-    {
-        var rooms = await _services.Rooms.GetAllAsync(ct).ConfigureAwait(true);
-        _roomById.Clear();
-        Rooms.Clear();
-
-        foreach (var room in rooms)
-        {
-            _roomById[room.Id] = room;
-            var item = new RoomListItemViewModel(room);
-            if (_knownLiveStatus.TryGetValue(room.Id, out var live))
-            {
-                item.SetLiveStatus(live);
-            }
-
-            Rooms.Add(item);
-        }
-
-        RefreshFilteredRooms();
-        RebuildGroups();
-        NotifyWorkspaceSummaryChanged();
-    }
-
-    private void RefreshFilteredRooms()
-    {
-        var filtered = RoomCatalogCoordinator.Filter(Rooms, SearchText, GroupFilter);
-        FilteredRooms.Clear();
-        foreach (var room in filtered)
-        {
-            FilteredRooms.Add(room);
-        }
-    }
-
-    private void RebuildGroups()
-    {
-        var groups = RoomCatalogCoordinator.BuildGroups(Rooms);
-
-        Groups.Clear();
-        foreach (var group in groups)
-        {
-            Groups.Add(group);
-        }
-
-        if (!RoomCatalogCoordinator.IsKnownGroup(Groups, GroupFilter))
-        {
-            GroupFilter = RoomCatalogCoordinator.AllGroupLabel;
-        }
     }
 
     private void StartHealthMonitor()
@@ -2534,96 +2210,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _roomStatusTimer = new DispatcherTimer { Interval = RoomStatusPollInterval };
-        _roomStatusTimer.Tick += async (_, _) => await RefreshAllRoomStatusesAsync().ConfigureAwait(true);
+        _roomStatusTimer.Tick += async (_, _) => await RoomCatalog.RefreshLiveStatusesAsync().ConfigureAwait(true);
         _roomStatusTimer.Start();
 
         // 启动后立即刷新一轮，避免首屏长时间停留在「状态未知」。
-        _ = RefreshAllRoomStatusesAsync();
-    }
-
-    private async Task RefreshAllRoomStatusesAsync()
-    {
-        if (_disposed || _roomStatusRefreshing)
-        {
-            return;
-        }
-
-        _roomStatusRefreshing = true;
-        try
-        {
-            var rooms = Rooms.Select(item => item.Room).ToList();
-            using var gate = new SemaphoreSlim(3);
-
-            // 有上限的并发：15 路房间若逐个等 10s 超时会拖到两分钟以上。
-            var tasks = rooms.Select(async room =>
-            {
-                await gate.WaitAsync().ConfigureAwait(true);
-                try
-                {
-                    if (_disposed)
-                    {
-                        return;
-                    }
-
-                    if (room.Platform == PlatformType.CustomStream)
-                    {
-                        // 清流没有「开播」概念，按在线处理，避免长期显示为未知。
-                        _knownLiveStatus[room.Id] = true;
-                        return;
-                    }
-
-                    var live = await TryQueryRoomLiveAsync(room).ConfigureAwait(true);
-                    if (live is not null)
-                    {
-                        _knownLiveStatus[room.Id] = live;
-                    }
-                }
-                finally
-                {
-                    gate.Release();
-                }
-            });
-
-            await Task.WhenAll(tasks).ConfigureAwait(true);
-        }
-        finally
-        {
-            _roomStatusRefreshing = false;
-        }
-
-        foreach (var item in Rooms)
-        {
-            if (_knownLiveStatus.TryGetValue(item.Id, out var live))
-            {
-                item.SetLiveStatus(live);
-            }
-        }
-
-        // 录制中心已创建时同步开播状态：让「正在直播」的房间按排序规则上浮。
-        _recordingCenter?.RefreshLiveStatuses();
-    }
-
-    /// <summary>查询单个房间的开播状态；失败返回 null（保留上一次已知状态，不误报为未开播）。</summary>
-    private async Task<bool?> TryQueryRoomLiveAsync(LiveRoom room)
-    {
-        var provider = _services.Platforms.Providers.FirstOrDefault(candidate => candidate.Platform == room.Platform);
-        if (provider is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            var cookie = await _services.Credentials.GetCookieAsync(room.Platform).ConfigureAwait(true);
-            using var cts = new CancellationTokenSource(RoomStatusCheckTimeout);
-            var status = await provider.GetRoomStatusAsync(room.RoomId, cookie, cts.Token).ConfigureAwait(true);
-            return status.IsLive;
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[room-status] 查询房间开播状态失败 {room.Platform}/{room.RoomId}：{ex.Message}");
-            return null;
-        }
+        _ = RoomCatalog.RefreshLiveStatusesAsync();
     }
 
     /// <summary>把工作区已知的直播状态同步到左侧主库；从未检测过的房间保持灰色未知。</summary>
@@ -2645,17 +2236,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if (live is not null)
             {
-                _knownLiveStatus[tile.LiveRoomId] = live;
+                RoomCatalog.RecordLiveStatus(tile.LiveRoomId, live);
             }
         }
 
-        foreach (var item in Rooms)
-        {
-            if (_knownLiveStatus.TryGetValue(item.Id, out var live))
-            {
-                item.SetLiveStatus(live);
-            }
-        }
+        RoomCatalog.ApplyLiveStatuses();
 
         // 工作区播放状态也能提供开播信息：录制中心打开时立即套用同一套排序。
         _recordingCenter?.RefreshLiveStatuses();
@@ -2681,4 +2266,90 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _players.RemovePlayer(tile);
         }
     }
+
+    /// <summary>创建「默认方案」时使用的 2×2 空布局 JSON（原初始化内联逻辑）。</summary>
+    private string CreateDefaultProfileLayoutJson()
+    {
+        var layout = _dockBuilder.CreateGrid(2, 2, paneId => new RoomTileViewModel(paneId, null));
+        return SerializeLayout(layout);
+    }
+
+    // ---------------------------------------------------------------------
+    // 子视图模型宿主实现：窗口级副作用（状态栏、工作区清理、播放器生命周期）
+    // 仍留在主 VM，并在与抽离前相同的时机、以相同文案执行。
+    // ---------------------------------------------------------------------
+
+    void IRoomCatalogHost.SetStatus(string message) => SetStatus(message);
+
+    void IRoomCatalogHost.MarkDirty() => MarkDirty();
+
+    void IRoomCatalogHost.NotifyWorkspaceSummaryChanged() => NotifyWorkspaceSummaryChanged();
+
+    void IRoomCatalogHost.RefreshRecordingCenterLiveStatuses() => _recordingCenter?.RefreshLiveStatuses();
+
+    async Task<bool> IRoomCatalogHost.TryStopRecordingForDeleteAsync(LiveRoom room, CancellationToken ct)
+    {
+        if (!_services.Recordings.IsRecording(room.Id))
+        {
+            return true;
+        }
+
+        try
+        {
+            await _services.Recordings.StopAsync(room.Id, ct).ConfigureAwait(true);
+            SetStatus($"已停止 {room.Alias} 的录制。");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"停止录制失败，已取消删除：{ex.Message}");
+            return false;
+        }
+    }
+
+    void IRoomCatalogHost.DetachRoomFromWorkspace(Guid roomId)
+    {
+        if (Layout is null)
+        {
+            return;
+        }
+
+        foreach (var tile in WorkspaceDockBuilder.EnumerateTiles(Layout).Where(tile => tile.LiveRoomId == roomId).ToList())
+        {
+            if (_focusedTile == tile)
+            {
+                ExitFocus();
+            }
+
+            _players.RemovePlayer(tile);
+            tile.ClearRoom();
+        }
+    }
+
+    Task IRoomCatalogHost.ReflowWorkspaceAsync(CancellationToken ct) => ReflowAutoAsync(ct);
+
+    void IRoomCatalogHost.SyncDanmakuSubscriptions() => SyncDanmakuSubscriptions();
+
+    WorkspaceLayoutSnapshot? IWorkspaceLayoutProfileHost.CaptureSnapshot()
+    {
+        if (Layout is null)
+        {
+            return null;
+        }
+
+        var dimensions = WorkspaceDockBuilder.GetGridDimensions(Layout);
+        GridRows = dimensions.Rows;
+        GridColumns = dimensions.Columns;
+        return new WorkspaceLayoutSnapshot(
+            SerializeCurrentLayout(Layout),
+            WorkspaceDockBuilder.EnumerateTiles(Layout).ToList(),
+            IsCustomLayout,
+            IsFreeformMode);
+    }
+
+    Task IWorkspaceLayoutProfileHost.LoadProfileAsync(LayoutProfile profile) => LoadProfileAsync(profile);
+
+    void IWorkspaceLayoutProfileHost.ClearCustomLayoutSnapshot() => ClearCustomLayoutSnapshot();
+
+    void IWorkspaceLayoutProfileHost.SetStatus(string message) => SetStatus(message);
 }
