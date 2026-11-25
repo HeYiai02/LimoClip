@@ -21,7 +21,7 @@ public sealed class DanmakuPlaybackCursor
     /// <summary>单次 <see cref="AdvanceTo(long)"/> 最多返回多少条，防止大跳变时弹幕洪峰。</summary>
     public const int MaxBatchSize = 200;
 
-    private readonly RecordedDanmakuItem[] _items;
+    private RecordedDanmakuItem[] _items;
     private int _nextIndex;
     private long _positionMs = -1;
 
@@ -42,6 +42,32 @@ public sealed class DanmakuPlaybackCursor
 
     /// <summary>弹幕总数。</summary>
     public int Count => _items.Length;
+
+    /// <summary>
+    /// 追加新录制到的弹幕（边录边剪时随录制进度增长），不影响当前播放位置：
+    /// 追加后按偏移稳定排序，并把游标重新定位到当前位置之后，已播放过的位置不会被重放。
+    /// </summary>
+    public void Append(IReadOnlyList<RecordedDanmakuItem>? items)
+    {
+        if (items is null || items.Count == 0)
+        {
+            return;
+        }
+
+        var merged = new RecordedDanmakuItem[_items.Length + items.Count];
+        Array.Copy(_items, merged, _items.Length);
+        for (var i = 0; i < items.Count; i++)
+        {
+            merged[_items.Length + i] = items[i];
+        }
+
+        // 正常录制产物本身有序；追加跨批数据可能乱序，这里做一次稳定排序。
+        Array.Sort(merged, static (a, b) => a.OffsetMs.CompareTo(b.OffsetMs));
+        _items = merged;
+
+        // 不重放已显示内容：把下一条待推送位置对齐到当前播放位置之后。
+        _nextIndex = _positionMs < 0 ? 0 : UpperBound(_positionMs);
+    }
 
     /// <summary>游标当前所在时间轴位置（毫秒），初始为 -1 表示尚未开始。</summary>
     public long PositionMs => _positionMs;

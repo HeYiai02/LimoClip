@@ -25,7 +25,7 @@ public sealed record ActiveRecordingSnapshot(LiveRoom Room, RecordingProgress Pr
 /// DanmakuManager 可以为 null（例如无弹幕场景），此时不写弹幕伴随文件。
 /// </para>
 /// </summary>
-public sealed class RecordingManager : IAsyncDisposable
+public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor
 {
     /// <summary>缺省保存目录的末尾相对路径，拼接在用户目录下。</summary>
     public const string DefaultRelativeDirectory = @"Videos\LimoClip";
@@ -401,6 +401,79 @@ public sealed class RecordingManager : IAsyncDisposable
         }
 
         return result;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<LiveRecordingInfo> GetLiveRecordings()
+    {
+        List<ActiveRecording> actives;
+        lock (_gate)
+        {
+            actives = _active.Values.ToList();
+        }
+
+        var result = new List<LiveRecordingInfo>(actives.Count);
+        foreach (var active in actives)
+        {
+            result.Add(BuildLiveRecordingInfo(active));
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public bool TryGetLiveRecording(Guid sessionId, out LiveRecordingInfo info)
+    {
+        List<ActiveRecording> actives;
+        lock (_gate)
+        {
+            actives = _active.Values.ToList();
+        }
+
+        foreach (var active in actives)
+        {
+            if (active.Session.Id == sessionId)
+            {
+                info = BuildLiveRecordingInfo(active);
+                return true;
+            }
+        }
+
+        info = null!;
+        return false;
+    }
+
+    /// <summary>
+    /// 构造「边录边剪」用的实时快照：当前正在写的分片路径 + 分片序号 + 累计时长/大小/弹幕/高能。
+    /// 分段切换的瞬间 <see cref="ActiveRecording.CurrentPartPath"/> 可能为空，此时按分片序号兜底拼路径。
+    /// </summary>
+    private LiveRecordingInfo BuildLiveRecordingInfo(ActiveRecording active)
+    {
+        var progress = BuildProgress(active);
+
+        TimeSpan completedDuration;
+        int partNumber;
+        string partFilePath;
+        lock (active.Sync)
+        {
+            completedDuration = active.CompletedDuration;
+            partNumber = Math.Max(1, active.PartIndex);
+            partFilePath = active.CurrentPartPath
+                           ?? BuildPartPath(active.Session.VideoFilePath, partNumber);
+        }
+
+        return new LiveRecordingInfo(
+            active.Session.Id,
+            active.Room.Id,
+            active.Room.DisplayNumber,
+            FormatRoomDisplayName(active.Room),
+            partFilePath,
+            partNumber,
+            completedDuration,
+            progress.Duration,
+            progress.FileSizeBytes,
+            progress.DanmakuCount,
+            progress.HighlightCount);
     }
 
     /// <summary>

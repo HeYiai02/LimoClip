@@ -275,4 +275,20 @@ public sealed class FfmpegArgumentBuilderTests
         Assert.Equal("tcp", arguments[transportIndex + 1]);
         Assert.DoesNotContain("-headers", arguments);
     }
+
+    [Fact]
+    public void Build_OutputTail_LimitsClusterDurationForLiveClipping()
+    {
+        var arguments = FfmpegArgumentBuilder.Build(Quality(), "out.mkv").ToList();
+
+        var clusterIndex = arguments.IndexOf("-cluster_time_limit");
+        var copyIndex = arguments.IndexOf("-c");
+        var outputIndex = arguments.IndexOf("out.mkv");
+
+        Assert.InRange(clusterIndex, 0, arguments.Count - 2);
+        Assert.Equal("2000", arguments[clusterIndex + 1]);
+        // 位于输出参数区、-c copy 之前，紧贴输出路径。
+        Assert.InRange(clusterIndex, copyIndex - 2, copyIndex - 1);
+        Assert.True(outputIndex > clusterIndex);
+    }
 }

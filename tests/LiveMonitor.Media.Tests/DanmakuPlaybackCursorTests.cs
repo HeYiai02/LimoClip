@@ -111,4 +111,44 @@ public sealed class DanmakuPlaybackCursorTests
         var fresh = new DanmakuPlaybackCursor(new[] { Item(0, "a") });
         Assert.Equal(new long[] { 0 }, Offsets(fresh.AdvanceTo(-100)));
     }
+
+    [Fact]
+    public void Append_keeps_order_and_does_not_replay_emitted_items()
+    {
+        var cursor = new DanmakuPlaybackCursor(new[] { Item(0, "a"), Item(1000, "b") });
+        Assert.Equal(new long[] { 0, 1000 }, Offsets(cursor.AdvanceTo(1000)));
+
+        // 边录边剪：录制继续增长时追加新弹幕，含一条比当前位置更早的乱序数据。
+        cursor.Append(new[] { Item(2000, "late"), Item(500, "inserted") });
+
+        Assert.Equal(4, cursor.Count);
+        // 当前位置之前的 500 不回放（已显示内容不重复），当前位置之后正常推送。
+        Assert.Empty(Offsets(cursor.AdvanceTo(1500)));
+        Assert.Equal(new long[] { 2000 }, Offsets(cursor.AdvanceTo(2500)));
+        Assert.Empty(Offsets(cursor.AdvanceTo(3000)));
+    }
+
+    [Fact]
+    public void Append_before_playback_starts_from_beginning()
+    {
+        var cursor = new DanmakuPlaybackCursor(Array.Empty<RecordedDanmakuItem>());
+
+        cursor.Append(new[] { Item(300, "b"), Item(100, "a") });
+
+        Assert.Equal(2, cursor.Count);
+        Assert.Equal(new long[] { 100, 300 }, Offsets(cursor.AdvanceTo(400)));
+    }
+
+    [Fact]
+    public void Append_null_or_empty_is_noop()
+    {
+        var cursor = new DanmakuPlaybackCursor(new[] { Item(100, "a") });
+        cursor.AdvanceTo(200);
+
+        cursor.Append(null);
+        cursor.Append(Array.Empty<RecordedDanmakuItem>());
+
+        Assert.Equal(1, cursor.Count);
+        Assert.Empty(cursor.AdvanceTo(300));
+    }
 }

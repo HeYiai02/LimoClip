@@ -116,6 +116,11 @@ public static class FfmpegArgumentBuilder
 
         arguments.AddRange(new[]
         {
+            // 边录边剪：录制中的 MKV 需要随时可被 libmpv / ffmpeg 读取预览。
+            // matroska 默认按关键帧/大小封 Cluster，长时间录制时尾部可能迟迟不落盘；
+            // 限制每个 Cluster 最长 2 秒，让“可读到的安全尾部”紧跟实时进度。
+            "-cluster_time_limit",
+            "2000",
             "-c",
             "copy",
             "-f",

@@ -1,4 +1,4 @@
-﻿using LiveMonitor.Core;
+using LiveMonitor.Core;
 using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Enums;
 using LiveMonitor.Media.Recording;
@@ -668,6 +668,53 @@ public sealed class RecordingManagerTests
         Assert.Equal(RecordingStatus.Completed, stored.Status);
 
         await harness.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task GetLiveRecordings_ExposesPartPathAndRealtimeProgress()
+    {
+        await using var harness = new RecordingManagerHarness();
+        await harness.InitializeAsync();
+        var room = harness.AddRoom();
+        harness.SetLive();
+        await harness.Manager.StartAsync(room);
+        var sessionId = harness.Manager.GetActiveSessionId(room.Id)!.Value;
+        harness.Recorder.RaiseAnchor(harness.Clock.Now);
+        harness.Recorder.RaiseProgress(TimeSpan.FromSeconds(3), 8192, 2500);
+
+        var live = Assert.Single(harness.Manager.GetLiveRecordings());
+        Assert.Equal(sessionId, live.SessionId);
+        Assert.Equal(room.Id, live.LiveRoomId);
+        Assert.Equal(1, live.RoomDisplayNumber);
+        Assert.Equal("#1 测试主播", live.RoomDisplayName);
+        Assert.Equal(1, live.PartNumber);
+        Assert.EndsWith(".part001.mkv", live.PartFilePath);
+        Assert.Equal(3, live.RecordedDuration.TotalSeconds, precision: 3);
+        Assert.Equal(8192, live.FileSizeBytes);
+        Assert.Equal(TimeSpan.Zero, live.CompletedDuration);
+    }
+
+    [Fact]
+    public async Task TryGetLiveRecording_ReturnsFalseForUnknownOrInactiveSession()
+    {
+        await using var harness = new RecordingManagerHarness();
+        await harness.InitializeAsync();
+        var room = harness.AddRoom();
+        harness.SetLive();
+
+        Assert.False(harness.Manager.TryGetLiveRecording(Guid.NewGuid(), out _));
+
+        await harness.Manager.StartAsync(room);
+        var sessionId = harness.Manager.GetActiveSessionId(room.Id)!.Value;
+
+        Assert.True(harness.Manager.TryGetLiveRecording(sessionId, out var info));
+        Assert.Equal(sessionId, info.SessionId);
+        Assert.EndsWith(".part001.mkv", info.PartFilePath);
+
+        await harness.Manager.StopAsync(room.Id);
+
+        Assert.False(harness.Manager.TryGetLiveRecording(sessionId, out _));
+        Assert.Empty(harness.Manager.GetLiveRecordings());
     }
 
     [Fact]
