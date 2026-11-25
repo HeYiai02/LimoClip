@@ -744,4 +744,530 @@ public sealed class RecordingManagerTests
             RecordingManager.DefaultDirectory,
             StringComparison.OrdinalIgnoreCase);
     }
+
+    // ---- 阶段三 3.4：多锁互斥、收尾单次性、抑制语义、崩溃恢复与高并发回归 ----
+
+    [Fact]
+    public async Task ConcurrentStartAsync_SameRoom_OnlyOneSucceeds()
+    {
+        await using var harness = CreateHarness();
+        await harness.InitializeAsync();
+        var room = harness.AddRoom();
+        harness.SetLive();
+
+        var attempts = Enumerable.Range(0, 8)
+            .Select(_ => Task.Run(() => TryStartCapturingFailureAsync(harness.Manager, room)))
+            .ToArray();
+        var messages = await Task.WhenAll(attempts).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(1, messages.Count(message => message is null));
+        var failures = messages.Where(message => message is not null).ToList();
+        Assert.Equal(7, failures.Count);
+        Assert.All(failures, message => Assert.Contains("正在录制中", message ?? string.Empty));
+
+        Assert.Single(harness.Recorders);
+        Assert.Single(harness.Sessions.Snapshot);
+        Assert.Single(harness.Started);
+        Assert.True(harness.Manager.IsRecording(room.Id));
+        Assert.NotNull(harness.Manager.GetActiveSessionId(room.Id));
+
+        await harness.Manager.StopAsync(room.Id).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Single(harness.Completed);
+        Assert.False(harness.Manager.IsRecording(room.Id));
+        Assert.Empty(harness.Manager.GetActiveRecordings());
+    }
+
+    [Fact]
+    public async Task StartAsync_WhileRecorderIsStarting_SerializesThroughStartGate()
+    {
+        await using var harness = CreateHarness();
+        await harness.InitializeAsync();
+        var room = harness.AddRoom();
+        harness.SetLive();
+
+        var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        harness.NextRecorderStartHook = async () =>
+        {
+            entered.TrySetResult(true);
+            await release.Task.ConfigureAwait(false);
+        };
+
+        var first = Task.Run(() => harness.Manager.StartAsync(room));
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // 录制器还没真正开跑，但活动会话已经登记：这正是 _startGate 需要保护的启动窗口。
+        Assert.True(harness.Manager.IsRecording(room.Id));
+        Assert.Single(harness.Recorders);
+
+        var second = Task.Run(() => harness.Manager.StartAsync(room));
+        await Task.Delay(300);
+        Assert.False(second.IsCompleted, "并发的第二次启动应阻塞在 _startGate 上，而不是进入第二个录制会话。");
+
+        release.TrySetResult(true);
+        await first.WaitAsync(TimeSpan.FromSeconds(10));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => second.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Contains("正在录制中", ex.Message);
+
+        Assert.Single(harness.Recorders);
+        Assert.Single(harness.Sessions.Snapshot);
+        Assert.Single(harness.Started);
+
+        await harness.Manager.StopAsync(room.Id).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Single(harness.Completed);
+    }
+
+    [Fact]
+    public async Task ConcurrentStopAsync_SameRoom_FinalizesOnce()
+    {
+        await using var harness = CreateHarness();
+        await harness.InitializeAsync();
+        var room = harness.AddRoom();
+        harness.SetLive();
+        await harness.Manager.StartAsync(room);
+        var sessionId = harness.Manager.GetActiveSessionId(room.Id)!.Value;
+        harness.Recorder.RaiseAnchor(harness.Clock.Now);
+        harness.Recorder.RaiseProgress(TimeSpan.FromSeconds(2), 2048, 800);
+
+        var stops = Enumerable.Range(0, 8)
+            .Select(_ => Task.Run(() => harness.Manager.StopAsync(room.Id)))
+            .ToArray();
+        await Task.WhenAll(stops).WaitAsync(TimeSpan.FromSeconds(10));
+
+        // 收尾体（合并、落库、事件、Dispose）只应执行一次。
+        Assert.Single(harness.Completed);
+        Assert.Single(harness.SegmentMerger.Batches);
+        Assert.Equal(1, harness.Recorder.DisposeCount);
+        Assert.Single(harness.Started);
+
+        var stored = await harness.Sessions.GetByIdAsync(sessionId);
+        Assert.NotNull(stored);
+        Assert.Equal(RecordingStatus.Completed, stored.Status);
+        Assert.False(harness.Manager.IsRecording(room.Id));
+        Assert.Empty(harness.Manager.GetActiveRecordings());
+    }
+
+    [Fact]
+    public async Task ManualStop_WhenMonitorNaturalExitRaces_FinalizesOnce()
+    {
+        await using var harness = CreateHarness();
+        await harness.InitializeAsync();
+        var room = harness.AddRoom();
+        harness.SetLive();
+        await harness.Manager.StartAsync(room);
+        var sessionId = harness.Manager.GetActiveSessionId(room.Id)!.Value;
+        harness.Recorder.RaiseAnchor(harness.Clock.Now);
+        harness.Recorder.RaiseProgress(TimeSpan.FromSeconds(2), 2048, 800);
+        harness.SetOffline();
+
+        // 手动停止与监控循环发现录制器退出同时发生：两条路径都可能尝试收尾。
+        var exitTask = Task.Run(() => harness.Recorder.RaiseExit(0));
+        var stopTask = Task.Run(() => harness.Manager.StopAsync(room.Id));
+        await Task.WhenAll(exitTask, stopTask).WaitAsync(TimeSpan.FromSeconds(10));
+        await RecordingManagerHarness.WaitUntilAsync(() => !harness.Manager.IsRecording(room.Id));
+
+        Assert.Single(harness.Completed);
+        Assert.Single(harness.SegmentMerger.Batches);
+
+        // 两种时序的终态都应一致：手动停止按 Completed 收尾；自然退出因房间已下播也按 Completed 收尾。
+        var stored = await harness.Sessions.GetByIdAsync(sessionId);
+        Assert.NotNull(stored);
+        Assert.Equal(RecordingStatus.Completed, stored.Status);
+        Assert.Null(stored.ErrorMessage);
+        Assert.Empty(harness.Manager.GetActiveRecordings());
+    }
+
+    [Fact]
+    public async Task ConcurrentStartAndStopBursts_Repeatedly_NoDeadlockAndConsistentState()
+    {
+        await using var harness = CreateHarness();
+        await harness.InitializeAsync();
+        var room = harness.AddRoom();
+        harness.SetLive();
+
+        // 20+ 轮并发启停：每轮 4 个并发启动尝试 + 2 个并发停止，全部带超时保护。
+        for (var round = 0; round < 25; round++)
+        {
+            var starts = Enumerable.Range(0, 4)
+                .Select(_ => Task.Run(() => TryStartCapturingFailureAsync(harness.Manager, room)))
+                .ToArray();
+            var stops = Enumerable.Range(0, 2)
+                .Select(_ => Task.Run(() => harness.Manager.StopAsync(room.Id)))
+                .ToArray();
+
+            await Task.WhenAll(starts.Cast<Task>().Concat(stops))
+                .WaitAsync(TimeSpan.FromSeconds(10));
+
+            // 停止可能早于启动完成（此时启动会成功进入录制），统一收尾后再检查不变量。
+            await harness.Manager.StopAsync(room.Id).WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.False(
+                harness.Manager.IsRecording(room.Id),
+                $"第 {round} 轮结束后房间仍在录制，疑似收尾未完成。");
+            Assert.Empty(harness.Manager.GetActiveRecordings());
+
+            // 无论并发顺序如何，一次成功的启动恰好对应一次会话、一次开始事件与一次结束事件。
+            Assert.Equal(harness.Recorders.Count, harness.Sessions.Snapshot.Count);
+            Assert.Equal(harness.Recorders.Count, harness.Started.Count);
+            Assert.Equal(harness.Recorders.Count, harness.Completed.Count);
+        }
+
+        Assert.True(harness.Recorders.Count >= 25, "多轮并发启停期间应持续产生新的录制会话。");
+    }
+
+    [Fact]
+    public async Task ManualStop_Suppression_ReenablingAutoRecordDoesNotClear_ButDisablingDoes()
+    {
+        await using var harness = CreateHarness();
+        var room = harness.AddRoom();
+        harness.Targets.Set(room.Id, autoRecordEnabled: true);
+        harness.SetLive();
+        await harness.InitializeAsync();
+
+        await harness.Manager.PollOnceAsync();
+        Assert.True(harness.Manager.IsRecording(room.Id));
+        Assert.Single(harness.Recorders);
+
+        await harness.Manager.StopAsync(room.Id);
+        Assert.False(harness.Manager.IsRecording(room.Id));
+        Assert.Single(harness.Recorders);
+
+        // 抑制期间轮询照常执行，但不会自动重开录制。
+        for (var i = 0; i < 3; i++)
+        {
+            await harness.Manager.PollOnceAsync();
+        }
+
+        Assert.False(harness.Manager.IsRecording(room.Id));
+        Assert.Single(harness.Recorders);
+
+        // 重新开启自动录制不属于解除抑制的路径。
+        await harness.Manager.SetAutoRecordAsync(room.Id, true, null);
+        await harness.Manager.PollOnceAsync();
+        Assert.False(harness.Manager.IsRecording(room.Id));
+        Assert.Single(harness.Recorders);
+
+        // 关闭自动录制会解除抑制；再次开启后轮询可以重新起录。
+        await harness.Manager.SetAutoRecordAsync(room.Id, false, null);
+        await harness.Manager.SetAutoRecordAsync(room.Id, true, null);
+        await harness.Manager.PollOnceAsync();
+
+        Assert.True(harness.Manager.IsRecording(room.Id));
+        Assert.Equal(2, harness.Recorders.Count);
+
+        await harness.Manager.StopAsync(room.Id);
+        Assert.Equal(2, harness.Completed.Count);
+    }
+
+    [Fact]
+    public async Task ManualStart_AfterManualStop_ClearsSuppression()
+    {
+        await using var harness = CreateHarness();
+        var room = harness.AddRoom();
+        harness.Targets.Set(room.Id, autoRecordEnabled: true);
+        harness.SetLive();
+        await harness.InitializeAsync();
+
+        await harness.Manager.PollOnceAsync();
+        await harness.Manager.StopAsync(room.Id);
+        await harness.Manager.PollOnceAsync();
+        Assert.False(harness.Manager.IsRecording(room.Id));
+        Assert.Single(harness.Recorders);
+
+        // 手动再次开始录制是解除抑制的路径之一。
+        await harness.Manager.StartAsync(room);
+        Assert.True(harness.Manager.IsRecording(room.Id));
+        Assert.Equal(2, harness.Recorders.Count);
+
+        // 手动开录后轮询不应再重复启动。
+        await harness.Manager.PollOnceAsync();
+        Assert.Equal(2, harness.Recorders.Count);
+
+        await harness.Manager.StopAsync(room.Id);
+        Assert.Equal(2, harness.Completed.Count);
+    }
+
+    [Fact]
+    public async Task ManualStop_DuringStallFinalize_SuppressesRetryScheduling()
+    {
+        await using var harness = CreateHarness();
+        var room = harness.AddRoom();
+        harness.Targets.Set(room.Id, autoRecordEnabled: true);
+        harness.SetLive();
+        await harness.InitializeAsync();
+        await harness.Manager.StartAsync(room);
+        var sessionId = harness.Manager.GetActiveSessionId(room.Id)!.Value;
+        harness.Recorder.RaiseAnchor(harness.Clock.Now);
+        harness.Recorder.RaiseProgress(TimeSpan.FromSeconds(1), 1024, 800);
+
+        var mergeEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseMerge = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        harness.SegmentMerger.BeforeMergeAsync = async () =>
+        {
+            mergeEntered.TrySetResult(true);
+            await releaseMerge.Task.ConfigureAwait(false);
+        };
+
+        // 推进 31 秒触发卡死判定：监控循环以「自然退出」路径开始收尾，随后在合并分片处卡住。
+        harness.Clock.Advance(TimeSpan.FromSeconds(31));
+        await mergeEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var stopTask = Task.Run(() => harness.Manager.StopAsync(room.Id));
+        await RecordingManagerHarness.WaitUntilAsync(
+            () => harness.Logs.Any(log => log.Contains("正在停止录制")),
+            timeoutMilliseconds: 5000,
+            message: "等待手动停止进入收尾流程超时。");
+        releaseMerge.TrySetResult(true);
+        await stopTask.WaitAsync(TimeSpan.FromSeconds(10));
+        await RecordingManagerHarness.WaitUntilAsync(() => !harness.Manager.IsRecording(room.Id));
+
+        // 抑制已在收尾的「安排重试」之前生效：不应出现断流续录调度。
+        Assert.DoesNotContain(harness.Logs, log => log.Contains("尝试续录"));
+        Assert.DoesNotContain(harness.StatusMessages, message => message.Contains("准备续录"));
+        Assert.Single(harness.Completed);
+        Assert.Single(harness.SegmentMerger.Batches);
+
+        // userStop 在收尾入口即已判定为 false（卡死路径），因此会话状态仍为 Failed。
+        var stored = await harness.Sessions.GetByIdAsync(sessionId);
+        Assert.NotNull(stored);
+        Assert.Equal(RecordingStatus.Failed, stored.Status);
+        Assert.Contains("卡死", stored.ErrorMessage);
+        Assert.False(harness.Manager.IsRecording(room.Id));
+    }
+
+    [Fact]
+    public async Task StreamStall_WithoutManualStop_SchedulesRetry()
+    {
+        await using var harness = CreateHarness();
+        var room = harness.AddRoom();
+        harness.Targets.Set(room.Id, autoRecordEnabled: true);
+        harness.SetLive();
+        await harness.InitializeAsync();
+        await harness.Manager.StartAsync(room);
+        var sessionId = harness.Manager.GetActiveSessionId(room.Id)!.Value;
+        harness.Recorder.RaiseAnchor(harness.Clock.Now);
+        harness.Recorder.RaiseProgress(TimeSpan.FromSeconds(1), 1024, 800);
+
+        harness.Clock.Advance(TimeSpan.FromSeconds(31));
+
+        await RecordingManagerHarness.WaitUntilAsync(
+            () => harness.Logs.Any(log => log.Contains("尝试续录")),
+            timeoutMilliseconds: 8000,
+            message: "等待断流续录调度超时。");
+
+        var stored = await harness.Sessions.GetByIdAsync(sessionId);
+        Assert.NotNull(stored);
+        Assert.Equal(RecordingStatus.Failed, stored.Status);
+        Assert.Contains("卡死", stored.ErrorMessage);
+        Assert.Single(harness.Completed);
+        Assert.Single(harness.SegmentMerger.Batches);
+        Assert.Contains(harness.StatusMessages, message => message.Contains("准备续录"));
+        Assert.False(harness.Manager.IsRecording(room.Id));
+    }
+
+    [Fact]
+    public async Task Initialize_RecoversAllUnfinishedStatuses_AndIsIdempotent()
+    {
+        await using var harness = CreateHarness();
+        var room = harness.AddRoom();
+        var recoveryDirectory = Path.Combine(harness.RootDirectory, "recovery-multi");
+        Directory.CreateDirectory(recoveryDirectory);
+        var startingPath = Path.Combine(recoveryDirectory, "starting.part001.mkv");
+        var stoppingPath = Path.Combine(recoveryDirectory, "stopping.part001.mkv");
+        await File.WriteAllBytesAsync(startingPath, new byte[2048]);
+        await File.WriteAllBytesAsync(stoppingPath, new byte[512]);
+        var now = harness.Clock.Now.UtcDateTime;
+
+        var starting = SeedSession(harness, room, RecordingStatus.Starting, startingPath, fileSize: 0);
+        var recording = SeedSession(
+            harness,
+            room,
+            RecordingStatus.Recording,
+            Path.Combine(recoveryDirectory, "missing.mkv"),
+            fileSize: 777);
+        var stopping = SeedSession(harness, room, RecordingStatus.Stopping, stoppingPath, fileSize: 2048);
+        var completed = SeedSession(harness, room, RecordingStatus.Completed, null, fileSize: 4096);
+        completed.EndedAt = now.AddMinutes(-30);
+        completed.ErrorMessage = "既有完成记录";
+        harness.Sessions.Seed(completed);
+        var failed = SeedSession(harness, room, RecordingStatus.Failed, null, fileSize: 123);
+        failed.EndedAt = now.AddMinutes(-20);
+        failed.ErrorMessage = "既有失败记录";
+        harness.Sessions.Seed(failed);
+
+        await harness.InitializeAsync();
+
+        var recoveredStarting = await harness.Sessions.GetByIdAsync(starting.Id);
+        var recoveredRecording = await harness.Sessions.GetByIdAsync(recording.Id);
+        var recoveredStopping = await harness.Sessions.GetByIdAsync(stopping.Id);
+        Assert.NotNull(recoveredStarting);
+        Assert.NotNull(recoveredRecording);
+        Assert.NotNull(recoveredStopping);
+
+        Assert.All(
+            new[] { recoveredStarting, recoveredRecording, recoveredStopping },
+            session =>
+            {
+                Assert.Equal(RecordingStatus.Failed, session.Status);
+                Assert.NotNull(session.EndedAt);
+                Assert.Equal(now, session.EndedAt!.Value);
+                Assert.Contains("程序异常退出", session.ErrorMessage);
+            });
+
+        // 文件大小只在比记录值更大时刷新；缺失文件与更小的文件不覆盖既有字节数。
+        Assert.Equal(2048, recoveredStarting.FileSizeBytes);
+        Assert.Equal(777, recoveredRecording.FileSizeBytes);
+        Assert.Equal(2048, recoveredStopping.FileSizeBytes);
+
+        var untouchedCompleted = await harness.Sessions.GetByIdAsync(completed.Id);
+        var untouchedFailed = await harness.Sessions.GetByIdAsync(failed.Id);
+        Assert.NotNull(untouchedCompleted);
+        Assert.NotNull(untouchedFailed);
+        Assert.Equal(RecordingStatus.Completed, untouchedCompleted.Status);
+        Assert.Equal("既有完成记录", untouchedCompleted.ErrorMessage);
+        Assert.Equal(now.AddMinutes(-30), untouchedCompleted.EndedAt);
+        Assert.Equal(RecordingStatus.Failed, untouchedFailed.Status);
+        Assert.Equal("既有失败记录", untouchedFailed.ErrorMessage);
+        Assert.Equal(now.AddMinutes(-20), untouchedFailed.EndedAt);
+
+        Assert.Empty(await harness.Sessions.GetUnfinishedAsync());
+        var firstRecoveryEndedAt = recoveredStarting.EndedAt;
+        Assert.Single(harness.Logs, log => log.Contains("崩溃恢复"));
+
+        await harness.InitializeAsync();
+
+        var afterSecondInitialize = await harness.Sessions.GetByIdAsync(starting.Id);
+        Assert.NotNull(afterSecondInitialize);
+        Assert.Equal(firstRecoveryEndedAt, afterSecondInitialize.EndedAt);
+        Assert.Single(harness.Logs, log => log.Contains("崩溃恢复"));
+    }
+
+    [Fact]
+    public async Task PollOnceAsync_ConcurrentPollers_RespectsPollGateAndStartsEachRoomOnce()
+    {
+        await using var harness = CreateHarness();
+        var rooms = Enumerable.Range(0, 8)
+            .Select(index => harness.AddRoom(
+                roomId: $"2{index:00}",
+                alias: $"主播{index}",
+                displayNumber: index + 1))
+            .ToList();
+        foreach (var room in rooms)
+        {
+            harness.Targets.Set(room.Id, autoRecordEnabled: true);
+        }
+
+        harness.SetLive();
+        await harness.InitializeAsync();
+
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var saturated = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var current = new int[1];
+        var peak = new int[1];
+        harness.Provider.BeforeStatusAsync = async () =>
+        {
+            var concurrent = Interlocked.Increment(ref current[0]);
+            UpdatePeak(peak, concurrent);
+            if (concurrent >= 4)
+            {
+                saturated.TrySetResult(true);
+            }
+
+            try
+            {
+                await release.Task.ConfigureAwait(false);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref current[0]);
+            }
+        };
+
+        var polls = Enumerable.Range(0, 3)
+            .Select(_ => Task.Run(() => harness.Manager.PollOnceAsync()))
+            .ToArray();
+
+        await saturated.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(150);
+        Assert.Equal(4, Volatile.Read(ref peak[0]));
+
+        release.TrySetResult(true);
+        await Task.WhenAll(polls).WaitAsync(TimeSpan.FromSeconds(20));
+
+        // 并发轮询会对同一房间重复发起启动，但 _startGate 保证每个房间只落一个会话。
+        Assert.Equal(8, harness.Recorders.Count);
+        Assert.Equal(8, harness.Sessions.Snapshot.Count);
+        Assert.Equal(8, harness.Started.Count);
+        foreach (var room in rooms)
+        {
+            Assert.True(harness.Manager.IsRecording(room.Id), $"房间 {room.RoomId} 未进入录制。");
+        }
+
+        harness.Provider.BeforeStatusAsync = null;
+        await Task.WhenAll(rooms.Select(room => harness.Manager.StopAsync(room.Id)))
+            .WaitAsync(TimeSpan.FromSeconds(20));
+
+        Assert.Equal(8, harness.Completed.Count);
+        Assert.Empty(harness.Manager.GetActiveRecordings());
+        Assert.All(
+            harness.Sessions.Snapshot,
+            session => Assert.Equal(RecordingStatus.Completed, session.Status));
+        Assert.All(harness.Recorders, recorder => Assert.False(recorder.IsRunning));
+    }
+
+    private static RecordingManagerHarness CreateHarness()
+        => new(delay: static (delay, ct) => delay >= TimeSpan.FromSeconds(1)
+            ? Task.Delay(Timeout.InfiniteTimeSpan, ct)
+            : Task.Delay(delay, ct));
+
+    private static async Task<string?> TryStartCapturingFailureAsync(RecordingManager manager, LiveRoom room)
+    {
+        try
+        {
+            await manager.StartAsync(room);
+            return null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ex.Message;
+        }
+    }
+
+    private static void UpdatePeak(int[] peak, int value)
+    {
+        int observed;
+        while (value > (observed = Volatile.Read(ref peak[0])))
+        {
+            if (Interlocked.CompareExchange(ref peak[0], value, observed) == observed)
+            {
+                return;
+            }
+        }
+    }
+
+    private static RecordingSession SeedSession(
+        RecordingManagerHarness harness,
+        LiveRoom room,
+        RecordingStatus status,
+        string? videoPath,
+        long fileSize)
+    {
+        var session = new RecordingSession
+        {
+            Id = Guid.NewGuid(),
+            LiveRoomId = room.Id,
+            Platform = room.Platform,
+            RoomId = room.RoomId,
+            RoomDisplayName = RecordingManager.FormatRoomDisplayName(room),
+            Status = status,
+            VideoFilePath = videoPath ?? string.Empty,
+            DanmakuFilePath = string.Empty,
+            StartedAt = harness.Clock.Now.UtcDateTime.AddMinutes(-10),
+            FileSizeBytes = fileSize,
+        };
+        harness.Sessions.Seed(session);
+        return session;
+    }
 }

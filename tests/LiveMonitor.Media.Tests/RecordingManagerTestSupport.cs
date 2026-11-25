@@ -1,4 +1,4 @@
-﻿using LiveMonitor.Core.Entities;
+using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Enums;
 using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Core.Models;
@@ -122,65 +122,124 @@ internal sealed class FakeRecordingTargetRepository : IRecordingTargetRepository
 
 internal sealed class FakeRecordingSessionRepository : IRecordingSessionRepository
 {
+    private readonly object _sync = new();
     private readonly Dictionary<Guid, RecordingSession> _sessions = new();
+    private int _addCalls;
 
-    public Task AddAsync(RecordingSession session, CancellationToken ct = default)
+    /// <summary>AddAsync 被调用的累计次数（并发测试用来断言没有重复落库）。</summary>
+    public int AddCalls => Volatile.Read(ref _addCalls);
+
+    /// <summary>AddAsync 落库前的可选异步钩子：用于把启动流程卡在「会话已建、活动录制未登记」之间。</summary>
+    public Func<Task>? BeforeAddAsync { get; set; }
+
+    public async Task AddAsync(RecordingSession session, CancellationToken ct = default)
     {
-        _sessions[session.Id] = Clone(session);
-        return Task.CompletedTask;
+        Interlocked.Increment(ref _addCalls);
+        var hook = BeforeAddAsync;
+        if (hook is not null)
+        {
+            await hook().ConfigureAwait(false);
+        }
+
+        lock (_sync)
+        {
+            _sessions[session.Id] = Clone(session);
+        }
     }
 
     public Task UpdateAsync(RecordingSession session, CancellationToken ct = default)
     {
-        if (!_sessions.ContainsKey(session.Id))
+        lock (_sync)
         {
-            throw new KeyNotFoundException($"录制会话不存在：{session.Id}。");
+            if (!_sessions.ContainsKey(session.Id))
+            {
+                throw new KeyNotFoundException($"录制会话不存在：{session.Id}。");
+            }
+
+            _sessions[session.Id] = Clone(session);
         }
 
-        _sessions[session.Id] = Clone(session);
         return Task.CompletedTask;
     }
 
     public Task<RecordingSession?> GetByIdAsync(Guid id, CancellationToken ct = default)
-        => Task.FromResult(_sessions.TryGetValue(id, out var session) ? Clone(session) : null);
+    {
+        lock (_sync)
+        {
+            return Task.FromResult(_sessions.TryGetValue(id, out var session) ? Clone(session) : null);
+        }
+    }
 
     public Task<IReadOnlyList<RecordingSession>> GetRecentAsync(int limit = 200, CancellationToken ct = default)
-        => Task.FromResult<IReadOnlyList<RecordingSession>>(
-            _sessions.Values.OrderByDescending(session => session.StartedAt).Take(limit).Select(Clone).ToList());
+    {
+        lock (_sync)
+        {
+            return Task.FromResult<IReadOnlyList<RecordingSession>>(
+                _sessions.Values.OrderByDescending(session => session.StartedAt).Take(limit).Select(Clone).ToList());
+        }
+    }
 
     public Task<IReadOnlyList<RecordingSession>> GetByRoomAsync(
         PlatformType platform,
         string roomId,
         int limit = 100,
         CancellationToken ct = default)
-        => Task.FromResult<IReadOnlyList<RecordingSession>>(
-            _sessions.Values
-                .Where(session => session.Platform == platform
-                    && string.Equals(session.RoomId, roomId.Trim(), StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(session => session.StartedAt)
-                .Take(limit)
-                .Select(Clone)
-                .ToList());
+    {
+        lock (_sync)
+        {
+            return Task.FromResult<IReadOnlyList<RecordingSession>>(
+                _sessions.Values
+                    .Where(session => session.Platform == platform
+                        && string.Equals(session.RoomId, roomId.Trim(), StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(session => session.StartedAt)
+                    .Take(limit)
+                    .Select(Clone)
+                    .ToList());
+        }
+    }
 
     public Task<IReadOnlyList<RecordingSession>> GetUnfinishedAsync(CancellationToken ct = default)
-        => Task.FromResult<IReadOnlyList<RecordingSession>>(
-            _sessions.Values
-                .Where(session => session.Status is RecordingStatus.Starting
-                    or RecordingStatus.Recording
-                    or RecordingStatus.Stopping)
-                .Select(Clone)
-                .ToList());
+    {
+        lock (_sync)
+        {
+            return Task.FromResult<IReadOnlyList<RecordingSession>>(
+                _sessions.Values
+                    .Where(session => session.Status is RecordingStatus.Starting
+                        or RecordingStatus.Recording
+                        or RecordingStatus.Stopping)
+                    .Select(Clone)
+                    .ToList());
+        }
+    }
 
     public Task DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        _sessions.Remove(id);
+        lock (_sync)
+        {
+            _sessions.Remove(id);
+        }
+
         return Task.CompletedTask;
     }
 
-    public void Seed(RecordingSession session) => _sessions[session.Id] = Clone(session);
+    public void Seed(RecordingSession session)
+    {
+        lock (_sync)
+        {
+            _sessions[session.Id] = Clone(session);
+        }
+    }
 
     public IReadOnlyList<RecordingSession> Snapshot
-        => _sessions.Values.Select(Clone).ToList();
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _sessions.Values.Select(Clone).ToList();
+            }
+        }
+    }
 
     private static RecordingSession Clone(RecordingSession session) => new()
     {
@@ -262,12 +321,15 @@ internal sealed class FakePlatformProvider : IPlatformProvider
 
     public string? LastCookie { get; private set; }
 
+    /// <summary>状态查询进入后的可选异步钩子：用于观测/卡住轮询并发度（验证 _pollGate 上限）。</summary>
+    public Func<Task>? BeforeStatusAsync { get; set; }
+
     public bool CanHandle(string roomUrl) => true;
 
     public string ExtractRoomId(string roomUrl)
         => roomUrl[(roomUrl.LastIndexOf('/') + 1)..];
 
-    public Task<RoomStatus> GetRoomStatusAsync(
+    public async Task<RoomStatus> GetRoomStatusAsync(
         string roomId,
         string? cookie = null,
         CancellationToken ct = default)
@@ -279,7 +341,12 @@ internal sealed class FakePlatformProvider : IPlatformProvider
             throw StatusException;
         }
 
-        return Task.FromResult(Status);
+        if (BeforeStatusAsync is not null)
+        {
+            await BeforeStatusAsync().ConfigureAwait(false);
+        }
+
+        return Status;
     }
 }
 
@@ -311,9 +378,12 @@ internal sealed class FakeFullStreamRecorder : IFullStreamRecorder
 
     public Exception? StartException { get; set; }
 
+    /// <summary>StartAsync 执行中的可选异步钩子：用于把启动流程卡在录制器真正开跑之前。</summary>
+    public Func<Task>? StartHook { get; set; }
+
     public TaskCompletionSource<bool> StartTcs { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public Task StartAsync(StreamQuality sourceQuality, string outputMkvPath, CancellationToken ct = default)
+    public async Task StartAsync(StreamQuality sourceQuality, string outputMkvPath, CancellationToken ct = default)
     {
         StartCount++;
         SourceQuality = sourceQuality;
@@ -334,9 +404,13 @@ internal sealed class FakeFullStreamRecorder : IFullStreamRecorder
             File.WriteAllBytes(outputMkvPath, Array.Empty<byte>());
         }
 
+        if (StartHook is not null)
+        {
+            await StartHook().ConfigureAwait(false);
+        }
+
         IsRunning = true;
         StartTcs.TrySetResult(true);
-        return Task.CompletedTask;
     }
 
     public Task StopGracefullyAsync(TimeSpan timeout)
@@ -368,6 +442,8 @@ internal sealed class FakeFullStreamRecorder : IFullStreamRecorder
 /// <summary>可控的分片合并器：默认把分片总大小当作合并结果大小，并写出一个输出文件。</summary>
 internal sealed class FakeSegmentMerger : ISegmentMerger
 {
+    private readonly object _sync = new();
+
     public List<string> OutputPaths { get; } = new();
 
     public List<IReadOnlyList<RecordedSegment>> Batches { get; } = new();
@@ -376,23 +452,36 @@ internal sealed class FakeSegmentMerger : ISegmentMerger
 
     public Exception? Exception { get; set; }
 
-    public Task<SegmentMergeResult> MergeAsync(
+    /// <summary>合并开始后的可选异步钩子：用于在收尾流程中途制造「收尾进行中」的窗口。</summary>
+    public Func<Task>? BeforeMergeAsync { get; set; }
+
+    public async Task<SegmentMergeResult> MergeAsync(
         string outputPath,
         IReadOnlyList<RecordedSegment> segments,
         CancellationToken ct = default)
     {
-        OutputPaths.Add(outputPath);
-        Batches.Add(segments.ToArray());
+        var batch = segments.ToArray();
+        lock (_sync)
+        {
+            OutputPaths.Add(outputPath);
+            Batches.Add(batch);
+        }
+
+        if (BeforeMergeAsync is not null)
+        {
+            await BeforeMergeAsync().ConfigureAwait(false);
+        }
+
         if (Exception is not null)
         {
             throw Exception;
         }
 
-        var totalSize = segments.Sum(segment => File.Exists(segment.Path) ? new FileInfo(segment.Path).Length : 0);
+        var totalSize = batch.Sum(segment => File.Exists(segment.Path) ? new FileInfo(segment.Path).Length : 0);
         var size = Result.FileSizeBytes > 0 ? Result.FileSizeBytes : totalSize;
         var duration = Result.Duration > TimeSpan.Zero
             ? Result.Duration
-            : SegmentOverlapPlanner.ComputeContentDuration(segments);
+            : SegmentOverlapPlanner.ComputeContentDuration(batch);
         if (Result.Merged)
         {
             var directory = Path.GetDirectoryName(outputPath);
@@ -404,7 +493,7 @@ internal sealed class FakeSegmentMerger : ISegmentMerger
             File.WriteAllBytes(outputPath, Array.Empty<byte>());
         }
 
-        return Task.FromResult(Result with { FileSizeBytes = size, Duration = duration });
+        return Result with { FileSizeBytes = size, Duration = duration };
     }
 }
 
@@ -515,6 +604,9 @@ internal sealed class RecordingManagerHarness : IAsyncDisposable
     public Exception? RecorderFactoryException { get; set; }
 
     public Exception? NextRecorderStartException { get; set; }
+
+    /// <summary>仅对下一次创建的录制器生效的 StartAsync 异步钩子（用于把启动过程卡在录制器开跑前）。</summary>
+    public Func<Task>? NextRecorderStartHook { get; set; }
 
     public List<FakeFullStreamRecorder> Recorders
     {
@@ -696,8 +788,10 @@ internal sealed class RecordingManagerHarness : IAsyncDisposable
         var recorder = new FakeFullStreamRecorder
         {
             StartException = NextRecorderStartException,
+            StartHook = NextRecorderStartHook,
         };
         NextRecorderStartException = null;
+        NextRecorderStartHook = null;
         lock (_sync)
         {
             _recorders.Add(recorder);

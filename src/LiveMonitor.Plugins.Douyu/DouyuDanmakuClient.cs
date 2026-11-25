@@ -58,6 +58,12 @@ public sealed class DouyuDanmakuClient : IDanmakuClient
 
     public string RoomId => _roomId;
 
+    /// <summary>
+    /// 客户端生命周期令牌：<see cref="DisposeAsync"/>（经由 <see cref="DisconnectAsync"/>）取消后触发。
+    /// 仅用于测试把内部收包/心跳循环挂到客户端生命周期上，验证 Dispose 能终止循环。
+    /// </summary>
+    internal CancellationToken ConnectionLifetimeToken => _cts.Token;
+
     public event Action<DanmakuMessage>? MessageReceived;
 
     public event Action<Exception?>? Disconnected;
@@ -153,11 +159,17 @@ public sealed class DouyuDanmakuClient : IDanmakuClient
         }
     }
 
-    private async Task RunReceiveLoopAsync(CancellationToken ct)
+    private Task RunReceiveLoopAsync(CancellationToken ct) => RunReceiveLoopAsync(_stream, ct);
+
+    /// <summary>
+    /// 收包循环核心实现。生产路径传入当前连接流；测试可注入内存流/分块流，验证半包、粘包与协议防御。
+    /// 传 null 时回退到 <see cref="_stream"/>，与改造前行为一致。
+    /// </summary>
+    internal async Task RunReceiveLoopAsync(Stream? stream, CancellationToken ct)
     {
         try
         {
-            var stream = _stream ?? throw new InvalidOperationException("斗鱼弹幕连接未建立。");
+            stream ??= _stream ?? throw new InvalidOperationException("斗鱼弹幕连接未建立。");
             var header = new byte[4];
             var joined = false;
 
@@ -207,10 +219,10 @@ public sealed class DouyuDanmakuClient : IDanmakuClient
                 {
                     case "loginres" when !joined:
                         joined = true;
-                        await SendAsync($"type@=joingroup/rid@={DouyuStt.Escape(_roomId)}/gid@=-9999/\0", ct);
+                        await SendAsync(stream, $"type@=joingroup/rid@={DouyuStt.Escape(_roomId)}/gid@=-9999/\0", ct);
                         break;
                     case "pingreq":
-                        await SendAsync("type@=mrkl/\0", ct);
+                        await SendAsync(stream, "type@=mrkl/\0", ct);
                         break;
                     case "chatmsg":
                         if (stt.TryGetValue("txt", out var text) && !string.IsNullOrWhiteSpace(text))
@@ -264,14 +276,21 @@ public sealed class DouyuDanmakuClient : IDanmakuClient
 
     private DateTimeOffset? _joinDeadline = DateTimeOffset.UtcNow.Add(JoinGroupTimeout);
 
-    private async Task RunHeartbeatLoopAsync(CancellationToken ct)
+    private Task RunHeartbeatLoopAsync(CancellationToken ct) => RunHeartbeatLoopAsync(_stream, HeartbeatInterval, ct);
+
+    /// <summary>
+    /// 心跳循环核心实现。生产路径使用 45 秒间隔向当前连接流发送 mrkl；测试可注入短间隔与记录流。
+    /// 传 null 流时回退到 <see cref="_stream"/>，与改造前行为一致。
+    /// </summary>
+    internal async Task RunHeartbeatLoopAsync(Stream? stream, TimeSpan interval, CancellationToken ct)
     {
         try
         {
+            stream ??= _stream;
             while (!ct.IsCancellationRequested)
             {
-                await Task.Delay(HeartbeatInterval, ct);
-                await SendAsync("type@=mrkl/\0", ct);
+                await Task.Delay(interval, ct);
+                await SendAsync(stream, "type@=mrkl/\0", ct);
             }
         }
         catch (OperationCanceledException)
@@ -301,9 +320,10 @@ public sealed class DouyuDanmakuClient : IDanmakuClient
 
     private void RaiseDisconnected(Exception? error) => Disconnected?.Invoke(error);
 
-    private async Task SendAsync(string payload, CancellationToken ct)
+    private Task SendAsync(string payload, CancellationToken ct) => SendAsync(_stream, payload, ct);
+
+    internal async Task SendAsync(Stream? stream, string payload, CancellationToken ct)
     {
-        var stream = _stream;
         if (stream is null)
         {
             throw new InvalidOperationException("斗鱼弹幕连接尚未建立。");
@@ -322,7 +342,7 @@ public sealed class DouyuDanmakuClient : IDanmakuClient
         }
     }
 
-    private static async Task<bool> ReadExactAsync(NetworkStream stream, byte[] buffer, CancellationToken ct)
+    internal static async Task<bool> ReadExactAsync(Stream stream, byte[] buffer, CancellationToken ct)
     {
         var offset = 0;
         while (offset < buffer.Length)

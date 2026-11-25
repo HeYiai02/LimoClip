@@ -161,30 +161,30 @@ public sealed class FakeDanmakuClientFactory : IDanmakuClientFactory
 
     public IDanmakuClient? Create(PlatformType platform, string roomId, string? cookie)
     {
-        var index = Interlocked.Increment(ref _createCount) - 1;
+        // CreateCount 与客户端注册必须在同一把锁内可见：否则等待 CreateCount 递增的
+        // 测试线程可能读到客户端尚未注册的中间状态（偶发「第 N 个弹幕客户端不存在」）。
         lock (_gate)
         {
+            var index = _createCount;
             _lastPlatform = platform;
             _lastRoomId = roomId;
             _lastCookie = cookie;
-        }
 
-        if (ReturnNull)
-        {
-            return null;
-        }
+            if (ReturnNull)
+            {
+                _createCount = index + 1;
+                return null;
+            }
 
-        var client = new FakeDanmakuClient(platform, roomId)
-        {
-            ConnectException = ConnectFailureOnAttempt?.Invoke(index),
-        };
+            var client = new FakeDanmakuClient(platform, roomId)
+            {
+                ConnectException = ConnectFailureOnAttempt?.Invoke(index),
+            };
 
-        lock (_gate)
-        {
             _clients.Add(client);
+            _createCount = index + 1;
+            return client;
         }
-
-        return client;
     }
 }
 
