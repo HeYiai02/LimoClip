@@ -478,13 +478,13 @@ Program.Main
 ### 10.3 播放器与监控
 
 - `WorkspacePlayerManager`：监控侧核心服务——
-  - `StartAsync(tile)`：解析房间 → 取 Cookie → `provider.GetRoomStatusAsync` → 更新窗格标题/状态 → `QualityPolicy.Choose` 选画质 → `MpvPlayerView.PlayAsync(quality)` → 挂弹幕会话；自定义清流会调用 `player.SetDanmakuEnabled(false)` 隐藏窗格弹幕开关；
+  - `StartAsync(tile)`：解析房间 → 取 Cookie → `provider.GetRoomStatusAsync` → 更新窗格标题/状态 → `QualityPolicy.Choose` 选画质 → `player.PlayAsync(quality)` → 挂弹幕会话；自定义清流会调用 `player.SetDanmakuEnabled(false)` 隐藏窗格弹幕开关；
   - 失败处理：`ReconnectPolicy`（3s/10s/30s 退避，最多 3 次）→ 60s 失败复检；主播离线时定时轮询（60s）；
   - 播放器状态 → 窗格状态文本（`PlayerStateText`：连接中/直播中/已停止/重连中/播放失败）；
   - 焦点模式：双击窗格进入单窗格全屏（`IsFocused` + 静音策略 + 恢复原布局）、Esc 退出；
   - 锚点/未开播文字与状态同步：`SetDanmakuEnabled` 控制清流弹幕按钮显隐；
   - 底部控制条：音量/静音、弹幕开关、紧凑模式，以及 V0.7 新增的「暂停/继续」（`TogglePause`，同步 mpv `pause` 属性并切换 ⏸/▶ 图标）与「刷新播放」（`RequestRefresh` → `RefreshRequested` → `WorkspacePlayerManager.RefreshTileAsync`，清空退避/离线计时器后立即重新解析地址并起播）；刷新按钮图标使用 `Icons.axaml` 的 `IconRefresh` PathIcon（矢量绘制，避免字体码点被裁切）。
-- 播放器控件创建/复用/销毁归属：`WorkspacePlayerManager.EnsurePlayer` 为窗格创建 `MpvPlayerView`，并在替换槽位时销毁被替换的旧实例；Dock 布局整树重建或窗格移除时由 `MainWindowViewModel.DisposePlayers`（`:2850-2863`）统一 `Stop + PlayerView.Dispose()`；`WorkspacePlayerManager.Stop` / `Dispose` 本身只停止播放并清理内部映射，不销毁控件。
+- 播放器句柄创建/复用/销毁归属：上层只依赖 `IWorkspacePlayer` 契约（通过 `View` 取回挂载控件），`WorkspacePlayerManager` 用可注入工厂（默认 `static () => new MpvPlayerView()`）独占创建句柄；`EnsurePlayer` 按窗格复用或创建，`TransferPlayer` 让新句柄经 `IWorkspacePlayer.TryAdoptSessionFrom` 接管旧 mpv 会话（具体类型校验收敛在实现内，迁移失败时释放新句柄并保持旧窗格不变）；销毁统一走 `RemovePlayer`（停止轮询/重试 → 清空 `PlayerView` → Dispose），由 `MainWindowViewModel` 在窗格移除、方案差集销毁、拖拽换位与 `DisposePlayers` 中调用；`Stop` 只停止播放与跟踪（自由画布切换等仍需复用句柄的场景），`Dispose` 兜底释放仍被跟踪的句柄（幂等）。可回放 seek（进度条/seek 轮询计时器）是播放器视图内部 chrome，不纳入契约。
 - `QualityPolicy`：按 Height/Fps 降序；大窗/焦点取最高；紧凑模式上限 480p；普通窗口优先 ≤720p，取第一个满足者。
 - `MpvPlayerView`（libmpv 封装）：
   - 初始化选项：`hwdec=auto-safe`、`vo=libmpv`、`gpu-api=opengl`、`cache=yes`、`demuxer-max-bytes`（按分辨率 3M/4M/8M）、`network-timeout=10`、`audio-buffer=0.8`、`audio-stream-silence=yes`、关闭 OSC/默认快捷键（键位由应用处理）；

@@ -1444,8 +1444,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        DisposePanePlayer(source);
-        DisposePanePlayer(target);
+        _players.RemovePlayer(source);
+        _players.RemovePlayer(target);
 
         source.ClearRoom();
         target.ClearRoom();
@@ -1459,13 +1459,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         IsDirty = true;
         StatusText = $"已交换 {source.DisplayTitle} 与 {target.DisplayTitle}";
         SyncDanmakuSubscriptions();
-    }
-
-    private void DisposePanePlayer(RoomTileViewModel tile)
-    {
-        _players.Stop(tile.PaneId);
-        tile.PlayerView?.Dispose();
-        tile.PlayerView = null;
     }
 
     private void OnTileFocusRequested(object? sender, EventArgs e)
@@ -1787,13 +1780,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     ExitFocus();
                 }
 
-                _players.Stop(tile.PaneId);
-                if (tile.PlayerView is { } player)
-                {
-                    tile.PlayerView = null;
-                    player.Dispose();
-                }
-
+                _players.RemovePlayer(tile);
                 tile.ClearRoom();
             }
         }
@@ -1819,13 +1806,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         if (IsFreeformMode || Layout is null)
         {
-            _players.Stop(tile.PaneId);
-            if (tile.PlayerView is { } player)
-            {
-                tile.PlayerView = null;
-                player.Dispose();
-            }
-
+            _players.RemovePlayer(tile);
             tile.ClearRoom();
 
             // 自由布局：窗格挂在 FreeformCanvas 上，改 Dock 模型并让画布同步即可，不重建 Dock 宿主。
@@ -2483,9 +2464,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                     continue;
                 }
 
-                _players.Stop(oldTile.PaneId);
-                oldTile.PlayerView?.Dispose();
-                oldTile.PlayerView = null;
+                _players.RemovePlayer(oldTile);
 
                 if (room is null)
                 {
@@ -2556,9 +2535,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 continue;
             }
 
-            _players.Stop(oldTile.PaneId);
-            oldTile.PlayerView?.Dispose();
-            oldTile.PlayerView = null;
+            _players.RemovePlayer(oldTile);
         }
 
         StatusText = rebuilt
@@ -2856,9 +2833,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         foreach (var tile in WorkspaceDockBuilder.EnumerateTiles(layout))
         {
-            _players.Stop(tile.PaneId);
-            tile.PlayerView?.Dispose();
-            tile.PlayerView = null;
+            _players.RemovePlayer(tile);
         }
     }
 }

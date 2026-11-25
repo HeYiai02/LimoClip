@@ -607,6 +607,37 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
         }
     }
 
+    /// <summary>
+    /// <see cref="IWorkspacePlayer"/> 的会话迁移入口：接管另一个播放器摘出的 MpvContext。
+    /// 只有来源同为 <see cref="MpvPlayerView"/> 且确实持有 context 时才成功，
+    /// 具体类型校验收敛在实现内部，WorkspacePlayerManager 不再接触具体播放器类型。
+    /// </summary>
+    public bool TryAdoptSessionFrom(IWorkspacePlayer source, string? detail = null)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (source is not MpvPlayerView oldPlayer)
+        {
+            return false;
+        }
+
+        lock (_contextGate)
+        {
+            if (_context is not null)
+            {
+                return false;
+            }
+        }
+
+        var context = oldPlayer.TakeContext();
+        if (context is null)
+        {
+            return false;
+        }
+
+        AdoptContext(context, oldPlayer.CurrentQuality, oldPlayer.State, detail);
+        return true;
+    }
+
     /// <summary>接管另一个播放器摘出的 MpvContext，保持画面不中断。</summary>
     public void AdoptContext(MpvContext context, StreamQuality? quality, PlayerState state, string? detail)
     {

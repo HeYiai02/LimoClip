@@ -7,8 +7,10 @@ using LiveMonitor.Desktop.ViewModels;
 namespace LiveMonitor.Desktop.Services;
 
 /// <summary>
-/// 按窗格管理 MpvPlayerView 实例。窗格从 Dock 树上摘下时播放器不销毁，
-/// 只有关闭方案或显式移除时才 Dispose，避免拖拽换位把正在播放的流杀掉。
+/// 按窗格管理 <see cref="IWorkspacePlayer"/> 句柄。窗格从 Dock 树上摘下时播放器不销毁，
+/// 只有关闭方案/显式移除（<see cref="RemovePlayer"/>）时才 Dispose，避免拖拽换位把正在播放的流杀掉。
+/// 句柄由本类独占创建与跟踪，创建入口是可注入工厂，测试可替换为假播放器而不启动 mpv。
+/// 可回放 seek（进度条）属于播放器视图内部 chrome，不在此契约内。
 /// </summary>
 public sealed class WorkspacePlayerManager : IDisposable
 {
@@ -22,33 +24,43 @@ public sealed class WorkspacePlayerManager : IDisposable
     private readonly Dictionary<string, DropBaseline> _dropBaselines = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _retryCounts = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CancellationTokenSource> _retryDelays = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, MpvPlayerView> _playerByPane = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IWorkspacePlayer> _playerByPane = new(StringComparer.Ordinal);
+    private readonly Func<IWorkspacePlayer> _createPlayer;
     private readonly SemaphoreSlim _parseGate = new(4, 4);
     private readonly DispatcherTimer _dropTimer;
     private readonly object _gate = new();
     private bool _disposed;
 
     public WorkspacePlayerManager(AppServices services)
+        : this(services, static () => new MpvPlayerView())
     {
+    }
+
+    /// <summary>测试接缝：注入假播放器工厂，避免 Desktop 单测启动真实 mpv。</summary>
+    internal WorkspacePlayerManager(AppServices services, Func<IWorkspacePlayer> createPlayer)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(createPlayer);
         _services = services;
+        _createPlayer = createPlayer;
         _dropTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _dropTimer.Tick += (_, _) => InspectDrops();
         _dropTimer.Start();
     }
 
-    public MpvPlayerView EnsurePlayer(RoomTileViewModel tile)
+    /// <summary>取得（必要时创建）窗格对应的播放器句柄；句柄的实现类型由创建工厂决定。</summary>
+    public IWorkspacePlayer EnsurePlayer(RoomTileViewModel tile)
     {
+        ArgumentNullException.ThrowIfNull(tile);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        // 本 PR 槽位句柄仍由本类独占创建，句柄的实际实现只会是 MpvPlayerView；
-        // 待 PR2 抽象化后再把字典/工厂整体切到 IWorkspacePlayer。
-        if (tile.PlayerView is MpvPlayerView existing)
+        if (tile.PlayerView is { } existing)
         {
             _playerByPane[tile.PaneId] = existing;
             return existing;
         }
 
-        var player = new MpvPlayerView();
+        var player = _createPlayer();
         WirePlayer(tile, player);
         tile.PlayerView = player;
         _playerByPane[tile.PaneId] = player;
@@ -56,26 +68,30 @@ public sealed class WorkspacePlayerManager : IDisposable
     }
 
     /// <summary>
-    /// 方案切换时把旧窗格的播放器 context 交给新窗格的新播放器控件，
+    /// 方案切换时把旧窗格的播放会话（mpv context）交给新窗格的新播放器控件，
     /// 旧控件立即摘下，新控件挂载后直接用同一路流继续渲染。
     /// </summary>
     public bool TransferPlayer(RoomTileViewModel oldTile, RoomTileViewModel newTile)
     {
-        // 同上：句柄实现只会是 MpvPlayerView，跨方案转移需要 TakeContext/AdoptContext。
-        if (oldTile.PlayerView is not MpvPlayerView oldPlayer)
+        ArgumentNullException.ThrowIfNull(oldTile);
+        ArgumentNullException.ThrowIfNull(newTile);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (oldTile.PlayerView is not { } oldPlayer)
         {
             return false;
         }
 
-        var context = oldPlayer.TakeContext();
-        if (context is null)
-        {
-            return false;
-        }
-
-        var newPlayer = new MpvPlayerView();
+        // 会话迁移不再由管理器判断具体类型：目标句柄自己决定能不能接管来源会话。
+        var newPlayer = _createPlayer();
         WirePlayer(newTile, newPlayer);
-        newPlayer.AdoptContext(context, oldPlayer.CurrentQuality, oldPlayer.State, oldTile.DetailText);
+        if (!newPlayer.TryAdoptSessionFrom(oldPlayer, oldTile.DetailText))
+        {
+            // 迁移失败（来源无会话/实现不兼容）：丢弃新句柄，旧窗格保持原状，调用方走重建路径。
+            newPlayer.Dispose();
+            return false;
+        }
+
         oldTile.PlayerView = null;
         _playerByPane.Remove(oldTile.PaneId);
         oldPlayer.Dispose();
@@ -84,7 +100,7 @@ public sealed class WorkspacePlayerManager : IDisposable
         return true;
     }
 
-    private void WirePlayer(RoomTileViewModel tile, MpvPlayerView player)
+    private void WirePlayer(RoomTileViewModel tile, IWorkspacePlayer player)
     {
         player.SetMute(true);
         player.StateChanged += (_, _) =>
@@ -100,7 +116,11 @@ public sealed class WorkspacePlayerManager : IDisposable
         };
         player.ReconnectRequested += (_, _) => ScheduleRetry(tile);
         player.RefreshRequested += (_, _) => _ = RefreshTileAsync(tile);
-        player.SizeChanged += (_, _) => ScheduleQualityCheck(tile, player);
+        // 尺寸变化挂在承载控件上（播放器句柄本身不保证是控件，假播放器的 View 可能为 null）。
+        if (player.View is { } view)
+        {
+            view.SizeChanged += (_, _) => ScheduleQualityCheck(tile, player);
+        }
     }
 
     public async Task StartAsync(RoomTileViewModel tile, CancellationToken ct = default)
@@ -174,14 +194,14 @@ public sealed class WorkspacePlayerManager : IDisposable
 
             _statuses[tile.PaneId] = status;
             _dropBaselines.Remove(tile.PaneId);
-            var quality = ChooseQuality(status, player.Bounds.Height, ActiveRoomCount);
+            var quality = ChooseQuality(status, ViewHeight(player), ActiveRoomCount);
             if (quality is null)
             {
                 player.ShowOffline("没有可用画质");
                 return;
             }
 
-            player.SetCompactMode(ShouldUseCompact(player.Bounds.Height, ActiveRoomCount));
+            player.SetCompactMode(ShouldUseCompact(ViewHeight(player), ActiveRoomCount));
             await player.PlayAsync(quality, cts.Token);
             // 起播时窗格可能还没完成布局（Bounds.Height=0），按 720P 起播；
             // 起播后拿到真实高度再纠正一次，单路/大窗才能升到原画。
@@ -220,7 +240,10 @@ public sealed class WorkspacePlayerManager : IDisposable
     private static StreamQuality? ChooseQuality(RoomStatus status, double height, int activeRoomCount)
         => QualityPolicy.Choose(status, height, activeRoomCount);
 
-    private void ScheduleQualityCheck(RoomTileViewModel tile, MpvPlayerView player)
+    /// <summary>承载控件高度；假播放器没有控件时按 0（等同“还没完成布局”）处理。</summary>
+    private static double ViewHeight(IWorkspacePlayer player) => player.View?.Bounds.Height ?? 0;
+
+    private void ScheduleQualityCheck(RoomTileViewModel tile, IWorkspacePlayer player)
     {
         if (_disposed || player.State != PlayerState.Playing || !_statuses.ContainsKey(tile.PaneId))
         {
@@ -266,7 +289,7 @@ public sealed class WorkspacePlayerManager : IDisposable
         });
     }
 
-    private async Task ApplyQualityAsync(RoomTileViewModel tile, MpvPlayerView player)
+    private async Task ApplyQualityAsync(RoomTileViewModel tile, IWorkspacePlayer player)
     {
         if (_disposed || player.State != PlayerState.Playing ||
             !_statuses.TryGetValue(tile.PaneId, out var status) || !status.IsLive)
@@ -274,9 +297,9 @@ public sealed class WorkspacePlayerManager : IDisposable
             return;
         }
 
-        var compact = ShouldUseCompact(player.Bounds.Height, ActiveRoomCount);
+        var compact = ShouldUseCompact(ViewHeight(player), ActiveRoomCount);
         player.SetCompactMode(compact);
-        var target = ChooseQuality(status, player.Bounds.Height, ActiveRoomCount);
+        var target = ChooseQuality(status, ViewHeight(player), ActiveRoomCount);
         if (target is null || player.CurrentQuality?.Id == target.Id)
         {
             return;
@@ -391,7 +414,7 @@ public sealed class WorkspacePlayerManager : IDisposable
         }
     }
 
-    private static async Task DowngradeAsync(MpvPlayerView player, RoomStatus status)
+    private static async Task DowngradeAsync(IWorkspacePlayer player, RoomStatus status)
     {
         var current = player.CurrentQuality;
         if (current is null)
@@ -456,6 +479,21 @@ public sealed class WorkspacePlayerManager : IDisposable
         }
     }
 
+    /// <summary>
+    /// 从工作区彻底移除某个窗格的播放器：停止轮询/重试、解除槽位绑定并释放句柄。
+    /// 与 <see cref="Stop"/> 的区别是 Stop 只停止播放与跟踪，句柄可能仍要留给上层复用或自行处置。
+    /// </summary>
+    public void RemovePlayer(RoomTileViewModel tile)
+    {
+        ArgumentNullException.ThrowIfNull(tile);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var player = tile.PlayerView;
+        Stop(tile.PaneId);
+        tile.PlayerView = null;
+        player?.Dispose();
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -466,6 +504,7 @@ public sealed class WorkspacePlayerManager : IDisposable
         _disposed = true;
         _dropTimer.Stop();
 
+        IWorkspacePlayer[] trackedPlayers;
         lock (_gate)
         {
             foreach (var cts in _starts.Values
@@ -484,7 +523,14 @@ public sealed class WorkspacePlayerManager : IDisposable
             _statuses.Clear();
             _dropBaselines.Clear();
             _retryCounts.Clear();
+            trackedPlayers = _playerByPane.Values.ToArray();
             _playerByPane.Clear();
+        }
+
+        // 句柄生命周期归本类独占：正常移除路径已提前 Dispose，这里对残留句柄兜底释放（Dispose 幂等）。
+        foreach (var player in trackedPlayers)
+        {
+            player.Dispose();
         }
 
         _parseGate.Dispose();
@@ -651,7 +697,7 @@ public sealed class WorkspacePlayerManager : IDisposable
         }
     }
 
-    private static void OnPlayerStateChanged(RoomTileViewModel tile, MpvPlayerView player)
+    private static void OnPlayerStateChanged(RoomTileViewModel tile, IWorkspacePlayer player)
     {
         void Update()
         {
