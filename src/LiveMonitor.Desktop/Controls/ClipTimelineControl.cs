@@ -42,17 +42,7 @@ public sealed record ClipHighlightMarker(TimeSpan Position, string? Reason = nul
 /// </summary>
 public sealed class ClipTimelineControl : Control
 {
-    private const double MinZoom = 1.0;
-    private const double MaxZoom = 60.0;
-    private const double HandleHitTolerancePx = 7.0;
-    private const double PlayheadHitTolerancePx = 6.0;
     private const double MinSelectionSeconds = 0.2;
-    private const double LeftPadding = 10.0;
-    private const double RightPadding = 10.0;
-    private const double TopPadding = 8.0;
-    private const double BottomPadding = 8.0;
-    private const double RulerHeight = 20.0;
-    private const double RowGap = 5.0;
 
     // ---- 暗房调色板：与 Styles/DesignTokens.axaml 的 token 保持一致 ----
 
@@ -137,7 +127,7 @@ public sealed class ClipTimelineControl : Control
     private TimeSpan _outPoint;
     private TimeSpan _safeDuration;
     private IReadOnlyList<ClipHighlightMarker>? _highlights;
-    private double _zoom = MinZoom;
+    private double _zoom = ClipTimelineGeometry.MinZoom;
     private double _viewStartSeconds;
 
     private DragMode _dragMode;
@@ -211,7 +201,9 @@ public sealed class ClipTimelineControl : Control
         get => _position;
         set
         {
-            var next = ClampToSafe(ClampTime(value));
+            var next = ClipTimelineGeometry.ClampToSafe(
+                ClipTimelineGeometry.ClampTime(value, _duration),
+                _safeDuration);
             if (next == _position)
             {
                 return;
@@ -228,7 +220,9 @@ public sealed class ClipTimelineControl : Control
         get => _inPoint;
         set
         {
-            var next = ClampToSafe(ClampTime(value));
+            var next = ClipTimelineGeometry.ClampToSafe(
+                ClipTimelineGeometry.ClampTime(value, _duration),
+                _safeDuration);
             var maxIn = Math.Max(0, _outPoint.TotalSeconds - MinSelectionSeconds);
             if (next.TotalSeconds > maxIn)
             {
@@ -251,14 +245,16 @@ public sealed class ClipTimelineControl : Control
         get => _outPoint;
         set
         {
-            var next = ClampToSafe(ClampTime(value));
+            var next = ClipTimelineGeometry.ClampToSafe(
+                ClipTimelineGeometry.ClampTime(value, _duration),
+                _safeDuration);
             var minOut = _inPoint.TotalSeconds + MinSelectionSeconds;
             if (next.TotalSeconds < minOut)
             {
                 next = TimeSpan.FromSeconds(minOut);
             }
 
-            next = ClampToSafe(next);
+            next = ClipTimelineGeometry.ClampToSafe(next, _safeDuration);
 
             if (next == _outPoint)
             {
@@ -290,7 +286,7 @@ public sealed class ClipTimelineControl : Control
         get => _safeDuration;
         set
         {
-            var next = ClampTime(value);
+            var next = ClipTimelineGeometry.ClampTime(value, _duration);
             if (next == _safeDuration)
             {
                 return;
@@ -308,10 +304,7 @@ public sealed class ClipTimelineControl : Control
     public TimeSpan ViewStart => TimeSpan.FromSeconds(_viewStartSeconds);
 
     /// <summary>当前视口可见时长。</summary>
-    public TimeSpan VisibleDuration =>
-        _zoom <= MinZoom || _duration <= TimeSpan.Zero
-            ? _duration
-            : TimeSpan.FromSeconds(_duration.TotalSeconds / _zoom);
+    public TimeSpan VisibleDuration => ClipTimelineGeometry.GetVisibleDuration(_duration, _zoom);
 
     /// <summary>入/出点被用户拖动后触发。</summary>
     public event EventHandler? InOutChanged;
@@ -325,7 +318,7 @@ public sealed class ClipTimelineControl : Control
     /// <summary>设置缩放并可选指定锚点时间（保持锚点视觉位置不变）。</summary>
     public void SetZoom(double zoom, TimeSpan? anchor = null)
     {
-        var target = Clamp(zoom, MinZoom, MaxZoom);
+        var target = ClipTimelineGeometry.ClampZoom(zoom);
         if (Math.Abs(target - _zoom) < 0.0001)
         {
             return;
@@ -341,7 +334,7 @@ public sealed class ClipTimelineControl : Control
 
         _zoom = target;
         var visible = _duration.TotalSeconds / _zoom;
-        _viewStartSeconds = ClampViewStart(anchorTime - ratio * visible);
+        _viewStartSeconds = ClipTimelineGeometry.ClampViewStart(anchorTime - ratio * visible, _duration, _zoom);
         InvalidateVisual();
         ViewChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -349,12 +342,12 @@ public sealed class ClipTimelineControl : Control
     /// <summary>恢复 1x 视口。</summary>
     public void ResetView()
     {
-        if (Math.Abs(_zoom - MinZoom) < 0.0001 && _viewStartSeconds <= 0.0001)
+        if (Math.Abs(_zoom - ClipTimelineGeometry.MinZoom) < 0.0001 && _viewStartSeconds <= 0.0001)
         {
             return;
         }
 
-        _zoom = MinZoom;
+        _zoom = ClipTimelineGeometry.MinZoom;
         _viewStartSeconds = 0;
         InvalidateVisual();
         ViewChanged?.Invoke(this, EventArgs.Empty);
@@ -369,9 +362,12 @@ public sealed class ClipTimelineControl : Control
         }
 
         var span = Math.Max(0.5, (end - start).TotalSeconds);
-        _zoom = Clamp(_duration.TotalSeconds / span, MinZoom, MaxZoom);
+        _zoom = ClipTimelineGeometry.ClampZoom(_duration.TotalSeconds / span);
         var visible = _duration.TotalSeconds / _zoom;
-        _viewStartSeconds = ClampViewStart(start.TotalSeconds - (visible - span) / 2);
+        _viewStartSeconds = ClipTimelineGeometry.ClampViewStart(
+            start.TotalSeconds - (visible - span) / 2,
+            _duration,
+            _zoom);
         InvalidateVisual();
         ViewChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -380,26 +376,14 @@ public sealed class ClipTimelineControl : Control
     public TimeSpan XToTime(double x)
     {
         var layout = GetLayout();
-        if (layout.Plot.Width <= 0)
-        {
-            return TimeSpan.Zero;
-        }
-
-        var ratio = (x - layout.Plot.Left) / layout.Plot.Width;
-        return ClampTime(TimeSpan.FromSeconds(_viewStartSeconds + ratio * VisibleDuration.TotalSeconds));
+        return ClipTimelineGeometry.XToTime(x, layout, _viewStartSeconds, VisibleDuration, _duration);
     }
 
     /// <summary>把时间换算为控件内 X 坐标。</summary>
     public double TimeToX(TimeSpan time)
     {
         var layout = GetLayout();
-        var visible = VisibleDuration.TotalSeconds;
-        if (layout.Plot.Width <= 0 || visible <= 0)
-        {
-            return layout.Plot.Left;
-        }
-
-        return layout.Plot.Left + (time.TotalSeconds - _viewStartSeconds) / visible * layout.Plot.Width;
+        return ClipTimelineGeometry.TimeToX(time, layout, _viewStartSeconds, VisibleDuration);
     }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
@@ -419,7 +403,7 @@ public sealed class ClipTimelineControl : Control
 
         var anchorTime = XToTime(pos.X);
         var factor = Math.Pow(1.3, e.Delta.Y);
-        var zoom = Clamp(_zoom * factor, MinZoom, MaxZoom);
+        var zoom = ClipTimelineGeometry.ClampZoom(_zoom * factor);
         if (Math.Abs(zoom - _zoom) < 0.0001)
         {
             return;
@@ -428,7 +412,7 @@ public sealed class ClipTimelineControl : Control
         var ratio = layout.Plot.Width > 0 ? Clamp((pos.X - layout.Plot.Left) / layout.Plot.Width, 0, 1) : 0;
         _zoom = zoom;
         var visible = _duration.TotalSeconds / _zoom;
-        _viewStartSeconds = ClampViewStart(anchorTime.TotalSeconds - ratio * visible);
+        _viewStartSeconds = ClipTimelineGeometry.ClampViewStart(anchorTime.TotalSeconds - ratio * visible, _duration, _zoom);
         InvalidateVisual();
         ViewChanged?.Invoke(this, EventArgs.Empty);
         e.Handled = true;
@@ -472,35 +456,46 @@ public sealed class ClipTimelineControl : Control
             return;
         }
 
-        var inX = TimeToX(_inPoint);
-        var outX = TimeToX(_outPoint);
-        var playheadX = TimeToX(_position);
+        var hit = ClipTimelineGeometry.HitTest(
+            pos.X,
+            pos.Y,
+            layout,
+            _viewStartSeconds,
+            VisibleDuration,
+            _inPoint,
+            _outPoint,
+            _position,
+            _highlights,
+            out var marker);
 
-        if (Math.Abs(pos.X - inX) <= HandleHitTolerancePx)
+        switch (hit)
         {
-            _dragMode = DragMode.In;
-        }
-        else if (Math.Abs(pos.X - outX) <= HandleHitTolerancePx)
-        {
-            _dragMode = DragMode.Out;
-        }
-        else if (TryHitHighlight(pos, layout, out var marker))
-        {
-            _position = ClampToSafe(ClampTime(marker!.Position));
-            InvalidateVisual();
-            SeekRequested?.Invoke(_position);
-            e.Handled = true;
-            return;
-        }
-        else if (Math.Abs(pos.X - playheadX) <= PlayheadHitTolerancePx)
-        {
-            _dragMode = DragMode.Playhead;
-        }
-        else
-        {
-            _dragMode = DragMode.Playhead;
-            _position = ClampToSafe(XToTime(pos.X));
-            InvalidateVisual();
+            case TimelineHitTarget.InHandle:
+                _dragMode = DragMode.In;
+                break;
+
+            case TimelineHitTarget.OutHandle:
+                _dragMode = DragMode.Out;
+                break;
+
+            case TimelineHitTarget.Highlight:
+                _position = ClipTimelineGeometry.ClampToSafe(
+                    ClipTimelineGeometry.ClampTime(marker!.Position, _duration),
+                    _safeDuration);
+                InvalidateVisual();
+                SeekRequested?.Invoke(_position);
+                e.Handled = true;
+                return;
+
+            case TimelineHitTarget.Playhead:
+                _dragMode = DragMode.Playhead;
+                break;
+
+            default:
+                _dragMode = DragMode.Playhead;
+                _position = ClipTimelineGeometry.ClampToSafe(XToTime(pos.X), _safeDuration);
+                InvalidateVisual();
+                break;
         }
 
         e.Pointer.Capture(this);
@@ -529,7 +524,7 @@ public sealed class ClipTimelineControl : Control
                 {
                     var visible = VisibleDuration.TotalSeconds;
                     var nextStart = _viewStartAtPanStart - delta / layout.Plot.Width * visible;
-                    _viewStartSeconds = ClampViewStart(nextStart);
+                    _viewStartSeconds = ClipTimelineGeometry.ClampViewStart(nextStart, _duration, _zoom);
                     InvalidateVisual();
                     ViewChanged?.Invoke(this, EventArgs.Empty);
                 }
@@ -542,7 +537,7 @@ public sealed class ClipTimelineControl : Control
                 var t = XToTime(pos.X);
                 var maxIn = _outPoint.TotalSeconds - MinSelectionSeconds;
                 t = TimeSpan.FromSeconds(Clamp(t.TotalSeconds, 0, Math.Max(0, maxIn)));
-                t = ClampToSafe(t);
+                t = ClipTimelineGeometry.ClampToSafe(t, _safeDuration);
                 if (t != _inPoint)
                 {
                     _inPoint = t;
@@ -576,7 +571,7 @@ public sealed class ClipTimelineControl : Control
 
             case DragMode.Playhead:
             {
-                var t = ClampToSafe(XToTime(pos.X));
+                var t = ClipTimelineGeometry.ClampToSafe(XToTime(pos.X), _safeDuration);
                 if (t != _position)
                 {
                     _position = t;
@@ -1100,7 +1095,7 @@ public sealed class ClipTimelineControl : Control
 
     private void DrawZoomBadge(DrawingContext context, TimelineLayout layout, Rect? playheadBubble)
     {
-        var label = _zoom <= MinZoom + 0.001 ? "1.0x · 滚轮缩放，双击复位" : $"{_zoom:0.0}x · 右键拖动平移";
+        var label = _zoom <= ClipTimelineGeometry.MinZoom + 0.001 ? "1.0x · 滚轮缩放，双击复位" : $"{_zoom:0.0}x · 右键拖动平移";
         var text = CreateText(label, 9.5, MutedTextBrush);
         var rect = new Rect(layout.Plot.Right - text.Width - 8, layout.Ruler.Top + 1, text.Width + 6, text.Height + 2);
         // 播放头气泡滑到右端时，把缩放提示临时挪到左端，避免两段文字叠在一起。
@@ -1111,31 +1106,6 @@ public sealed class ClipTimelineControl : Control
 
         context.FillRectangle(ZoomBadgeBrush, rect);
         context.DrawText(text, new Point(rect.X + 3, rect.Y + 1));
-    }
-
-    private bool TryHitHighlight(Point pos, TimelineLayout layout, out ClipHighlightMarker? marker)
-    {
-        marker = null;
-        if (_highlights is null || _highlights.Count == 0)
-        {
-            return false;
-        }
-
-        if (pos.Y < layout.Highlight.Top - 4 || pos.Y > layout.Highlight.Bottom + 4)
-        {
-            return false;
-        }
-
-        foreach (var item in _highlights)
-        {
-            if (Math.Abs(TimeToX(item.Position) - pos.X) <= 8)
-            {
-                marker = item;
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private double SampleEnvelope(float[] data, double seconds, double bucketSec)
@@ -1182,63 +1152,11 @@ public sealed class ClipTimelineControl : Control
         return RulerStepsSeconds[^1];
     }
 
-    private TimelineLayout GetLayout()
-    {
-        var width = Math.Max(1, Bounds.Width - LeftPadding - RightPadding);
-        var contentTop = TopPadding + RulerHeight + RowGap;
-        var contentHeight = Math.Max(24, Bounds.Height - contentTop - BottomPadding - RowGap * 2);
-        var waveHeight = contentHeight * 0.5;
-        var densityHeight = contentHeight * 0.25;
-        var highlightHeight = Math.Max(10, contentHeight - waveHeight - densityHeight);
-        var rect = new Rect(LeftPadding, TopPadding, width, Math.Max(24, Bounds.Height - TopPadding - BottomPadding));
-        var ruler = new Rect(LeftPadding, TopPadding, width, RulerHeight);
-        var wave = new Rect(LeftPadding, contentTop, width, waveHeight);
-        var density = new Rect(LeftPadding, wave.Bottom + RowGap, width, densityHeight);
-        var highlight = new Rect(LeftPadding, density.Bottom + RowGap, width, highlightHeight);
-        return new TimelineLayout(rect, ruler, wave, density, highlight);
-    }
+    private TimelineLayout GetLayout() => ClipTimelineGeometry.ComputeLayout(Bounds.Width, Bounds.Height);
 
     private double DisplayedCenterSeconds()
     {
         return _viewStartSeconds + VisibleDuration.TotalSeconds / 2;
-    }
-
-    private double ClampViewStart(double start)
-    {
-        var visible = _duration.TotalSeconds / Math.Max(MinZoom, _zoom);
-        var maxStart = Math.Max(0, _duration.TotalSeconds - visible);
-        if (maxStart <= 0)
-        {
-            return 0;
-        }
-
-        return Clamp(start, 0, maxStart);
-    }
-
-    private TimeSpan ClampTime(TimeSpan time)
-    {
-        if (time <= TimeSpan.Zero)
-        {
-            return TimeSpan.Zero;
-        }
-
-        if (_duration > TimeSpan.Zero && time > _duration)
-        {
-            return _duration;
-        }
-
-        return time;
-    }
-
-    /// <summary>边录边剪时把播放头/选区限制在安全可剪截止时间内；未启用（Zero）时原样返回。</summary>
-    private TimeSpan ClampToSafe(TimeSpan time)
-    {
-        if (_safeDuration > TimeSpan.Zero && time > _safeDuration)
-        {
-            return _safeDuration;
-        }
-
-        return time;
     }
 
     private void ClampState()
@@ -1249,7 +1167,7 @@ public sealed class ClipTimelineControl : Control
             _inPoint = TimeSpan.Zero;
             _outPoint = TimeSpan.Zero;
             _viewStartSeconds = 0;
-            _zoom = MinZoom;
+            _zoom = ClipTimelineGeometry.MinZoom;
             return;
         }
 
@@ -1276,8 +1194,8 @@ public sealed class ClipTimelineControl : Control
             }
         }
 
-        _position = ClampTime(_position);
-        _viewStartSeconds = ClampViewStart(_viewStartSeconds);
+        _position = ClipTimelineGeometry.ClampTime(_position, _duration);
+        _viewStartSeconds = ClipTimelineGeometry.ClampViewStart(_viewStartSeconds, _duration, _zoom);
     }
 
     private static double Clamp(double value, double min, double max) =>
@@ -1320,11 +1238,4 @@ public sealed class ClipTimelineControl : Control
 
         return $"{ts.Minutes}:{ts.Seconds:00}.{ts.Milliseconds / 100}";
     }
-
-    private readonly record struct TimelineLayout(
-        Rect Plot,
-        Rect Ruler,
-        Rect Wave,
-        Rect Density,
-        Rect Highlight);
 }
