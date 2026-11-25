@@ -368,7 +368,7 @@ Program.Main
   - `BilibiliUnicycleFilter`：B 站独轮车识别（同用户高频、复读机式复制弹幕、短文本豁免），命中后仅计数不渲染；
   - `KeywordFilter`：`DanmakuBlockKeywords` 黑名单，支持子串匹配。
 - 高能检测：`SlidingWindowDetector` 以「短窗计数 / 基线窗计数 / 密度倍数 / 最小条数 / 冷却时间 / 加权关键词」判定高能事件，产出 `HighlightEvent`（峰值、基线、倍数、原因、命中词）；`HighlightSettingsStore` 负责参数持久化。
-- 渲染：`DanmakuOverlay` + `DanmakuLaneAllocator`（按时间/高度分配轨道避免重叠）+ `DanmakuRenderTicker`（UI 线程帧驱动滚动）；`DanmakuEmoteText` / `DanmakuEmoteImageCache` 处理表情文本与图片缓存（可选开关）。
+- 渲染：`DanmakuOverlay` + `DanmakuLaneAllocator`（按时间/高度分配轨道避免重叠）+ `DanmakuRenderTicker`（所有窗格共用一个与合成器 vsync 对齐的帧回调，用 `TopLevel.RequestAnimationFrame` 的时间戳推进滚动，避免 DispatcherTimer 抖动；弹幕空闲时停止循环，带 1s 低频看门狗防止最小化后帧回调丢失导致冻结）；`DanmakuEmoteText` / `DanmakuEmoteImageCache` 处理表情文本与图片缓存（可选开关）。
 - 落地：录制时 `DanmakuJsonlRecorder` 逐行写 JSONL（含时间戳与高能标记）；剪辑回放由 `DanmakuJsonlReader` + `DanmakuPlaybackCursor` 按时间轴读取，并支持导出 `.ass` 字幕（`DanmakuAssConverter`）。
 
 ---
@@ -475,7 +475,8 @@ Program.Main
   - 初始化选项：`hwdec=auto-safe`、`vo=libmpv`、`gpu-api=opengl`、`cache=yes`、`demuxer-max-bytes`（按分辨率 3M/4M/8M）、`network-timeout=10`、`audio-buffer=0.8`、`audio-stream-silence=yes`、关闭 OSC/默认快捷键（键位由应用处理）；
   - 播放选项：UA → `user-agent`、Referer → `referrer`、`Cookie` → `http-header-fields`、`audio-file`（分离音频）、TLS CA（http 不传）；
   - 状态机：`Loading → Playing → Offline/Reconnecting/Failed`；EOF/中断 → `Reconnecting` + 触发 `ReconnectRequested`（UI 显示「直播流中断，正在自动重连…」，而不是「未开播」）；
-  - 健康指标：`demuxer-cache-time`、丢帧/解码速率等经 `PlayerHealthMetrics` 上报顶栏状态；
+  - 健康指标：`demuxer-cache-time`、丢帧/解码速率等经 `PlayerHealthMetrics` 上报（角标文案「硬解/软解 · 源<fps>fps」，fps 取自 mpv `container-fps`，即解码器实际收到的源帧率，不是渲染帧率）；
+  - 底栏画质文案：`PlayerQualityText.Format` 先只显示档位名，拿到 `container-fps` 后补成「1080P · 60fps」；不再显示平台元数据里猜出来的 fps（B 站解析不到高帧率时一律兜底 30，会与实测冲突）；
   - 音频表：通过 FFmpeg `af=astats` 输出到命名管道（`audio-meter`），`AudioLevelMeter` 读取显示。
 - `MpvVideoView`：libmpv 渲染目标控件（OpenGL 纹理），尺寸变化触发重绘；`PlayerSmokeWindow` 为无 UI 冒烟用窗口。
 

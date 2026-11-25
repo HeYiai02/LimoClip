@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using Avalonia.Controls;
@@ -48,6 +48,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
     private PlayerState _state = PlayerState.Offline;
     private PlayerHealthMetrics _metrics = PlayerHealthMetrics.Empty;
     private StreamQuality? _quality;
+    private string? _qualityDisplayName;
     private bool _userStopped;
     private bool _muted;
     private bool _paused;
@@ -171,7 +172,11 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
         _userStopped = false;
         SetPaused(false);
         _quality = quality;
-        QualityLabel = $"{quality.DisplayName} · {quality.Fps}fps";
+        _qualityDisplayName = quality.DisplayName;
+        // 底栏先只显示档位名；真实帧率等 mpv 报出 container-fps 后再补。
+        // 平台元数据里的 Fps 是猜测值（B 站等平台解析不到 60 帧时一律兜底 30），
+        // 直接显示会和右上角实测帧率冲突。
+        QualityLabel = PlayerQualityText.Format(_qualityDisplayName, 0);
         SetState(PlayerState.Loading, "正在建立播放通道…");
 
         var loadTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -618,7 +623,8 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
 
             if (quality is not null)
             {
-                QualityLabel = $"{quality.DisplayName} · {quality.Fps}fps";
+                _qualityDisplayName = quality.DisplayName;
+                QualityLabel = PlayerQualityText.Format(_qualityDisplayName, 0);
             }
 
             SetState(state, detail);
@@ -1088,16 +1094,34 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
                 hwdec,
                 DateTimeOffset.Now);
 
-            HealthText.Text = hardware
-                ? $"硬解 {fps:0}fps"
-                : $"软解 {fps:0}fps";
+            // container-fps 是解码器实际收到的源帧率；读不到时只报硬解/软解，不瞎猜。
+            HealthText.Text = fps > 0
+                ? (hardware ? $"硬解 · 源{fps:0}fps" : $"软解 · 源{fps:0}fps")
+                : (hardware ? "硬解" : "软解");
             HealthText.Foreground = hardware
                 ? new SolidColorBrush(Avalonia.Media.Color.Parse("#5BD68A"))
                 : new SolidColorBrush(Avalonia.Media.Color.Parse("#E0B15C"));
+
+            UpdateQualityFps(fps);
         }
         catch
         {
             // mpv 正在切换/释放时属性读取会失败，等下一周期。
+        }
+    }
+
+    /// <summary>用实测源帧率更新底栏档位文案；帧率未知时保持只显示档位名。</summary>
+    private void UpdateQualityFps(double fps)
+    {
+        if (fps <= 0 || string.IsNullOrWhiteSpace(_qualityDisplayName))
+        {
+            return;
+        }
+
+        var label = PlayerQualityText.Format(_qualityDisplayName, fps);
+        if (!string.Equals(QualityText.Text, label, StringComparison.Ordinal))
+        {
+            QualityText.Text = label;
         }
     }
 
