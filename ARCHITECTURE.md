@@ -30,7 +30,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | WebView 登录 | WebView2（临时用户目录，登录后采集 Cookie） |
 | 平台解析 | 各家 HTTP API + Jint（斗鱼签名、抖音 sign.js）；yt-dlp 作为 YouTube/Twitch 兜底 |
 | 插件签名 | Ed25519（BouncyCastle）+ SHA256 清单校验 |
-| 测试 | xUnit（6 个测试工程，当前共 1191 个用例） |
+| 测试 | xUnit（6 个测试工程，当前共 1351 个用例） |
 
 ### 平台支持矩阵
 
@@ -474,6 +474,7 @@ Program.Main
   - 主副屏按钮：`ApplyHeroLayoutAsync` → `CreateHeroAndSideColumn` 重建 + 记忆 `IsHeroLayout`（模式文本、底栏房间数展示不同）；
   - 拖拽/分割条变化 → `SetCustomLayout(true)`（`LayoutModeText` 显示「自定义比例 / 主副屏 · 自定义」），保存/恢复快照 `Capture/RestoreCustomLayoutAsync`；
   - 窗格增删（双击房间、关闭窗格）与 `AppendPaneAsync`；关闭窗格：自由布局删除文档 placement，Dock 宿主（自动/主副屏/自定义）统一整树重建后起播，避免播放器控件被新旧 `ContentPresenter` 同时引用导致闪退（见 §10.4「移出窗格」）。
+- `MainWindowViewModel` 职责拆分（阶段五）：主 VM 从 2865 行降至约 2355 行，保留窗口级命令（工作区/录制中心/剪辑台切换）、`IsFreeformMode` 与自由画布协调、Dock 序列化/布局跟踪、自定义比例快照、焦点/全屏/主静音、弹幕订阅、健康监控与 `DisposePlayers`/`Dispose` 编排；内部协作类 `RoomCatalogCoordinator`（主库增删与选中）、`HealthSummaryCoordinator`（平台健康/资源摘要）、`WorkspaceLayoutCoordinator`（布局差量应用）承担无 UI 的状态编排；`RoomCatalogViewModel`（房间集合/筛选/分组/开播轮询）与 `WorkspaceLayoutProfileViewModel`（方案档案/保存另存/切换 dirty）承接原主 VM 的绑定面，窗口级副作用经 `IRoomCatalogHost`/`IWorkspaceLayoutProfileHost` 回调主 VM；`SystemStatusBarViewModel`/`HighlightFeedViewModel` 为只读子面板（状态栏、高亮事件流），`MainWindow.axaml` 对其使用局部 `x:CompileBindings="True"` + `x:DataType` 编译期绑定。
 
 ### 10.3 播放器与监控
 
@@ -498,6 +499,7 @@ Program.Main
 ### 10.4 录制中心 / 剪辑台 / 设置
 
 - `AddRoomWindow` / `EditRoomWindow`：普通平台按链接识别平台；粘贴清流直链（或勾选「作为自定义清流添加」）时按清流保存，可填 Referer/User-Agent；编辑清流时可直接替换播放地址（保留槽位与录制配置）并触发当前窗格重新拉流。
+- `RecordingManager` 职责拆分（阶段五）：由 `RecordingTargetPoller`（流探测与开播轮询：首轮 3s、间隔 10~600s clamp、并发 4、离线重置抑制重试；host 回调接口 `IRecordingTargetPollerHost`）与 `RecordingSessionWorker`（单会话状态机：`ActiveRecording` 同步/启动/收尾、`FfmpegFullRecorder` 分段续录与合并、`DanmakuJsonlRecorder`、`RecordingHighlightTracker` 绑定；线程安全 `BuildProgress`/`BuildLiveRecordingInfo`，`FinalizeAsync` 经 `Interlocked` 闸门恰好一次）组成；`RecordingManager`（约 1123 行）保留 `_gate`/`_startGate`/`_retries`/`_suppressedRooms`、未完成会话恢复与 `ILiveRecordingMonitor` 桥接（`GetLiveRecordings`/`TryGetLiveRecording`/`SessionCompleted` 签名不变）。
 - `RecordingCenterViewModel`：目标列表（自动录制开关、目录修改、立即开录/停止、当前录制进度）、历史列表（去剪辑、打开文件夹、删除；删除会同时删视频与 jsonl）。清流目标不显示「自动录制」开关。目标排序（V0.7.1）：`RecordingTargetOrdering.Rank` 按「正在录制 (0) → 直播中 (1) → 其他 (2)」分组，组内再按显示序号稳定排序，保证正在录制/直播中的房间永远排在最前且同序号相对顺序不变。
 - `ClipStudioViewModel`：录制场次选择 / 打开本地文件、片段播放（`LocalClipPlayerView`）、时间轴（波形+弹幕密度+选区）、导出面板（模式/编码器/目录/文件名/进度）、语音识别面板（转写当前选区、逐句跳转播放、复制文本）。场次下拉顶部追加「🔴 录制中」实时会话（V0.7.1），选中即进入边录边剪模式（安全区、增量波形/弹幕、F5 同步最新进度、录制结束自动切换完整文件，见 §9.2）。
 - `SettingsWindow`：平台账号（六平台 WebView2 登录/清除，状态显示 Cookie 是否绑定）、弹幕与高能参数、录制默认目录与轮询间隔、ASR 预设/Key、Twitch 去广告代理、组件与插件更新（yt-dlp/插件检查与安装）。
@@ -587,17 +589,17 @@ dotnet build LiveMonitor.sln --no-restore
 - 工程目标框架：`Data`、`Media`、`Desktop` 为 `net8.0-windows`，其余类库为 `net8.0`；测试工程对应同目标框架（`Data`/`Media`/`Desktop` 测试为 `net8.0-windows`，`Platforms`/`Danmaku` 测试为 `net8.0`）。
 - 需要 `tools/` 下的 ffmpeg/mpv 才能运行应用（`scripts/fetch-tools.ps1` 自动下载并校验）。
 
-### 13.2 测试（当前 1191 个用例）
+### 13.2 测试（当前 1351 个用例）
 
 | 测试工程 | 覆盖范围 | 用例数 |
 | --- | --- | --- |
 | `tests/LiveMonitor.Data.Tests` | 数据库/仓储/凭据（DPAPI）、清流请求头迁移 | 38 |
 | `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退、自定义清流 Provider、斗鱼流接缝、抖音帧接缝与断线通知、弹幕重连退避 | 505 |
 | `tests/LiveMonitor.Danmaku.Tests` | 过滤器、高能检测、会话管理、重连/释放竞态 | 100 |
-| `tests/LiveMonitor.Media.Tests` | 录制状态机与并发收尾、分段合并、剪辑导出、波形、增量波形/增量弹幕读取、FFmpeg 参数协议分支 | 215 |
-| `tests/LiveMonitor.Desktop.Tests` | ViewModel、Dock/自由画布布局、时间轴几何、AppServices 释放、设置页 ASR/组件更新、登录配置、播放状态文本、录制目标排序、边录边剪剪辑台、自由布局命中与宿主切换 | 333 |
+| `tests/LiveMonitor.Media.Tests` | 录制状态机与并发收尾、轮询器与会话工作器、分段合并、剪辑导出、波形、增量波形/增量弹幕读取、FFmpeg 参数协议分支 | 232 |
+| `tests/LiveMonitor.Desktop.Tests` | ViewModel（主窗口拆分/房间目录/布局方案/状态栏/高亮/录制中心/剪辑台/设置页 ASR/组件更新/通用与弹幕）、Dock/自由画布布局、时间轴几何、播放器管理器与 `IWorkspacePlayer`、AppServices 释放、登录配置、播放状态文本、录制目标排序、自由布局命中与宿主切换 | 476 |
 
-合计 **1191** 个用例，五套全部通过（0 失败 0 跳过）。
+合计 **1351** 个用例，五套全部通过（0 失败 0 跳过）。
 
 运行方式（使用已构建的测试 dll，避免重复构建）：
 
