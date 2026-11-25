@@ -3,6 +3,8 @@ using System.Reflection;
 using LiveMonitor.Core;
 using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Enums;
+using LiveMonitor.Core.Interfaces;
+using LiveMonitor.Core.Models;
 using LiveMonitor.Media.Recording;
 using LiveMonitor.Desktop.ViewModels;
 using Xunit;
@@ -283,7 +285,7 @@ public sealed class RecordingCenterViewModelTests
                 DateTime.UtcNow,
                 RecordingStatus.Recording,
                 roomDisplayName: "边录边剪房间");
-            var active = CreateActiveRecording(room, session);
+            var active = CreateActiveRecording(context, room, session);
             var activeEntries = GetActiveRecordingEntries(context);
             activeEntries[room.Id] = active;
             try
@@ -385,14 +387,80 @@ public sealed class RecordingCenterViewModelTests
         return session;
     }
 
-    private static object CreateActiveRecording(LiveRoom room, RecordingSession session)
+    private static object CreateActiveRecording(
+        ViewModelTestHarness.ViewModelTestContext context,
+        LiveRoom room,
+        RecordingSession session)
     {
-        var activeType = typeof(RecordingManager).GetNestedType("ActiveRecording", BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("RecordingManager.ActiveRecording 私有类型不存在，测试需要同步更新。");
-        var constructor = activeType
+        var assembly = typeof(RecordingManager).Assembly;
+        var workerType = assembly.GetType("LiveMonitor.Media.Recording.RecordingSessionWorker")
+            ?? throw new InvalidOperationException("RecordingSessionWorker 类型不存在，测试需要同步更新。");
+        var constructor = workerType
             .GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
             .Single();
-        return constructor.Invoke(new object?[] { room, session, null, DateTimeOffset.UtcNow });
+        var workerContext = typeof(RecordingManager)
+            .GetField("_workerContext", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(context.Services.Recordings)
+            ?? throw new InvalidOperationException("RecordingManager._workerContext 私有字段不存在，测试需要同步更新。");
+        return constructor.Invoke(new object?[]
+        {
+            room,
+            session,
+            new StubFullStreamRecorder(),
+            new StubPlatformProvider(),
+            null,
+            new StreamQuality("1080p60", "1080p60", 1080, 60, "https://example.com/live.flv", new Dictionary<string, string>()),
+            DateTimeOffset.UtcNow,
+            workerContext
+        });
+    }
+
+    /// <summary>不启动任何进程与后台任务的录制器替身，仅供反射构造 worker 使用。</summary>
+    private sealed class StubFullStreamRecorder : IFullStreamRecorder
+    {
+        public event Action<DateTimeOffset>? OnFirstFrameAnchored
+        {
+            add { }
+            remove { }
+        }
+
+        public event Action<TimeSpan, long, double>? OnProgressUpdated
+        {
+            add { }
+            remove { }
+        }
+
+        public event Action<int, string?>? OnExited
+        {
+            add { }
+            remove { }
+        }
+
+        public double? SourceTimelineStartSeconds => null;
+
+        public Task StartAsync(StreamQuality sourceQuality, string outputMkvPath, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
+        public Task StopGracefullyAsync(TimeSpan timeout) => Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    /// <summary>平台查询替身：反射构造 worker 只需要一个非空实现。</summary>
+    private sealed class StubPlatformProvider : IPlatformProvider
+    {
+        public PlatformType Platform => PlatformType.Bilibili;
+
+        public bool CanHandle(string roomUrl) => false;
+
+        public string ExtractRoomId(string roomUrl) =>
+            throw new ArgumentException("替身不解析直播间标识。", nameof(roomUrl));
+
+        public Task<RoomStatus> GetRoomStatusAsync(
+            string roomId,
+            string? cookie = null,
+            CancellationToken ct = default) =>
+            Task.FromResult(RoomStatus.Offline(roomId, PlatformType.Bilibili, "测试直播间", "测试主播"));
     }
 
     private static IDictionary GetActiveRecordingEntries(ViewModelTestHarness.ViewModelTestContext context)
