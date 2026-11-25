@@ -362,16 +362,17 @@
                     <TextBlock Grid.Column="1" x:Name="YtDlpVersionText" Classes="mono"
                                Margin="6,0" FontSize="11"
                                Foreground="{DynamicResource BrushTextSecondary}"
-                               VerticalAlignment="Center" Text="尚未检查" />
+                               VerticalAlignment="Center" Text="{Binding YtDlpVersionText}" />
                     <Button Grid.Column="2" x:Name="CheckYtDlpButton" Content="检查更新"
-                            Classes="subtle-btn" Padding="10,4" Click="OnCheckYtDlpUpdate" />
+                            Classes="subtle-btn" Padding="10,4"
+                            IsEnabled="{Binding CanCheckYtDlp}" Click="OnCheckForUpdates" />
                     <Button Grid.Column="3" x:Name="InstallYtDlpButton" Content="下载并更新"
-                            Classes="ghost-btn" Padding="10,4" IsEnabled="False"
-                            Click="OnInstallYtDlpUpdate" />
+                            Classes="ghost-btn" Padding="10,4" IsEnabled="{Binding CanInstallYtDlp}"
+                            Click="OnInstallUpdates" />
                   </Grid>
                   <TextBlock x:Name="UpdateStatusText" FontSize="10"
                              Foreground="{DynamicResource BrushTextSecondary}"
-                             TextWrapping="Wrap" Text="更新组件会从 GitHub 下载，需要联网。" />
+                             TextWrapping="Wrap" Text="{Binding StatusText}" />
                 </StackPanel>
               </Border>
 
@@ -387,12 +388,13 @@
                                Margin="6,0" FontSize="11"
                                Foreground="{DynamicResource BrushTextSecondary}"
                                VerticalAlignment="Center" TextWrapping="Wrap"
-                               Text="尚未检查（内置 B 站 / Twitch / YouTube / 虎牙 / 斗鱼 / 抖音）" />
+                               Text="{Binding PluginUpdateSummaryText}" />
                     <Button Grid.Column="2" x:Name="CheckPluginsButton" Content="检查插件更新"
-                            Classes="subtle-btn" Padding="10,4" Click="OnCheckPluginUpdates" />
+                            Classes="subtle-btn" Padding="10,4"
+                            IsEnabled="{Binding CanCheckPlugins}" Click="OnCheckForUpdates" />
                     <Button Grid.Column="3" x:Name="InstallPluginsButton" Content="下载并安装"
-                            Classes="ghost-btn" Padding="10,4" IsEnabled="False"
-                            Click="OnInstallPluginUpdates" />
+                            Classes="ghost-btn" Padding="10,4" IsEnabled="{Binding CanInstallPlugins}"
+                            Click="OnInstallUpdates" />
                   </Grid>
                   <Border Background="{DynamicResource BrushBgCanvas}" CornerRadius="6"
                           Padding="10,8">
