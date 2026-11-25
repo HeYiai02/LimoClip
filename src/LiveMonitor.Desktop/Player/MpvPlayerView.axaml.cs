@@ -26,11 +26,15 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
     private static readonly TimeSpan RenderReadyTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StartPlaybackTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan HealthInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan SeekPollInterval = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan SeekCommitDelay = TimeSpan.FromMilliseconds(160);
 
     private static readonly ConditionalWeakTable<MpvContext, string> AudioMeterPaths = new();
 
     private readonly object _contextGate = new();
     private readonly DispatcherTimer _audioMeterTimer;
+    private readonly DispatcherTimer _seekPollTimer;
+    private readonly DispatcherTimer _seekCommitTimer;
     private MpvContext? _context;
     private TaskCompletionSource<bool>? _loadTcs;
     private DispatcherTimer? _healthTimer;
@@ -61,11 +65,22 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
     private bool _audioEnabled = true;
     private int _volume = 100;
 
+    // 回放支持：只有 mpv 报告 seekable=yes 且 duration 有限（如支持 Range 的清流、
+    // HLS 点播/带 DVR 窗口的源）才显示进度条；普通直播流不受影响。
+    private bool _seekAvailable;
+    private double _seekDuration;
+    private int _suppressSeekChange;
+    private double _pendingSeekSeconds = -1;
+
     public MpvPlayerView()
     {
         InitializeComponent();
         _audioMeterTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
         _audioMeterTimer.Tick += (_, _) => UpdateAudioMeter();
+        _seekPollTimer = new DispatcherTimer { Interval = SeekPollInterval };
+        _seekPollTimer.Tick += (_, _) => UpdateSeekBar();
+        _seekCommitTimer = new DispatcherTimer { Interval = SeekCommitDelay };
+        _seekCommitTimer.Tick += (_, _) => CommitSeek();
         ApplyStateVisuals(PlayerState.Offline, "等待加入房间");
     }
 
@@ -490,6 +505,8 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
         _loadTcs?.TrySetCanceled();
         _healthTimer?.Stop();
         _audioMeterTimer.Stop();
+        _seekPollTimer.Stop();
+        _seekCommitTimer.Stop();
         _meterAttached = false;
         TryDeleteAudioMeterFile();
 
@@ -577,6 +594,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
             _context = null;
             _healthTimer?.Stop();
             _audioMeterTimer.Stop();
+            StopSeekPolling();
             _meterAttached = false;
             // 文件交给接管方继续用，旧播放器 Dispose 时不要把文件删掉。
             _audioMeterPath = null;
@@ -1052,6 +1070,144 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
         });
     }
 
+    private void StartSeekPolling()
+    {
+        if (!_seekPollTimer.IsEnabled)
+        {
+            _seekPollTimer.Start();
+        }
+    }
+
+    private void StopSeekPolling()
+    {
+        _seekPollTimer.Stop();
+        _seekCommitTimer.Stop();
+        _pendingSeekSeconds = -1;
+        _seekAvailable = false;
+        _seekDuration = 0;
+        if (SeekBarHost is not null)
+        {
+            SeekBarHost.IsVisible = false;
+        }
+    }
+
+    /// <summary>
+    /// 每 0.5s 探测一次当前源是否自带回放能力：mpv 报 seekable=yes 且能取到有限 duration
+    /// （如支持 Range 的清流直链、HLS 点播/带 DVR 窗口的源）时才显示进度条；
+    /// 普通直播流（RTMP/RTSP/FLV/HLS-Live）seekable=no 或不报时长，保持无进度条形态。
+    /// 我们不做本地时移缓冲，能回放多少完全取决于源站能力。
+    /// </summary>
+    private void UpdateSeekBar()
+    {
+        var context = _context;
+        if (context is null || _state != PlayerState.Playing)
+        {
+            StopSeekPolling();
+            return;
+        }
+
+        try
+        {
+            var seekable = string.Equals(context.GetPropertyString("seekable"), "yes", StringComparison.OrdinalIgnoreCase);
+            var duration = seekable ? context.GetPropertyDouble("duration") : null;
+            if (!seekable || duration is not { } total || !double.IsFinite(total) || total < 1d)
+            {
+                if (SeekBarHost.IsVisible)
+                {
+                    SeekBarHost.IsVisible = false;
+                    _seekAvailable = false;
+                    _seekDuration = 0;
+                }
+
+                return;
+            }
+
+            _seekAvailable = true;
+            _seekDuration = total;
+            if (!SeekBarHost.IsVisible)
+            {
+                SeekBarHost.IsVisible = true;
+            }
+
+            var position = context.GetPropertyDouble("time-pos");
+            _suppressSeekChange++;
+            try
+            {
+                if (Math.Abs(SeekSlider.Maximum - total) > 0.01)
+                {
+                    SeekSlider.Maximum = total;
+                }
+
+                // 用户正在拖动（提交定时器在跑）时不回写位置，避免进度条被轮询抢回去。
+                if (!_seekCommitTimer.IsEnabled && position is { } current)
+                {
+                    var clamped = Math.Clamp(current, 0d, total);
+                    if (Math.Abs(SeekSlider.Value - clamped) > 0.25)
+                    {
+                        SeekSlider.Value = clamped;
+                    }
+                }
+            }
+            finally
+            {
+                _suppressSeekChange--;
+            }
+
+            SeekTimeText.Text = $"{FormatClock(SeekSlider.Value)} / {FormatClock(total)}";
+        }
+        catch
+        {
+            // mpv 正在切换/释放时属性读取会失败，等下一个周期。
+        }
+    }
+
+    private void OnSeekChanged(object? sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (_suppressSeekChange != 0 || !_seekAvailable)
+        {
+            return;
+        }
+
+        _pendingSeekSeconds = e.NewValue;
+        SeekTimeText.Text = $"{FormatClock(e.NewValue)} / {FormatClock(_seekDuration)}";
+        // 拖动会连续触发 ValueChanged：短暂防抖后只发一次 seek，避免一次拖动打出几十条命令。
+        _seekCommitTimer.Stop();
+        _seekCommitTimer.Start();
+    }
+
+    private void CommitSeek()
+    {
+        _seekCommitTimer.Stop();
+        if (_pendingSeekSeconds < 0 || !_seekAvailable)
+        {
+            return;
+        }
+
+        var target = _pendingSeekSeconds;
+        _pendingSeekSeconds = -1;
+        try
+        {
+            _context?.Command("seek", target.ToString("0.###", CultureInfo.InvariantCulture), "absolute+exact");
+        }
+        catch
+        {
+            // 流已切换或 mpv 已释放时忽略本次 seek。
+        }
+    }
+
+    private static string FormatClock(double seconds)
+    {
+        if (!double.IsFinite(seconds) || seconds < 0)
+        {
+            seconds = 0;
+        }
+
+        var span = TimeSpan.FromSeconds(seconds);
+        return span.TotalHours >= 1
+            ? span.ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture)
+            : span.ToString(@"mm\:ss", CultureInfo.InvariantCulture);
+    }
+
     private void StartHealthTimer()
     {
         if (_healthTimer is null)
@@ -1145,6 +1301,15 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
     private void SetState(PlayerState state, string? detail)
     {
         _state = state;
+        if (state == PlayerState.Playing)
+        {
+            StartSeekPolling();
+        }
+        else
+        {
+            StopSeekPolling();
+        }
+
         ApplyStateVisuals(state, detail);
         StateChanged?.Invoke(this, EventArgs.Empty);
     }

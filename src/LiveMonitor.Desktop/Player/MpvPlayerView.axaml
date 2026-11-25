@@ -17,6 +17,14 @@
       <Setter Property="Background" Value="#E6F1F5F9" />
       <Setter Property="BorderThickness" Value="0" />
     </Style>
+    <!-- 回放进度条与音量条风格保持一致，避免系统默认大圆点抢画面。 -->
+    <Style Selector="Slider#SeekSlider /template/ Border">
+      <Setter Property="Width" Value="10" />
+      <Setter Property="Height" Value="10" />
+      <Setter Property="CornerRadius" Value="5" />
+      <Setter Property="Background" Value="#E6F1F5F9" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
   </UserControl.Styles>
 
   <Grid ClipToBounds="True">
@@ -72,7 +80,31 @@
           <GradientStop Color="#4D070A10" Offset="1" />
         </LinearGradientBrush>
       </Border.Background>
-      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">
+      <StackPanel Orientation="Vertical" Spacing="2">
+        <!-- 回放进度条只对「自带回放能力」的源显示：mpv 探测到 seekable 且 duration 有限时才出现；
+             普通直播流（RTMP/RTSP/FLV/HLS-Live）保持原来的无进度条形态。 -->
+        <Grid x:Name="SeekBarHost"
+              IsVisible="False"
+              ColumnDefinitions="*,Auto"
+              Margin="0,0,0,2">
+          <Slider x:Name="SeekSlider"
+                  Grid.Column="0"
+                  Minimum="0"
+                  Maximum="0"
+                  Value="0"
+                  VerticalAlignment="Center"
+                  ValueChanged="OnSeekChanged"
+                  ToolTip.Tip="拖动回放（仅对支持回放的源生效）" />
+          <TextBlock x:Name="SeekTimeText"
+                     Grid.Column="1"
+                     Classes="mono"
+                     FontSize="9.5"
+                     Margin="8,0,0,0"
+                     VerticalAlignment="Center"
+                     Foreground="{DynamicResource BrushTextMuted}"
+                     Text="00:00 / 00:00" />
+        </Grid>
+        <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">
         <StackPanel Grid.Column="0"
                     Orientation="Horizontal"
                     Spacing="6"
@@ -180,7 +212,8 @@
                 FontFamily="{DynamicResource FontMono}"
                 Content="60fps"
                 Click="OnCompactClick" />
-      </Grid>
+        </Grid>
+      </StackPanel>
     </Border>
 
   </Grid>
