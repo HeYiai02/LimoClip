@@ -12,7 +12,6 @@ using LiveMonitor.Danmaku;
 using LiveMonitor.Desktop.Services;
 using LiveMonitor.Desktop.ViewModels;
 using LiveMonitor.Platforms;
-using LiveMonitor.Platforms.Plugins;
 using Button = Avalonia.Controls.Button;
 using Color = Avalonia.Media.Color;
 
@@ -27,10 +26,13 @@ public partial class SettingsWindow : Window
     /// <summary>ASR 子块表单状态与读/存/测试逻辑（生命周期与窗口一致）。</summary>
     private readonly AsrSettingsViewModel _asrViewModel = null!;
 
-    /// <summary>更新分区与 ASR 分区共用的状态文本语气画刷（ASR 的类别由 ViewModel 给出）。</summary>
-    private static readonly IBrush AsrNeutralBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#94A3B8"));
-    private static readonly IBrush AsrSuccessBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#22C55E"));
-    private static readonly IBrush AsrErrorBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#EF4444"));
+    /// <summary>组件与更新子块状态与更新动作（生命周期与窗口一致）。</summary>
+    private readonly PluginAndToolUpdateViewModel _updateViewModel = null!;
+
+    /// <summary>更新分区与 ASR 分区共用的状态文本语气画刷（语气类别由 ViewModel 给出）。</summary>
+    private static readonly IBrush NeutralStatusBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#94A3B8"));
+    private static readonly IBrush SuccessStatusBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#22C55E"));
+    private static readonly IBrush ErrorStatusBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#EF4444"));
 
     /// <summary>左侧设置分组：Key 对应导航按钮 Tag，标题/副标题显示在右侧页头。</summary>
     private static readonly (string Key, string Title, string Subtitle)[] SettingsPages =
@@ -43,15 +45,6 @@ public partial class SettingsWindow : Window
     };
 
     private bool _loading;
-
-    /// <summary>最近一次 yt-dlp 更新检查结果（供「下载并更新」复用）。</summary>
-    private CliUpdateCheckResult? _ytDlpUpdate;
-
-    /// <summary>最近一次平台插件清单检查结果（供「下载并安装」复用）。</summary>
-    private PluginUpdateCheckResult? _pluginUpdates;
-
-    /// <summary>组件与插件更新操作进行中（用于禁用按钮并阻止重入）。</summary>
-    private bool _updateBusy;
 
     /// <summary>各平台账号状态文本（按平台索引，登录/清除后统一刷新）。</summary>
     private readonly Dictionary<PlatformType, TextBlock> _accountStatusTexts = new();
@@ -67,7 +60,10 @@ public partial class SettingsWindow : Window
         _services = services;
         _asrViewModel = new AsrSettingsViewModel(services.AsrSettings);
         _asrViewModel.PropertyChanged += OnAsrViewModelPropertyChanged;
+        _updateViewModel = new PluginAndToolUpdateViewModel(services.CliUpdater, services.PluginUpdates);
+        _updateViewModel.PropertyChanged += OnUpdateViewModelPropertyChanged;
         DataContext = _asrViewModel;
+        UpdatesPage.DataContext = _updateViewModel;
         KeywordList.ItemsSource = _keywords;
         BuildAccountRows();
         Opened += OnOpened;
@@ -264,9 +260,9 @@ public partial class SettingsWindow : Window
 
         AsrStatusText.Foreground = _asrViewModel.StatusKind switch
         {
-            AsrSettingsStatusKind.Success => AsrSuccessBrush,
-            AsrSettingsStatusKind.Error => AsrErrorBrush,
-            _ => AsrNeutralBrush
+            AsrSettingsStatusKind.Success => SuccessStatusBrush,
+            AsrSettingsStatusKind.Error => ErrorStatusBrush,
+            _ => NeutralStatusBrush
         };
     }
 
@@ -503,208 +499,45 @@ public partial class SettingsWindow : Window
         }
     }
 
-    /// <summary>检查 yt-dlp 是否有新版本（只查询、不下载）。</summary>
-    private async void OnCheckYtDlpUpdate(object? sender, RoutedEventArgs e)
+    /// <summary>「检查更新」/「检查插件更新」共用转发入口（按 sender 区分目标，更新逻辑在 ViewModel）。</summary>
+    private async void OnCheckForUpdates(object? sender, RoutedEventArgs e)
     {
-        if (_updateBusy || _services is null)
+        if (ReferenceEquals(sender, CheckYtDlpButton))
+        {
+            await _updateViewModel.CheckYtDlpAsync();
+        }
+        else if (ReferenceEquals(sender, CheckPluginsButton))
+        {
+            await _updateViewModel.CheckPluginUpdatesAsync();
+        }
+    }
+
+    /// <summary>「下载并更新」/「下载并安装」共用转发入口（按 sender 区分目标，更新逻辑在 ViewModel）。</summary>
+    private async void OnInstallUpdates(object? sender, RoutedEventArgs e)
+    {
+        if (ReferenceEquals(sender, InstallYtDlpButton))
+        {
+            await _updateViewModel.InstallYtDlpAsync();
+        }
+        else if (ReferenceEquals(sender, InstallPluginsButton))
+        {
+            await _updateViewModel.InstallPluginUpdatesAsync();
+        }
+    }
+
+    /// <summary>更新分区状态语气变化时把 ViewModel 的类别映射为分区状态文本颜色。</summary>
+    private void OnUpdateViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PluginAndToolUpdateViewModel.StatusKind))
         {
             return;
         }
 
-        SetUpdateBusy(true);
-        SetUpdateStatus("正在检查 yt-dlp 更新…", UpdateStatusKind.Neutral);
-        try
+        UpdateStatusText.Foreground = _updateViewModel.StatusKind switch
         {
-            var result = await _services.CliUpdater.CheckYtDlpAsync();
-            _ytDlpUpdate = result;
-            if (!result.CheckSucceeded)
-            {
-                YtDlpVersionText.Text = "检查失败";
-                InstallYtDlpButton.IsEnabled = false;
-                SetUpdateStatus($"检查 yt-dlp 更新失败：{result.ErrorMessage}", UpdateStatusKind.Error);
-                return;
-            }
-
-            YtDlpVersionText.Text = $"本地 {result.LocalVersion} · 最新 {result.LatestVersion}";
-            InstallYtDlpButton.IsEnabled = result.UpdateAvailable && !string.IsNullOrWhiteSpace(result.DownloadUrl);
-            SetUpdateStatus(
-                result.UpdateAvailable
-                    ? $"发现新版本 {result.LatestVersion}，点击「下载并更新」替换 tools 目录内的 yt-dlp.exe。"
-                    : "yt-dlp 已是最新版本。",
-                result.UpdateAvailable ? UpdateStatusKind.Neutral : UpdateStatusKind.Success);
-        }
-        catch (Exception ex)
-        {
-            InstallYtDlpButton.IsEnabled = false;
-            SetUpdateStatus($"检查 yt-dlp 更新失败：{ex.Message}", UpdateStatusKind.Error);
-        }
-        finally
-        {
-            SetUpdateBusy(false);
-        }
-    }
-
-    /// <summary>下载并原子替换 yt-dlp（先校验体积与 MZ 头）。</summary>
-    private async void OnInstallYtDlpUpdate(object? sender, RoutedEventArgs e)
-    {
-        if (_updateBusy || _ytDlpUpdate is null)
-        {
-            return;
-        }
-
-        if (!_ytDlpUpdate.UpdateAvailable || string.IsNullOrWhiteSpace(_ytDlpUpdate.DownloadUrl))
-        {
-            SetUpdateStatus("没有可用的 yt-dlp 更新，请先点击「检查更新」。", UpdateStatusKind.Error);
-            return;
-        }
-
-        SetUpdateBusy(true);
-        InstallYtDlpButton.IsEnabled = false;
-        SetUpdateStatus("正在下载并替换 yt-dlp…", UpdateStatusKind.Neutral);
-        try
-        {
-            var installed = await _services.CliUpdater.DownloadAndInstallAsync(_ytDlpUpdate);
-            if (!installed.Success)
-            {
-                SetUpdateStatus($"更新 yt-dlp 失败：{installed.ErrorMessage}", UpdateStatusKind.Error);
-                return;
-            }
-
-            YtDlpVersionText.Text = $"本地 {installed.NewVersion} · 已更新";
-            _ytDlpUpdate = null;
-            SetUpdateStatus($"yt-dlp 已更新到 {installed.NewVersion}。", UpdateStatusKind.Success);
-        }
-        catch (Exception ex)
-        {
-            SetUpdateStatus($"更新 yt-dlp 失败：{ex.Message}", UpdateStatusKind.Error);
-        }
-        finally
-        {
-            SetUpdateBusy(false);
-        }
-    }
-
-    /// <summary>拉取 providers-manifest.json（主源→镜像）并筛选可用插件更新。</summary>
-    private async void OnCheckPluginUpdates(object? sender, RoutedEventArgs e)
-    {
-        if (_updateBusy || _services is null)
-        {
-            return;
-        }
-
-        SetUpdateBusy(true);
-        SetUpdateStatus("正在检查平台插件更新…", UpdateStatusKind.Neutral);
-        try
-        {
-            var result = await _services.PluginUpdates.CheckAsync();
-            _pluginUpdates = result;
-            if (!result.Succeeded)
-            {
-                PluginUpdateSummaryText.Text = "检查失败";
-                InstallPluginsButton.IsEnabled = false;
-                SetUpdateStatus($"检查插件更新失败：{result.ErrorMessage}", UpdateStatusKind.Error);
-                return;
-            }
-
-            if (result.Updates.Count == 0)
-            {
-                PluginUpdateSummaryText.Text = $"已是最新（清单来源：{result.ManifestSource}）";
-                InstallPluginsButton.IsEnabled = false;
-                SetUpdateStatus("没有可用的平台插件更新。", UpdateStatusKind.Success);
-                return;
-            }
-
-            PluginUpdateSummaryText.Text = string.Join(
-                "；",
-                result.Updates.Select(u => $"{u.Entry.PluginId} {u.Entry.Version}"));
-            InstallPluginsButton.IsEnabled = true;
-            SetUpdateStatus(
-                $"发现 {result.Updates.Count} 个插件更新，点击「下载并安装」（下载后自动验签）。",
-                UpdateStatusKind.Neutral);
-        }
-        catch (Exception ex)
-        {
-            InstallPluginsButton.IsEnabled = false;
-            SetUpdateStatus($"检查插件更新失败：{ex.Message}", UpdateStatusKind.Error);
-        }
-        finally
-        {
-            SetUpdateBusy(false);
-        }
-    }
-
-    /// <summary>下载并安装插件：验签通过后在无录制/弹幕任务时立即生效。</summary>
-    private async void OnInstallPluginUpdates(object? sender, RoutedEventArgs e)
-    {
-        if (_updateBusy || _pluginUpdates is null || _pluginUpdates.Updates.Count == 0)
-        {
-            return;
-        }
-
-        SetUpdateBusy(true);
-        InstallPluginsButton.IsEnabled = false;
-        SetUpdateStatus("正在下载并安装平台插件…", UpdateStatusKind.Neutral);
-        try
-        {
-            var result = await _services.PluginUpdates.InstallAsync(_pluginUpdates.Updates);
-            if (!result.Succeeded)
-            {
-                SetUpdateStatus($"安装平台插件失败：{result.ErrorMessage}", UpdateStatusKind.Error);
-                return;
-            }
-
-            var parts = new List<string>();
-            if (result.Installed.Count > 0)
-            {
-                parts.Add($"已安装 {result.Installed.Count} 个");
-            }
-
-            if (result.Applied.Count > 0)
-            {
-                parts.Add($"已生效 {result.Applied.Count} 个");
-            }
-
-            if (result.Deferred.Count > 0)
-            {
-                parts.Add($"待下次启动生效 {result.Deferred.Count} 个");
-            }
-
-            if (result.Failures.Count > 0)
-            {
-                parts.Add($"失败 {result.Failures.Count} 个：{string.Join("；", result.Failures.Select(f => $"{f.PluginId}（{f.ErrorMessage}）"))}");
-            }
-
-            PluginUpdateSummaryText.Text = parts.Count > 0 ? string.Join("，", parts) : "没有变化";
-            _pluginUpdates = null;
-            SetUpdateStatus(
-                parts.Count > 0 ? $"插件更新完成：{string.Join("，", parts)}。" : "没有可安装的插件更新。",
-                result.Failures.Count > 0 ? UpdateStatusKind.Error : UpdateStatusKind.Success);
-        }
-        catch (Exception ex)
-        {
-            SetUpdateStatus($"安装平台插件失败：{ex.Message}", UpdateStatusKind.Error);
-        }
-        finally
-        {
-            SetUpdateBusy(false);
-        }
-    }
-
-    private void SetUpdateBusy(bool busy)
-    {
-        _updateBusy = busy;
-        CheckYtDlpButton.IsEnabled = !busy;
-        CheckPluginsButton.IsEnabled = !busy;
-    }
-
-    private void SetUpdateStatus(string text, UpdateStatusKind kind)
-    {
-        UpdateStatusText.Text = text;
-        UpdateStatusText.Foreground = kind switch
-        {
-            UpdateStatusKind.Success => AsrSuccessBrush,
-            UpdateStatusKind.Error => AsrErrorBrush,
-            _ => AsrNeutralBrush,
+            UpdateStatusKind.Success => SuccessStatusBrush,
+            UpdateStatusKind.Error => ErrorStatusBrush,
+            _ => NeutralStatusBrush
         };
     }
 
@@ -748,13 +581,5 @@ public partial class SettingsWindow : Window
             PageSubtitle.Text = subtitle;
             break;
         }
-    }
-
-    /// <summary>组件与插件更新分区状态文本的语气（决定前景色）。</summary>
-    private enum UpdateStatusKind
-    {
-        Neutral,
-        Success,
-        Error
     }
 }
