@@ -3,6 +3,7 @@
 
   <!-- 3 级深色导播台背景阶梯 -->
   <Color x:Key="ColorBgCanvas">#0B0D12</Color>
+  <Color x:Key="ColorBgWorkspace">#141A26</Color>
   <Color x:Key="ColorBgBase">#11141B</Color>
   <Color x:Key="ColorBgSurface">#161A23</Color>
   <Color x:Key="ColorBgElevated">#1E2430</Color>
@@ -31,6 +32,7 @@
 
   <!-- 画刷映射 -->
   <SolidColorBrush x:Key="BrushBgCanvas" Color="{StaticResource ColorBgCanvas}" />
+  <SolidColorBrush x:Key="BrushBgWorkspace" Color="{StaticResource ColorBgWorkspace}" />
   <SolidColorBrush x:Key="BrushBgBase" Color="{StaticResource ColorBgBase}" />
   <SolidColorBrush x:Key="BrushBgSurface" Color="{StaticResource ColorBgSurface}" />
   <SolidColorBrush x:Key="BrushBgElevated" Color="{StaticResource ColorBgElevated}" />

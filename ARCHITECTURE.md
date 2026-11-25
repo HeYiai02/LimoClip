@@ -443,6 +443,7 @@ Program.Main
 - **沉浸模式**：焦点模式或桌面全屏下，鼠标空闲 2.5s 自动隐藏各播放器底部控制条与右上角状态角标、隐藏顶部提示；鼠标/按键活动立即恢复（`_immersiveIdleTimer` + 逐窗格 `SetChromeVisible`）；
 - **桌面级全屏**：F11 或顶栏「桌面全屏」按钮；记录进入前的 `WindowState`，进入 `WindowState.FullScreen` 并隐藏外壳，顶部提示仅在鼠标移到屏幕顶部（Y≤90）时出现；Esc 退出（自带 400ms 去抖避免重复触发）；
 - 侧栏：房间库搜索、分组药丸（`WrapPanel` 自动换行 + `ScrollViewer` 限高）、房间条目操作（编辑/删除/双击加入工作区）。
+- 工作区空闲底色：`DesignTokens.axaml` 的 `BrushBgWorkspace`（`#141A26`，与窗格黑底区分）用于工作区 Border 与自由画布；`MainWindow.Resources` 同时覆盖 Dock 主题的 `DockThemeBackgroundBrush`/`DockThemeControlBackgroundBrush`/`DockSurfaceWorkbenchBrush`/`DockSurfacePanelBrush`，保证平铺模式窗格间隙与无窗格区域同样显示该底色。
 - 侧栏开播状态：`MainWindowViewModel` 每 60s 独立轮询主库全部房间（`DispatcherTimer` + 信号量限并发 3、单房间 10s 超时），按 `PlatformType` 取 Provider、带 Cookie 调 `GetRoomStatusAsync`，结果写入 `_knownLiveStatus` 并刷新条目状态点；工作区窗格的实时状态仍由播放器状态同步，两条来源合并后显示，未查询到历史状态的房间保持灰色「状态未知」。顶栏一体化自绘标题栏：空白区域按住拖动窗口、双击最大化/还原，事件源命中按钮/下拉框/输入框等交互控件时直接放行（`IsTopBarInteractiveSource`），避免吞掉首次点击。
 
 ### 10.2 布局系统（Dock）
@@ -468,7 +469,7 @@ Program.Main
   - 播放器状态 → 窗格状态文本（`PlayerStateText`：连接中/直播中/已停止/重连中/播放失败）；
   - 焦点模式：双击窗格进入单窗格全屏（`IsFocused` + 静音策略 + 恢复原布局）、Esc 退出；
   - 锚点/未开播文字与状态同步：`SetDanmakuEnabled` 控制清流弹幕按钮显隐；
-  - 底部控制条：音量/静音、弹幕开关、紧凑模式，以及 V0.7 新增的「暂停/继续」（`TogglePause`，同步 mpv `pause` 属性并切换 ⏸/▶ 图标）与「刷新播放」（`RequestRefresh` → `RefreshRequested` → `WorkspacePlayerManager.RefreshTileAsync`，清空退避/离线计时器后立即重新解析地址并起播）。
+  - 底部控制条：音量/静音、弹幕开关、紧凑模式，以及 V0.7 新增的「暂停/继续」（`TogglePause`，同步 mpv `pause` 属性并切换 ⏸/▶ 图标）与「刷新播放」（`RequestRefresh` → `RefreshRequested` → `WorkspacePlayerManager.RefreshTileAsync`，清空退避/离线计时器后立即重新解析地址并起播）；刷新按钮图标使用 `Icons.axaml` 的 `IconRefresh` PathIcon（矢量绘制，避免字体码点被裁切）。
 - `QualityPolicy`：按 Height/Fps 降序；大窗/焦点取最高；紧凑模式上限 480p；普通窗口优先 ≤720p，取第一个满足者。
 - `MpvPlayerView`（libmpv 封装）：
   - 初始化选项：`hwdec=auto-safe`、`vo=libmpv`、`gpu-api=opengl`、`cache=yes`、`demuxer-max-bytes`（按分辨率 3M/4M/8M）、`network-timeout=10`、`audio-buffer=0.8`、`audio-stream-silence=yes`、关闭 OSC/默认快捷键（键位由应用处理）；

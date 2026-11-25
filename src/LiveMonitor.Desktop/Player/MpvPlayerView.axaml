@@ -146,11 +146,9 @@
                 Margin="2,0,0,0"
                 ToolTip.Tip="刷新播放（重新获取直播地址并重连）"
                 Click="OnRefreshClick">
-          <TextBlock Text="&#xE72C;"
-                     FontFamily="Segoe Fluent Icons"
-                     FontSize="13"
-                     Foreground="{DynamicResource BrushTextSecondary}"
-                     VerticalAlignment="Center" />
+          <PathIcon Data="{DynamicResource IconRefresh}"
+                    Width="13" Height="13"
+                    Foreground="{DynamicResource BrushTextSecondary}" />
         </Button>
 
         <Button x:Name="MuteButton"

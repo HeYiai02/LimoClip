@@ -14,6 +14,14 @@
         ExtendClientAreaTitleBarHeightHint="48"
         Background="{DynamicResource BrushBgCanvas}">
 
+  <Window.Resources>
+    <!-- Dock 主题默认使用近黑背景；此处覆盖为工作区底色，让没有窗格的区域更易辨识。 -->
+    <SolidColorBrush x:Key="DockThemeBackgroundBrush" Color="#141A26" />
+    <SolidColorBrush x:Key="DockThemeControlBackgroundBrush" Color="#141A26" />
+    <SolidColorBrush x:Key="DockSurfaceWorkbenchBrush" Color="#141A26" />
+    <SolidColorBrush x:Key="DockSurfacePanelBrush" Color="#141A26" />
+  </Window.Resources>
+
   <Grid x:Name="RootGrid" RowDefinitions="48,*,28" ColumnDefinitions="260,*">
 
     <!-- ==================== 1. 一体化顶部导播栏 (48px) ==================== -->
@@ -273,7 +281,7 @@
     </Border>
 
     <!-- ==================== 3. 右侧平铺监控工作区 ==================== -->
-    <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource BrushBgCanvas}" Padding="6">
+    <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource BrushBgWorkspace}" Padding="6">
       <Grid>
         <dock:DockControl x:Name="Dock" Layout="{Binding Layout}"
                           IsVisible="{Binding ShowDockWorkspace}" />
@@ -281,7 +289,7 @@
         <!-- 自由布局画布（V0.7）：与平铺 Dock 互斥显示，支持拖动/缩放/磁吸/画中画 -->
         <controls:FreeformWorkspaceCanvas x:Name="FreeformCanvas"
                                           IsVisible="{Binding IsFreeformMode}"
-                                          Background="{DynamicResource BrushBgCanvas}" />
+                                          Background="{DynamicResource BrushBgWorkspace}" />
 
 
         <!-- 空状态引导：工作区还没有任何直播间窗格 -->
