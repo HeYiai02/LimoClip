@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# 同一分支/PR 的新提交自动取消旧任务，省 Runner 配额
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build & Test (Windows)
+    runs-on: windows-latest
+    env:
+      # Media.Tests 的 FfmpegLocator CI 守卫用例依赖该变量：CI=true 时必须解析到 ffmpeg。
+      CI: 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Data / Media / Desktop 及其测试工程均为 net8.0-windows，必须用 Windows Runner；
+      # 显式绑定 global.json，避免 Runner 镜像自带 SDK 升级导致行为漂移。
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-win-${{ hashFiles('global.json', 'Directory.Build.props', '**/*.csproj') }}
+          restore-keys: |
+            nuget-win-
+
+      # tools/ 存放 libmpv、yt-dlp、ffmpeg 等第三方二进制，体积大且不进 Git；
+      # Key 带上 fetch-tools.ps1 的哈希：脚本升级（URL/版本变化）时自动失效重拉。
+      - name: Cache tools
+        id: tools-cache
+        uses: actions/cache@v4
+        with:
+          path: tools
+          key: tools-win-${{ hashFiles('scripts/fetch-tools.ps1') }}
+
+      - name: Fetch tools (libmpv / yt-dlp / ffmpeg)
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: ./scripts/fetch-tools.ps1 -WithFfmpeg
+
+      # Media.Tests 等大量 FFmpeg 用例缺 ffmpeg 时会直接 return（.trx 仍记 Passed），
+      # 因此必须在 dotnet test 前显式门禁。仅校验 ffmpeg（产品只依赖它，不依赖 ffprobe）。
+      - name: Verify ffmpeg
+        shell: pwsh
+        run: |
+          if (-not (Test-Path ./tools/ffmpeg/ffmpeg.exe)) {
+            throw 'tools/ffmpeg/ffmpeg.exe 缺失：fetch-tools.ps1 未正确下载或缓存损坏。'
+          }
+          ./tools/ffmpeg/ffmpeg.exe -version
+
+      - name: Restore
+        run: dotnet restore LiveMonitor.sln
+
+      - name: Build (Release)
+        run: dotnet build LiveMonitor.sln -c Release --no-restore
+
+      - name: Test (Release)
+        run: dotnet test LiveMonitor.sln -c Release --no-build --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/TestResults/*.trx'
+          if-no-files-found: warn
