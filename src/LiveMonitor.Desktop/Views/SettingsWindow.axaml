@@ -112,9 +112,11 @@
                              Text="Twitch 直播流内会插播广告。可填写外部去广告 M3U8 代理模板：用占位符 channel 代表频道名，例如 https://eu.luminous.dev/live/channel。留空时使用内置的原生 GQL + Usher 播放列表（可去广告），失败会自动回退 yt-dlp。" />
                   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                     <TextBox Grid.Column="0" x:Name="TwitchProxyBox" FontSize="11"
-                             Watermark="留空 = 仅使用内置原生播放列表（推荐先留空）" />
+                             Watermark="留空 = 仅使用内置原生播放列表（推荐先留空）"
+                             Text="{Binding TwitchProxyTemplate, Mode=TwoWay}" />
                     <Button Grid.Column="1" Content="保存" Classes="subtle-btn"
-                            Padding="14,4" Click="OnSaveTwitchProxy" />
+                            Padding="14,4" Click="OnSaveTwitchProxy"
+                            IsEnabled="{Binding IsNotBusy}" />
                   </Grid>
                   <TextBlock FontSize="10" Foreground="{DynamicResource BrushTextMuted}"
                              TextWrapping="Wrap"
@@ -143,15 +145,20 @@
                              Foreground="{DynamicResource BrushTextPrimary}" />
                   <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                     <TextBox Grid.Column="0" x:Name="KeywordBox"
-                             Watermark="输入要屏蔽的关键词 / 正则表达式" FontSize="12" />
+                             Watermark="输入要屏蔽的关键词 / 正则表达式" FontSize="12"
+                             Text="{Binding NewKeywordText, Mode=TwoWay}" />
                     <CheckBox Grid.Column="1" x:Name="KeywordIsRegexCheck" Content="正则"
                               FontSize="11" VerticalAlignment="Center"
+                              IsChecked="{Binding NewKeywordIsRegex, Mode=TwoWay}"
                               ToolTip.Tip="勾选后按 .NET 正则表达式匹配弹幕内容" />
                     <Button Grid.Column="2" Content="添加" Classes="primary-btn"
-                            Padding="12,4" Click="OnAddKeyword" />
+                            Padding="12,4" Click="OnAddKeyword"
+                            IsEnabled="{Binding IsNotBusy}" />
                   </Grid>
                   <ListBox x:Name="KeywordList" Classes="settings-list" Height="160"
-                           FontSize="11">
+                           FontSize="11"
+                           ItemsSource="{Binding Keywords}"
+                           SelectedItem="{Binding SelectedKeyword, Mode=TwoWay}">
                     <ListBox.ItemTemplate>
                       <DataTemplate>
                         <Grid ColumnDefinitions="*,Auto">
@@ -166,9 +173,10 @@
                   </ListBox>
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button Content="删除选中" Classes="ghost-btn" Padding="10,4"
-                            Click="OnRemoveKeyword" />
+                            Click="OnRemoveKeyword" IsEnabled="{Binding IsNotBusy}" />
                     <CheckBox x:Name="UnicycleToggle" Content="开启独轮车自动屏蔽"
                               FontSize="11" VerticalAlignment="Center"
+                              IsChecked="{Binding UnicycleEnabled, Mode=TwoWay}"
                               Checked="OnUnicycleChanged" Unchecked="OnUnicycleChanged" />
                   </StackPanel>
                 </StackPanel>
@@ -180,14 +188,17 @@
                              Foreground="{DynamicResource BrushTextPrimary}" />
                   <CheckBox x:Name="DanmakuPreviewToggle" Content="监控画面弹幕预览"
                             FontSize="11" VerticalAlignment="Center"
+                            IsChecked="{Binding DanmakuPreviewEnabled, Mode=TwoWay}"
                             Checked="OnDanmakuPreviewChanged" Unchecked="OnDanmakuPreviewChanged" />
                   <CheckBox x:Name="DanmakuStickerToggle"
                             Content="渲染纯表情包弹幕（关闭后仅统计与高能检测）"
                             FontSize="11" VerticalAlignment="Center"
+                            IsChecked="{Binding DanmakuStickerVisible, Mode=TwoWay}"
                             Checked="OnDanmakuStickerChanged" Unchecked="OnDanmakuStickerChanged" />
                   <CheckBox x:Name="DanmakuEmoteImagesToggle"
                             Content="显示表情图片（静态，多屏时建议关闭）"
                             FontSize="11" VerticalAlignment="Center"
+                            IsChecked="{Binding DanmakuEmoteImagesVisible, Mode=TwoWay}"
                             Checked="OnDanmakuEmoteImagesChanged" Unchecked="OnDanmakuEmoteImagesChanged" />
                   <Border Background="{DynamicResource BrushBgCanvas}" CornerRadius="6"
                           Padding="10,8">
@@ -295,31 +306,32 @@
                                VerticalAlignment="Center" />
                     <NumericUpDown Grid.Row="0" Grid.Column="1" x:Name="HighlightShortWindow"
                                    Minimum="1" Maximum="600" Increment="1" FormatString="0"
-                                   FontSize="11" />
+                                   FontSize="11" Value="{Binding HighlightShortWindow, Mode=TwoWay}" />
                     <TextBlock Grid.Row="1" Grid.Column="0" Text="基线窗（秒）" FontSize="11"
                                Foreground="{DynamicResource BrushTextSecondary}"
                                VerticalAlignment="Center" />
                     <NumericUpDown Grid.Row="1" Grid.Column="1" x:Name="HighlightBaselineWindow"
                                    Minimum="1" Maximum="3600" Increment="10" FormatString="0"
-                                   FontSize="11" />
+                                   FontSize="11" Value="{Binding HighlightBaselineWindow, Mode=TwoWay}" />
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="密度倍数" FontSize="11"
                                Foreground="{DynamicResource BrushTextSecondary}"
                                VerticalAlignment="Center" />
                     <NumericUpDown Grid.Row="2" Grid.Column="1" x:Name="HighlightDensityMultiplier"
                                    Minimum="0.1" Maximum="1000" Increment="0.5"
-                                   FormatString="0.0##" FontSize="11" />
+                                   FormatString="0.0##" FontSize="11"
+                                   Value="{Binding HighlightDensityMultiplier, Mode=TwoWay}" />
                     <TextBlock Grid.Row="3" Grid.Column="0" Text="短窗最少条数" FontSize="11"
                                Foreground="{DynamicResource BrushTextSecondary}"
                                VerticalAlignment="Center" />
                     <NumericUpDown Grid.Row="3" Grid.Column="1" x:Name="HighlightMinShortWindowCount"
                                    Minimum="1" Maximum="1000000" Increment="1" FormatString="0"
-                                   FontSize="11" />
+                                   FontSize="11" Value="{Binding HighlightMinShortWindowCount, Mode=TwoWay}" />
                     <TextBlock Grid.Row="4" Grid.Column="0" Text="冷却（秒）" FontSize="11"
                                Foreground="{DynamicResource BrushTextSecondary}"
                                VerticalAlignment="Center" />
                     <NumericUpDown Grid.Row="4" Grid.Column="1" x:Name="HighlightCooldownSeconds"
                                    Minimum="0" Maximum="86400" Increment="10" FormatString="0"
-                                   FontSize="11" />
+                                   FontSize="11" Value="{Binding HighlightCooldownSeconds, Mode=TwoWay}" />
                   </Grid>
                 </StackPanel>
               </Border>
@@ -333,12 +345,13 @@
                   <TextBox x:Name="HighlightBoostKeywordsBox" AcceptsReturn="True"
                            TextWrapping="Wrap" Height="80" FontSize="11"
                            FontFamily="{DynamicResource FontMono}"
+                           Text="{Binding HighlightBoostKeywords, Mode=TwoWay}"
                            Watermark="666&#10;草&#10;神回&#10;Pog" />
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button Content="保存高能参数" Classes="primary-btn" Padding="12,4"
-                            Click="OnSaveHighlight" />
+                            Click="OnSaveHighlight" IsEnabled="{Binding IsNotBusy}" />
                     <Button Content="恢复默认" Classes="ghost-btn" Padding="10,4"
-                            Click="OnResetHighlight" />
+                            Click="OnResetHighlight" IsEnabled="{Binding IsNotBusy}" />
                   </StackPanel>
                   <TextBlock FontSize="10" Foreground="{DynamicResource BrushTextMuted}"
                              TextWrapping="Wrap"
