@@ -213,7 +213,9 @@
                                Foreground="{DynamicResource BrushTextSecondary}"
                                VerticalAlignment="Center" />
                     <ComboBox Grid.Row="0" Grid.Column="1" x:Name="AsrPresetBox" FontSize="12"
-                              HorizontalAlignment="Stretch" SelectionChanged="OnAsrPresetChanged">
+                              HorizontalAlignment="Stretch"
+                              ItemsSource="{Binding Presets}"
+                              SelectedItem="{Binding SelectedPreset, Mode=TwoWay}">
                       <ComboBox.ItemTemplate>
                         <DataTemplate>
                           <TextBlock Text="{Binding DisplayName}" FontSize="12"
@@ -226,38 +228,48 @@
                                Foreground="{DynamicResource BrushTextSecondary}"
                                VerticalAlignment="Center" />
                     <TextBox Grid.Row="1" Grid.Column="1" x:Name="AsrEndpointBox" FontSize="12"
+                             Text="{Binding Endpoint, Mode=TwoWay}"
                              Watermark="https://api.example.com/v1/audio/transcriptions" />
 
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="模型" FontSize="11"
                                Foreground="{DynamicResource BrushTextSecondary}"
                                VerticalAlignment="Center" />
                     <TextBox Grid.Row="2" Grid.Column="1" x:Name="AsrModelBox" FontSize="12"
+                             Text="{Binding Model, Mode=TwoWay}"
                              Watermark="例如 FunAudioLLM/SenseVoiceSmall" />
 
                     <TextBlock Grid.Row="3" Grid.Column="0" Text="语言" FontSize="11"
                                Foreground="{DynamicResource BrushTextSecondary}"
                                VerticalAlignment="Center" />
                     <ComboBox Grid.Row="3" Grid.Column="1" x:Name="AsrLanguageBox" FontSize="12"
-                              HorizontalAlignment="Stretch" />
+                              HorizontalAlignment="Stretch"
+                              ItemsSource="{Binding LanguageNames}"
+                              SelectedIndex="{Binding LanguageIndex, Mode=TwoWay}" />
 
                     <TextBlock Grid.Row="4" Grid.Column="0" Text="API Key" FontSize="11"
                                Foreground="{DynamicResource BrushTextSecondary}"
                                VerticalAlignment="Center" />
                     <TextBox Grid.Row="4" Grid.Column="1" x:Name="AsrApiKeyBox" FontSize="12"
-                             PasswordChar="●" Watermark="粘贴 API Key" />
+                             PasswordChar="●" Text="{Binding ApiKey, Mode=TwoWay}"
+                             Watermark="{Binding ApiKeyWatermark}" />
                   </Grid>
                   <TextBlock x:Name="AsrPresetDescriptionText" FontSize="10"
                              Foreground="{DynamicResource BrushTextMuted}"
-                             TextWrapping="Wrap" />
+                             TextWrapping="Wrap"
+                             Text="{Binding PresetDescription}" />
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button x:Name="AsrSaveButton" Content="保存" Classes="primary-btn"
-                            Padding="14,4" Click="OnSaveAsrSettings" />
-                    <Button x:Name="AsrTestButton" Content="测试连接" Classes="subtle-btn"
-                            Padding="12,4" Click="OnTestAsrConnection" />
+                            Padding="14,4" Click="OnSaveAsrSettings"
+                            IsEnabled="{Binding IsNotBusy}" />
+                    <Button x:Name="AsrTestButton" Classes="subtle-btn"
+                            Padding="12,4" Click="OnTestAsrConnection"
+                            Content="{Binding TestButtonText}"
+                            IsEnabled="{Binding IsNotBusy}" />
                   </StackPanel>
                   <TextBlock x:Name="AsrStatusText" FontSize="10"
                              Foreground="{DynamicResource BrushTextSecondary}"
-                             TextWrapping="Wrap" Text="尚未读取语音识别设置。" />
+                             TextWrapping="Wrap"
+                             Text="{Binding StatusText}" />
                   <Border Background="{DynamicResource BrushBgCanvas}" CornerRadius="6"
                           Padding="10,8">
                     <TextBlock FontSize="10" Foreground="{DynamicResource BrushTextMuted}"

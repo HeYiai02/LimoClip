@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
@@ -9,6 +10,7 @@ using LiveMonitor.Core.Enums;
 using LiveMonitor.Core.Models;
 using LiveMonitor.Danmaku;
 using LiveMonitor.Desktop.Services;
+using LiveMonitor.Desktop.ViewModels;
 using LiveMonitor.Platforms;
 using LiveMonitor.Platforms.Plugins;
 using Button = Avalonia.Controls.Button;
@@ -22,9 +24,10 @@ public partial class SettingsWindow : Window
     private readonly ObservableCollection<DanmakuBlockKeyword> _keywords = new();
     private readonly WebViewLoginService _loginService = new();
 
-    /// <summary>ASR 语言下拉项与持久化 Id 一一对应（下标相同）。</summary>
-    private static readonly string[] AsrLanguageIds = { "auto", "zh", "en", "ja", "ko" };
-    private static readonly string[] AsrLanguageNames = { "自动检测", "中文", "英文", "日文", "韩文" };
+    /// <summary>ASR 子块表单状态与读/存/测试逻辑（生命周期与窗口一致）。</summary>
+    private readonly AsrSettingsViewModel _asrViewModel = null!;
+
+    /// <summary>更新分区与 ASR 分区共用的状态文本语气画刷（ASR 的类别由 ViewModel 给出）。</summary>
     private static readonly IBrush AsrNeutralBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#94A3B8"));
     private static readonly IBrush AsrSuccessBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#22C55E"));
     private static readonly IBrush AsrErrorBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#EF4444"));
@@ -40,12 +43,6 @@ public partial class SettingsWindow : Window
     };
 
     private bool _loading;
-
-    /// <summary>正在把快照回填到 ASR 控件（用于抑制预设下拉的 SelectionChanged 副作用）。</summary>
-    private bool _asrLoading;
-
-    /// <summary>ASR 保存/测试进行中（用于禁用按钮并阻止重入）。</summary>
-    private bool _asrBusy;
 
     /// <summary>最近一次 yt-dlp 更新检查结果（供「下载并更新」复用）。</summary>
     private CliUpdateCheckResult? _ytDlpUpdate;
@@ -68,10 +65,10 @@ public partial class SettingsWindow : Window
     public SettingsWindow(AppServices services) : this()
     {
         _services = services;
+        _asrViewModel = new AsrSettingsViewModel(services.AsrSettings);
+        _asrViewModel.PropertyChanged += OnAsrViewModelPropertyChanged;
+        DataContext = _asrViewModel;
         KeywordList.ItemsSource = _keywords;
-        AsrPresetBox.ItemsSource = AsrSettingsStore.Presets;
-        AsrLanguageBox.ItemsSource = AsrLanguageNames;
-        AsrLanguageBox.SelectedIndex = 0;
         BuildAccountRows();
         Opened += OnOpened;
     }
@@ -164,7 +161,7 @@ public partial class SettingsWindow : Window
                 || !string.Equals(emoteImages, "false", StringComparison.OrdinalIgnoreCase);
 
             await LoadHighlightSettingsAsync();
-            await LoadAsrSettingsAsync();
+            await _asrViewModel.LoadAsync();
             await LoadTwitchProxyAsync();
         }
         catch (Exception ex)
@@ -257,87 +254,24 @@ public partial class SettingsWindow : Window
         }
     }
 
-    /// <summary>读取 ASR 快照并回填表单；Key 只回填 Watermark，绝不回显明文。</summary>
-    private async Task LoadAsrSettingsAsync()
+    /// <summary>ASR 状态语气变化时把 ViewModel 的类别映射为分区状态文本颜色。</summary>
+    private void OnAsrViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        _asrLoading = true;
-        try
-        {
-            var snapshot = await _services.AsrSettings.LoadAsync();
-            AsrPresetBox.SelectedItem = AsrSettingsStore.ResolvePreset(snapshot.PresetId);
-            AsrEndpointBox.Text = snapshot.Endpoint;
-            AsrModelBox.Text = snapshot.Model;
-            int languageIndex = Array.IndexOf(AsrLanguageIds, snapshot.Language);
-            AsrLanguageBox.SelectedIndex = languageIndex >= 0 ? languageIndex : 0;
-            UpdateAsrPresetDescription();
-            UpdateAsrKeyWatermark(snapshot.HasApiKey);
-            SetAsrStatus(
-                snapshot.HasApiKey ? "已读取语音识别设置。" : "尚未配置 API Key，请粘贴后点击「保存」。",
-                AsrStatusKind.Neutral);
-        }
-        catch (Exception ex)
-        {
-            SetAsrStatus($"读取语音识别设置失败：{ex.Message}", AsrStatusKind.Error);
-        }
-        finally
-        {
-            _asrLoading = false;
-        }
-    }
-
-    /// <summary>切换预设时把接口地址与模型填成预设默认值（自定义预设为空，允许手填）。</summary>
-    private void OnAsrPresetChanged(object? sender, SelectionChangedEventArgs e)
-    {
-        if (_asrLoading || AsrPresetBox.SelectedItem is not AsrPreset preset)
+        if (e.PropertyName != nameof(AsrSettingsViewModel.StatusKind))
         {
             return;
         }
 
-        AsrEndpointBox.Text = preset.Endpoint;
-        AsrModelBox.Text = preset.Model;
-        UpdateAsrPresetDescription();
-        if (string.Equals(preset.Id, "custom", StringComparison.OrdinalIgnoreCase))
+        AsrStatusText.Foreground = _asrViewModel.StatusKind switch
         {
-            SetAsrStatus("自定义服务需要填写接口地址和模型（OpenAI 兼容）。", AsrStatusKind.Neutral);
-        }
-        else
-        {
-            SetAsrStatus($"已切换为「{preset.DisplayName}」，点击「保存」后生效。", AsrStatusKind.Neutral);
-        }
+            AsrSettingsStatusKind.Success => AsrSuccessBrush,
+            AsrSettingsStatusKind.Error => AsrErrorBrush,
+            _ => AsrNeutralBrush
+        };
     }
 
     private async void OnSaveAsrSettings(object? sender, RoutedEventArgs e)
-    {
-        if (_asrBusy)
-        {
-            return;
-        }
-
-        var preset = AsrPresetBox.SelectedItem as AsrPreset ?? AsrSettingsStore.ResolvePreset(null);
-        var draft = BuildAsrDraft(preset);
-        if (RejectInvalidCustomPreset(preset, draft))
-        {
-            return;
-        }
-
-        SetAsrBusy(true, "正在保存语音识别设置…");
-        try
-        {
-            await _services.AsrSettings.SaveAsync(draft);
-            // 保存成功后清空明文 Key 并重新读取，刷新 Watermark 与表单内容。
-            AsrApiKeyBox.Text = string.Empty;
-            await LoadAsrSettingsAsync();
-            SetAsrStatus("语音识别设置已保存。", AsrStatusKind.Success);
-        }
-        catch (Exception ex)
-        {
-            SetAsrStatus($"保存语音识别设置失败：{ex.Message}", AsrStatusKind.Error);
-        }
-        finally
-        {
-            SetAsrBusy(false, null);
-        }
-    }
+        => await _asrViewModel.SaveAsync();
 
     /// <summary>读取 Twitch 去广告代理模板（V0.5-G）；留空表示不使用外部代理。</summary>
     private async Task LoadTwitchProxyAsync()
@@ -371,111 +305,7 @@ public partial class SettingsWindow : Window
     }
 
     private async void OnTestAsrConnection(object? sender, RoutedEventArgs e)
-    {
-        if (_asrBusy)
-        {
-            return;
-        }
-
-        var preset = AsrPresetBox.SelectedItem as AsrPreset ?? AsrSettingsStore.ResolvePreset(null);
-        var draft = BuildAsrDraft(preset);
-        if (RejectInvalidCustomPreset(preset, draft))
-        {
-            return;
-        }
-
-        SetAsrBusy(true, "正在测试连接…");
-        AsrTestButton.Content = "正在测试…";
-        try
-        {
-            // 仅用当前表单草稿测试，不写入 AppSettings。
-            var result = await _services.AsrSettings.TestConnectionAsync(draft);
-            SetAsrStatus(result.Message, result.Success ? AsrStatusKind.Success : AsrStatusKind.Error);
-        }
-        catch (Exception ex)
-        {
-            SetAsrStatus($"测试连接失败：{ex.Message}", AsrStatusKind.Error);
-        }
-        finally
-        {
-            AsrTestButton.Content = "测试连接";
-            SetAsrBusy(false, null);
-        }
-    }
-
-    /// <summary>把表单内容拼成保存/测试共用草稿；Key 留空表示保留原值。</summary>
-    private AsrSettingsDraft BuildAsrDraft(AsrPreset preset)
-    {
-        string? plainApiKey = string.IsNullOrWhiteSpace(AsrApiKeyBox.Text) ? null : AsrApiKeyBox.Text;
-        return new AsrSettingsDraft(
-            preset.Id,
-            AsrEndpointBox.Text ?? string.Empty,
-            AsrModelBox.Text ?? string.Empty,
-            GetSelectedAsrLanguageId(),
-            plainApiKey);
-    }
-
-    /// <summary>自定义服务必须填写接口地址与模型；校验失败时返回 true 并已写状态文本。</summary>
-    private bool RejectInvalidCustomPreset(AsrPreset preset, AsrSettingsDraft draft)
-    {
-        if (!string.Equals(preset.Id, "custom", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (!string.IsNullOrWhiteSpace(draft.Endpoint) && !string.IsNullOrWhiteSpace(draft.Model))
-        {
-            return false;
-        }
-
-        SetAsrStatus("自定义服务需要填写接口地址和模型。", AsrStatusKind.Error);
-        return true;
-    }
-
-    private string GetSelectedAsrLanguageId()
-    {
-        int index = AsrLanguageBox.SelectedIndex;
-        return index >= 0 && index < AsrLanguageIds.Length
-            ? AsrLanguageIds[index]
-            : AsrSettingsStore.DefaultLanguage;
-    }
-
-    private void UpdateAsrKeyWatermark(bool hasApiKey)
-    {
-        AsrApiKeyBox.Watermark = hasApiKey ? "已保存，留空保持不变" : "粘贴 API Key";
-    }
-
-    private void UpdateAsrPresetDescription()
-    {
-        if (AsrPresetBox.SelectedItem is AsrPreset preset)
-        {
-            AsrPresetDescriptionText.Text = preset.Description;
-        }
-    }
-
-    /// <summary>更新 ASR 分区状态文本并按语气着色（默认灰、成功绿、失败红）。</summary>
-    private void SetAsrStatus(string text, AsrStatusKind kind)
-    {
-        AsrStatusText.Text = text;
-        AsrStatusText.Foreground = kind switch
-        {
-            AsrStatusKind.Success => AsrSuccessBrush,
-            AsrStatusKind.Error => AsrErrorBrush,
-            _ => AsrNeutralBrush
-        };
-    }
-
-    /// <summary>进入/退出 ASR 保存或测试：切换两个按钮的可用状态，可附带一条状态提示。</summary>
-    private void SetAsrBusy(bool busy, string? statusText)
-    {
-        _asrBusy = busy;
-        AsrSaveButton.IsEnabled = !busy;
-        AsrTestButton.IsEnabled = !busy;
-        if (statusText is not null)
-        {
-            SetAsrStatus(statusText, AsrStatusKind.Neutral);
-        }
-    }
+        => await _asrViewModel.TestConnectionAsync();
 
     private async void OnPlatformLogin(object? sender, RoutedEventArgs e)
     {
@@ -922,14 +752,6 @@ public partial class SettingsWindow : Window
 
     /// <summary>组件与插件更新分区状态文本的语气（决定前景色）。</summary>
     private enum UpdateStatusKind
-    {
-        Neutral,
-        Success,
-        Error
-    }
-
-    /// <summary>ASR 分区状态文本的语气（决定前景色）。</summary>
-    private enum AsrStatusKind
     {
         Neutral,
         Success,
