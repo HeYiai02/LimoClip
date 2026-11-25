@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="LiveMonitor.Desktop.Views.EditRoomWindow"
-        Icon="avares://LiveMonitor.Desktop/Assets/AppIcon.ico"
+        Icon="avares://LimoClip/Assets/AppIcon.ico"
         Title="修改直播间"
         Width="520"
         SizeToContent="Height"

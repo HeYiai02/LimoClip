@@ -5,6 +5,11 @@
     <UseWindowsForms>true</UseWindowsForms>
     <UseWPF>false</UseWPF>
     <RootNamespace>LiveMonitor.Desktop</RootNamespace>
+    <AssemblyName>LimoClip</AssemblyName>
+    <Product>LimoClip</Product>
+    <AssemblyTitle>LimoClip</AssemblyTitle>
+    <Description>多平台直播监控、录制与弹幕高能剪辑工作台</Description>
+    <Company>LimoClip</Company>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>

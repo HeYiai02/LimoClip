@@ -582,7 +582,7 @@ dotnet test tests\LiveMonitor.Desktop.Tests\bin\Debug\net8.0-windows\LiveMonitor
 ### 13.3 打包与发布
 
 - `scripts/fetch-tools.ps1`：下载并校验 ffmpeg/mpv（或复用已下载文件）。
-- `scripts/package-release.ps1 -Version <版本号>`：`dotnet publish` 自包含 win-x64 → 复制 tools/插件 → 生成 `README_FIRST.txt` → 去重 → zip + `SHA256SUMS.txt` → 输出到 `artifacts/`。
+- `scripts/package-release.ps1 -Version <版本号>`：`dotnet publish` 自包含 win-x64 → 复制 tools/插件 → 生成 `README_FIRST.txt` → 去重 → zip + `SHA256SUMS.txt` → 输出到 `artifacts/`。发布包主程序为 `LimoClip.exe`（`AssemblyName=LimoClip`，`ApplicationIcon=Assets/AppIcon.ico`）。
 - `scripts/build-plugins.ps1`：构建四个插件工程 → 用 `PluginSigner` 签名 → 更新 `plugins/providers-manifest.json`。
 - `scripts/sign-plugin.ps1`：签名单个插件并输出清单条目（可带 `-MirrorDownloadUrl`）。
 - 发布产物与 SHA256 记录见 GitHub Releases 页面（仓库不保留 zip）。

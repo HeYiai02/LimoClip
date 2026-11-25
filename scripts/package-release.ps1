@@ -122,7 +122,7 @@ LimoClip $Version ($Runtime 免环境绿色版)
 ==================================================
 
 1. 启动方式
-   请解压至非系统保护目录（如 D:\Tools\LimoClip\），双击运行 LiveMonitor.Desktop.exe。
+   请解压至非系统保护目录（如 D:\Tools\LimoClip\），双击运行 LimoClip.exe。
    若 Windows 弹出 SmartScreen 警告，点击「更多信息」->「仍要运行」即可。
 
 2. 推荐初始配置

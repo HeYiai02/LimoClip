@@ -2,13 +2,13 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "LiveMonitor.Desktop",
+      "name": "LimoClip",
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build-desktop",
       "program": "${workspaceFolder}\\.dotnet\\dotnet.exe",
       "args": [
-        "${workspaceFolder}\\src\\LiveMonitor.Desktop\\bin\\Debug\\net8.0-windows\\LiveMonitor.Desktop.dll"
+        "${workspaceFolder}\\src\\LiveMonitor.Desktop\\bin\\Debug\\net8.0-windows\\LimoClip.dll"
       ],
       "cwd": "${workspaceFolder}\\src\\LiveMonitor.Desktop\\bin\\Debug\\net8.0-windows",
       "env": {

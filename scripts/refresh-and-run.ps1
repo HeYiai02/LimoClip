@@ -51,10 +51,10 @@ function Write-Step([string]$Message) {
 }
 
 try {
-    $running = @(Get-Process -Name 'LiveMonitor.Desktop' -ErrorAction SilentlyContinue)
+    $running = @(Get-Process -Name 'LimoClip' -ErrorAction SilentlyContinue)
     if ($running.Count -gt 0) {
         $pids = ($running | ForEach-Object { $_.Id }) -join ', '
-        Write-Host "LiveMonitor 正在运行（PID: $pids），请先关闭应用再执行本脚本。" -ForegroundColor Yellow
+        Write-Host "LimoClip 正在运行（PID: $pids），请先关闭应用再执行本脚本。" -ForegroundColor Yellow
         Read-Host '按回车退出' | Out-Null
         exit 1
     }
@@ -112,8 +112,8 @@ try {
 }
 
 if (-not $NoLaunch) {
-    Write-Step '[3/3] 启动 LiveMonitor（工作区外副本）...'
-    $exe = Join-Path $dst 'LiveMonitor.Desktop.exe'
+    Write-Step '[3/3] 启动 LimoClip（工作区外副本）...'
+    $exe = Join-Path $dst 'LimoClip.exe'
     if (-not (Test-Path $exe)) {
         Write-Host "找不到程序：$exe" -ForegroundColor Red
         Read-Host '按回车退出' | Out-Null
@@ -122,7 +122,7 @@ if (-not $NoLaunch) {
 
     Start-Process -FilePath $exe -WorkingDirectory $dst
     Start-Sleep -Seconds 2
-    $proc = @(Get-Process -Name 'LiveMonitor.Desktop' -ErrorAction SilentlyContinue)
+    $proc = @(Get-Process -Name 'LimoClip' -ErrorAction SilentlyContinue)
     if ($proc.Count -eq 0) {
         Write-Host '应用启动失败，请把上面的日志发给开发者。' -ForegroundColor Red
         Read-Host '按回车退出' | Out-Null

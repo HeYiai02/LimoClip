@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="LiveMonitor.Desktop.Views.AddRoomWindow"
-        Icon="avares://LiveMonitor.Desktop/Assets/AppIcon.ico"
+        Icon="avares://LimoClip/Assets/AppIcon.ico"
         Title="添加直播间"
         Width="560"
         SizeToContent="Height"

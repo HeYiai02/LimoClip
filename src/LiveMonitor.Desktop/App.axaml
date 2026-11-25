@@ -10,8 +10,8 @@
   <Application.Resources>
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
-        <ResourceInclude Source="avares://LiveMonitor.Desktop/Styles/DesignTokens.axaml" />
-        <ResourceInclude Source="avares://LiveMonitor.Desktop/Styles/Icons.axaml" />
+        <ResourceInclude Source="avares://LimoClip/Styles/DesignTokens.axaml" />
+        <ResourceInclude Source="avares://LimoClip/Styles/Icons.axaml" />
       </ResourceDictionary.MergedDictionaries>
 
       <ControlTheme x:Key="{x:Type dockCtl:ToolChromeControl}" TargetType="dockCtl:ToolChromeControl">
@@ -49,6 +49,6 @@
   <Application.Styles>
     <semi:SemiTheme />
     <dock:DockFluentTheme />
-    <StyleInclude Source="avares://LiveMonitor.Desktop/Styles/Controls.axaml" />
+    <StyleInclude Source="avares://LimoClip/Styles/Controls.axaml" />
   </Application.Styles>
 </Application>
