@@ -2283,47 +2283,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         try
         {
-            // V0.4：剪辑台导出任务与其 Job Object 句柄一并释放（会级联终止残留 ffmpeg）。
             _clipStudio?.Dispose();
             _clipStudio = null;
-            _services.DisposeClipExportResources();
         }
         catch
         {
             // 剪辑台释放失败不阻塞窗口关闭。
         }
 
-        try
-        {
-            // 录制引擎退出前停止所有录制并 flush 弹幕文件；最多等 5 秒，失败不阻塞关闭。
-            Task.Run(async () => await _services.Recordings.DisposeAsync().ConfigureAwait(false))
-                .Wait(TimeSpan.FromSeconds(5));
-        }
-        catch
-        {
-            // 退出时录制收尾失败不阻塞关闭。
-        }
-
-        try
-        {
-            // 弹幕管理器退出前 flush 高能事件落盘；最多等 2 秒，失败不阻塞窗口关闭。
-            Task.Run(async () => await _services.Danmaku.DisposeAsync().ConfigureAwait(false))
-                .Wait(TimeSpan.FromSeconds(2));
-        }
-        catch
-        {
-            // 退出时落盘失败不阻塞关闭。
-        }
-
-        try
-        {
-            // V0.5-B：卸载平台插件并释放插件网络客户端（放在录制/弹幕之后，避免卸载仍在使用的插件类型）。
-            _services.DisposePluginResources();
-        }
-        catch
-        {
-            // 退出时插件卸载失败不阻塞关闭。
-        }
+        // 基础设施单例（剪辑导出/ASR → 录制引擎 → 弹幕 → 插件宿主/HttpClient → SQLite 连接池）
+        // 由组合根按与创建相反的顺序统一释放，ViewModel 只负责视图态退订与播放器控件销毁。
+        // AppServices.Dispose 内部幂等且各步骤不抛异常，不会阻塞窗口关闭。
+        _services.Dispose();
     }
 
     private async Task SelectProfileAsync(LayoutProfile? profile)

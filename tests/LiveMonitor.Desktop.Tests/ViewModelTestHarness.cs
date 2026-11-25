@@ -8,8 +8,8 @@ namespace LiveMonitor.Desktop.Tests;
 
 /// <summary>
 /// ViewModel 基线测试的共享脚手架：为每个测试创建独立临时目录与 SQLite 数据库，
-/// 设置并恢复 <c>LIVEMONITOR_DB</c>，避免测试之间串库；同时统一释放被测 ViewModel，
-/// 让 Dispatcher 计时器与录制引擎后台循环不会残留到后续测试。
+/// 设置并恢复 <c>LIVEMONITOR_DB</c>，避免测试之间串库；同时统一释放被测 ViewModel 与组合根，
+/// 让 Dispatcher 计时器、录制引擎后台循环与 SQLite 连接池不会残留到后续测试。
 /// </summary>
 internal static class ViewModelTestHarness
 {
@@ -140,22 +140,31 @@ internal static class ViewModelTestHarness
             Guid.NewGuid().ToString("N"));
         var databasePath = Path.Combine(tempDirectory, "livemonitor.db");
         var previousDatabase = Environment.GetEnvironmentVariable(DatabaseEnvironmentVariable);
+        AppServices? services = null;
         try
         {
             Directory.CreateDirectory(tempDirectory);
             Environment.SetEnvironmentVariable(DatabaseEnvironmentVariable, databasePath);
-            var services = await AppServices.CreateAsync();
+            services = await AppServices.CreateAsync();
             await body(new ViewModelTestContext(services, tempDirectory, databasePath));
         }
         finally
         {
             Environment.SetEnvironmentVariable(DatabaseEnvironmentVariable, previousDatabase);
+            // 组合根统一释放：RunMainWindowAsync 已经由 ViewModel.Dispose 级联调用过，重复调用幂等；
+            // RunRecordingCenterAsync 只释放了子 ViewModel，这里补上基础设施与 SQLite 连接池。
+            TryDispose(services);
             TryDeleteDirectory(tempDirectory);
         }
     }
 
-    private static void TryDispose(IDisposable disposable)
+    private static void TryDispose(IDisposable? disposable)
     {
+        if (disposable is null)
+        {
+            return;
+        }
+
         try
         {
             disposable.Dispose();

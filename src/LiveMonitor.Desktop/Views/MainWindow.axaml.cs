@@ -351,7 +351,11 @@ public partial class MainWindow : Window
             // 关闭阶段播放器收尾失败不阻塞退出。
         }
 
+        // ViewModel 负责视图态退订并调用 AppServices.Dispose 统一释放基础设施。
         _viewModel?.Dispose();
+
+        // 兜底：启动阶段 ViewModel 构造失败时窗口仍持有 AppServices，同样按组合根释放（幂等）。
+        _services?.Dispose();
     }
 
     /// <summary>

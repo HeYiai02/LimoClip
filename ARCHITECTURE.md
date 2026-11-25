@@ -165,7 +165,7 @@ Program.Main
 9. `AsrSettingsStore` + `OpenAiCompatibleAsrProvider`；
 10. `PlatformPluginHost`（注入平台工厂/弹幕工厂/HttpClient/yt-dlp 路径），注册内置插件并加载已安装外部插件；`PluginUpdateService`、`CliUpdater`。
 
-释放顺序与创建**相反**（先停录制与弹幕，再停播放器，最后释放数据库），由 `MainWindowViewModel.Dispose`（`Window.Closing` 触发）编排；`AppServices` 自身未实现 `IDisposable`，仅提供 `DisposeClipExportResources()` / `DisposePluginResources()` 两个局部释放方法。`LiveMonitorDatabase` 不持有长连接（每次操作 `OpenConnection()` 创建短生命周期连接、由 Microsoft.Data.Sqlite 连接池托管），无需显式关闭。
+释放顺序与创建**相反**，分两层：`Window.Closing` 先调用 `MainWindowViewModel.Dispose` 做视图态退订（停止计时器与弹幕订阅、解除布局跟踪、销毁子 ViewModel 与播放器控件），随后调用 `AppServices.Dispose`（同步 `IDisposable`，幂等）在组合根内统一释放基础设施：剪辑导出 Job Object 与 ASR → 录制引擎（最多等 5 秒停止录制并 flush）→ 弹幕管理器（最多等 2 秒 flush 高能事件）→ 平台插件宿主与插件 `HttpClient` → 最后 `SqliteConnection.ClearAllPools()`。选择同步接口而非 `IAsyncDisposable`，是因为唯一调用点 `Window.Closing` 是同步事件；两个 `IAsyncDisposable` 依赖以有界等待收尾，超时也继续关闭。`LiveMonitorDatabase` 不持有长连接（每次操作 `OpenConnection()` 创建短生命周期连接、由 Microsoft.Data.Sqlite 连接池托管），因此自身无需实现 `IDisposable`，但退出前仍必须清空连接池才能关闭数据库/WAL 文件句柄（便于升级或备份时替换库文件）。
 
 ---
 

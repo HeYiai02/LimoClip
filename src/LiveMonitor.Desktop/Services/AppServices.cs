@@ -9,13 +9,15 @@ using LiveMonitor.Media.Recording;
 using LiveMonitor.Platforms;
 using LiveMonitor.Platforms.CustomStream;
 using LiveMonitor.Platforms.Plugins;
+using Microsoft.Data.Sqlite;
 
 namespace LiveMonitor.Desktop.Services;
 
 /// <summary>
 /// V0.1 的组合根。Desktop 直接 new 出仓储与平台工厂，避免为一个模块引入完整 DI 容器。
+/// 组合根同时接管其创建的基础设施单例的释放，窗口关闭时由 <see cref="Dispose"/> 统一收尾。
 /// </summary>
-public sealed class AppServices
+public sealed class AppServices : IDisposable
 {
     private AppServices(
         LiveMonitorDatabase database,
@@ -135,18 +137,30 @@ public sealed class AppServices
 
     private readonly ProcessJobGuard _clipJobGuard;
     private readonly HttpClient _pluginHttpClient;
-    private bool _clipResourcesDisposed;
-    private bool _pluginResourcesDisposed;
+    private bool _disposed;
 
-    /// <summary>窗口关闭时释放导出/ASR 用的 Job Object 与网络客户端（级联结束残留 ffmpeg）。</summary>
-    public void DisposeClipExportResources()
+    /// <summary>
+    /// 窗口关闭时按「与创建相反」的顺序释放组合根持有的基础设施单例（重复调用无副作用）：
+    /// 剪辑导出任务/ASR → 录制引擎 → 弹幕管理器 → 插件宿主与插件 HttpClient →
+    /// 最后清空 SQLite 连接池释放数据库文件句柄。
+    /// </summary>
+    /// <remarks>
+    /// 选择同步 <see cref="IDisposable"/> 而非 <see cref="IAsyncDisposable"/>：唯一调用点是
+    /// Avalonia 的同步 <c>Window.Closing</c> 事件，无法安全 await；<see cref="RecordingManager"/>
+    /// 与 <see cref="DanmakuManager"/> 两个异步释放对象以有界等待收尾（录制 5 秒、弹幕 2 秒），
+    /// 超时也继续关闭，避免退出卡死。各步骤独立 try/catch，失败不阻塞窗口关闭。
+    /// </remarks>
+    public void Dispose()
     {
-        if (_clipResourcesDisposed)
+        if (_disposed)
         {
             return;
         }
 
-        _clipResourcesDisposed = true;
+        _disposed = true;
+
+        // 1. 先停剪辑导出相关资源：Job Object 级联结束残留 ffmpeg；ASR Provider 在构造时
+        //    接管注入的 HttpClient 与 Job Object 的所有权，交由它自己释放。
         try
         {
             _clipJobGuard.Dispose();
@@ -164,17 +178,14 @@ public sealed class AppServices
         {
             // 同上。
         }
-    }
 
-    /// <summary>窗口关闭时卸载所有平台插件并释放插件网络客户端（应在录制/弹幕释放之后调用，避免卸载仍在使用的插件类型）。</summary>
-    public void DisposePluginResources()
-    {
-        if (_pluginResourcesDisposed)
-        {
-            return;
-        }
+        // 2. 录制引擎：停轮询/自动录制/进行中的录制，最多等 5 秒。
+        DisposeAsyncWithTimeout(() => Recordings.DisposeAsync(), TimeSpan.FromSeconds(5));
 
-        _pluginResourcesDisposed = true;
+        // 3. 弹幕管理器：关闭连接并 flush 待落盘高能事件，最多等 2 秒。
+        DisposeAsyncWithTimeout(() => Danmaku.DisposeAsync(), TimeSpan.FromSeconds(2));
+
+        // 4. 平台插件宿主与插件网络客户端：放在录制/弹幕之后，避免卸载仍在使用的插件类型。
         try
         {
             PluginHost.Dispose();
@@ -191,6 +202,31 @@ public sealed class AppServices
         catch
         {
             // 同上。
+        }
+
+        // 5. 最后清空 SQLite 连接池。LiveMonitorDatabase 不持长连接（短生命周期连接由
+        //    Microsoft.Data.Sqlite 连接池托管），清池后底层数据库/WAL 文件句柄才会关闭，
+        //    升级或备份时才能替换数据库文件。
+        try
+        {
+            SqliteConnection.ClearAllPools();
+        }
+        catch
+        {
+            // 退出阶段清空连接池失败不阻塞关闭。
+        }
+    }
+
+    /// <summary>同步等待异步释放完成；超时后继续关闭（后台任务仍会自行收尾，不阻塞退出）。</summary>
+    private static void DisposeAsyncWithTimeout(Func<ValueTask> disposeAsync, TimeSpan timeout)
+    {
+        try
+        {
+            Task.Run(async () => await disposeAsync().ConfigureAwait(false)).Wait(timeout);
+        }
+        catch
+        {
+            // 退出时收尾失败/超时不阻塞关闭。
         }
     }
 
@@ -310,7 +346,7 @@ public sealed class AppServices
             new DanmakuAssConverter());
 
         // V0.5-A 云端 ASR：专用 HttpClient（长片段上传，超时 10 分钟）与独立 Job Object，
-        // 生命周期由 Provider 自己接管，窗口关闭时随 DisposeClipExportResources 一并释放。
+        // 生命周期由 Provider 自己接管，窗口关闭时随 AppServices.Dispose 一并释放。
         var asrSettings = new AsrSettingsStore(settings);
         var asrCacheDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
