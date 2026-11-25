@@ -1,14 +1,9 @@
-using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Media;
-using LiveMonitor.Core;
-using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Enums;
-using LiveMonitor.Core.Models;
-using LiveMonitor.Danmaku;
 using LiveMonitor.Desktop.Services;
 using LiveMonitor.Desktop.ViewModels;
 using LiveMonitor.Platforms;
@@ -17,10 +12,20 @@ using Color = Avalonia.Media.Color;
 
 namespace LiveMonitor.Desktop.Views;
 
+/// <summary>
+/// 设置窗视图外壳：只承担控件挂载、async void 事件转发、VM 语气到画刷的映射，以及视图/宿主交互。
+/// 各分区表单状态与读/存/校验逻辑已迁入 <see cref="AsrSettingsViewModel"/>、
+/// <see cref="PluginAndToolUpdateViewModel"/> 与 <see cref="GeneralAndDanmakuSettingsViewModel"/>。
+/// <para>
+/// 以下逻辑刻意保留在 View（不抽离），因为它们依赖视觉树、临时窗口或宿主时序而非业务状态：
+/// 平台账号 WebView2 登录/清除（<see cref="WebViewLoginService"/> 承载，需要临时窗口与 Cookie 轮询）、
+/// <see cref="BuildAccountRows"/> 与各平台状态 TextBlock 的动态视觉树操作、设置页导航
+/// （<see cref="OnSettingsNav"/>/<see cref="SelectSettingsPage"/>）、窗口打开/关闭。
+/// </para>
+/// </summary>
 public partial class SettingsWindow : Window
 {
     private readonly AppServices _services = null!;
-    private readonly ObservableCollection<DanmakuBlockKeyword> _keywords = new();
     private readonly WebViewLoginService _loginService = new();
 
     /// <summary>ASR 子块表单状态与读/存/测试逻辑（生命周期与窗口一致）。</summary>
@@ -29,7 +34,10 @@ public partial class SettingsWindow : Window
     /// <summary>组件与更新子块状态与更新动作（生命周期与窗口一致）。</summary>
     private readonly PluginAndToolUpdateViewModel _updateViewModel = null!;
 
-    /// <summary>更新分区与 ASR 分区共用的状态文本语气画刷（语气类别由 ViewModel 给出）。</summary>
+    /// <summary>通用与弹幕子块（屏蔽词/弹幕开关/高能参数/Twitch 代理）状态与读/存逻辑（生命周期与窗口一致）。</summary>
+    private readonly GeneralAndDanmakuSettingsViewModel _generalViewModel = null!;
+
+    /// <summary>各分区状态文本语气共用的画刷（语气类别由 ViewModel 给出，映射保留在 View）。</summary>
     private static readonly IBrush NeutralStatusBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#94A3B8"));
     private static readonly IBrush SuccessStatusBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#22C55E"));
     private static readonly IBrush ErrorStatusBrush = new SolidColorBrush(Avalonia.Media.Color.Parse("#EF4444"));
@@ -43,8 +51,6 @@ public partial class SettingsWindow : Window
         ("highlight", "高能事件检测", "按短窗弹幕密度与基线倍率自动记录打点。"),
         ("updates", "组件与更新", "yt-dlp 与平台插件的版本检查、下载与验签。"),
     };
-
-    private bool _loading;
 
     /// <summary>各平台账号状态文本（按平台索引，登录/清除后统一刷新）。</summary>
     private readonly Dictionary<PlatformType, TextBlock> _accountStatusTexts = new();
@@ -62,14 +68,20 @@ public partial class SettingsWindow : Window
         _asrViewModel.PropertyChanged += OnAsrViewModelPropertyChanged;
         _updateViewModel = new PluginAndToolUpdateViewModel(services.CliUpdater, services.PluginUpdates);
         _updateViewModel.PropertyChanged += OnUpdateViewModelPropertyChanged;
+        _generalViewModel = new GeneralAndDanmakuSettingsViewModel(services.Settings, services.Blocklist);
+        _generalViewModel.PropertyChanged += OnGeneralViewModelPropertyChanged;
         DataContext = _asrViewModel;
         UpdatesPage.DataContext = _updateViewModel;
-        KeywordList.ItemsSource = _keywords;
+        // 通用/弹幕子块的绑定源：弹幕页、高能页，以及账号页里的 Twitch 去广告代理输入框；
+        // 账号行本身由 BuildAccountRows 手工生成，不依赖该 DataContext。
+        DanmakuPage.DataContext = _generalViewModel;
+        HighlightPage.DataContext = _generalViewModel;
+        AccountPage.DataContext = _generalViewModel;
         BuildAccountRows();
         Opened += OnOpened;
     }
 
-    /// <summary>按平台配置表动态生成账号行，避免每加一个平台就改一遍 XAML。</summary>
+    /// <summary>按平台配置表动态生成账号行，避免每加一个平台就改一遍 XAML（保留在 View：纯视觉树操作）。</summary>
     private void BuildAccountRows()
     {
         AccountRowsPanel.Children.Clear();
@@ -133,40 +145,21 @@ public partial class SettingsWindow : Window
         }
     }
 
+    /// <summary>
+    /// 窗口打开后加载各分区设置：账号状态属于视觉树交互，保留在 View；
+    /// 通用/弹幕与 ASR 分区的设置加载分别交给各自 ViewModel 的 LoadAsync。
+    /// </summary>
     private async void OnOpened(object? sender, EventArgs e)
     {
-        _loading = true;
         try
         {
             await LoadAccountStatusAsync();
-            await ReloadKeywordsAsync();
-            var value = await _services.Settings.GetAsync(AppSettingKeys.BlockUnicycleEnabled);
-            UnicycleToggle.IsChecked = string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
-
-            var preview = await _services.Settings.GetAsync(AppSettingKeys.DanmakuPreviewEnabled);
-            DanmakuPreviewToggle.IsChecked = string.Equals(preview, "true", StringComparison.OrdinalIgnoreCase);
-
-            var sticker = await _services.Settings.GetAsync(AppSettingKeys.DanmakuStickerVisible);
-            // 键缺失时默认开启渲染（与代码默认值保持一致）。
-            DanmakuStickerToggle.IsChecked = string.IsNullOrWhiteSpace(sticker)
-                || !string.Equals(sticker, "false", StringComparison.OrdinalIgnoreCase);
-
-            var emoteImages = await _services.Settings.GetAsync(AppSettingKeys.DanmakuEmoteImagesVisible);
-            // 键缺失时默认开启（与 UI 代码默认值保持一致）；只有显式 false 才关闭。
-            DanmakuEmoteImagesToggle.IsChecked = string.IsNullOrWhiteSpace(emoteImages)
-                || !string.Equals(emoteImages, "false", StringComparison.OrdinalIgnoreCase);
-
-            await LoadHighlightSettingsAsync();
+            await _generalViewModel.LoadAsync();
             await _asrViewModel.LoadAsync();
-            await LoadTwitchProxyAsync();
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"读取设置失败：{ex.Message}";
-        }
-        finally
-        {
-            _loading = false;
+            SetStatusBar($"读取设置失败：{ex.Message}", ErrorStatusBrush);
         }
     }
 
@@ -187,69 +180,6 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private async Task ReloadKeywordsAsync()
-    {
-        var keywords = await _services.Blocklist.GetAllAsync();
-        _keywords.Clear();
-        foreach (var keyword in keywords)
-        {
-            _keywords.Add(keyword);
-        }
-    }
-
-    private async Task LoadHighlightSettingsAsync()
-    {
-        var options = await HighlightSettingsStore.LoadAsync(_services.Settings);
-        HighlightShortWindow.Value = options.ShortWindowSeconds;
-        HighlightBaselineWindow.Value = options.BaselineWindowSeconds;
-        HighlightDensityMultiplier.Value = (decimal)options.DensityMultiplier;
-        HighlightMinShortWindowCount.Value = options.MinShortWindowCount;
-        HighlightCooldownSeconds.Value = options.CooldownSeconds;
-        HighlightBoostKeywordsBox.Text = HighlightSettingsStore.FormatBoostKeywords(options.BoostKeywords);
-    }
-
-    private HighlightRuleOptions ReadHighlightOptions()
-    {
-        var defaults = HighlightRuleOptions.Default;
-        return new HighlightRuleOptions
-        {
-            ShortWindowSeconds = (int)(HighlightShortWindow.Value ?? defaults.ShortWindowSeconds),
-            BaselineWindowSeconds = (int)(HighlightBaselineWindow.Value ?? defaults.BaselineWindowSeconds),
-            DensityMultiplier = (double)(HighlightDensityMultiplier.Value ?? (decimal)defaults.DensityMultiplier),
-            MinShortWindowCount = (int)(HighlightMinShortWindowCount.Value ?? defaults.MinShortWindowCount),
-            CooldownSeconds = (int)(HighlightCooldownSeconds.Value ?? defaults.CooldownSeconds),
-            BoostKeywords = HighlightSettingsStore.ParseBoostKeywords(HighlightBoostKeywordsBox.Text)
-        };
-    }
-
-    private async void OnSaveHighlight(object? sender, RoutedEventArgs e)
-    {
-        try
-        {
-            await HighlightSettingsStore.SaveAsync(_services.Settings, ReadHighlightOptions());
-            await LoadHighlightSettingsAsync();
-            StatusText.Text = "高能参数已保存（对运行中的会话即时生效）。";
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"保存高能参数失败：{ex.Message}";
-        }
-    }
-
-    private async void OnResetHighlight(object? sender, RoutedEventArgs e)
-    {
-        try
-        {
-            await HighlightSettingsStore.SaveAsync(_services.Settings, HighlightRuleOptions.Default);
-            await LoadHighlightSettingsAsync();
-            StatusText.Text = "高能参数已恢复默认值。";
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"恢复默认值失败：{ex.Message}";
-        }
-    }
-
     /// <summary>ASR 状态语气变化时把 ViewModel 的类别映射为分区状态文本颜色。</summary>
     private void OnAsrViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -266,42 +196,80 @@ public partial class SettingsWindow : Window
         };
     }
 
+    /// <summary>更新分区状态语气变化时把 ViewModel 的类别映射为分区状态文本颜色。</summary>
+    private void OnUpdateViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PluginAndToolUpdateViewModel.StatusKind))
+        {
+            return;
+        }
+
+        UpdateStatusText.Foreground = _updateViewModel.StatusKind switch
+        {
+            UpdateStatusKind.Success => SuccessStatusBrush,
+            UpdateStatusKind.Error => ErrorStatusBrush,
+            _ => NeutralStatusBrush
+        };
+    }
+
+    /// <summary>
+    /// 通用/弹幕子块状态文案与语气 → 底部共享状态栏：文案随 VM 更新，
+    /// 语气到画刷的映射保留在 View（ViewModel 不引用 Avalonia 画刷）。
+    /// </summary>
+    private void OnGeneralViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(GeneralAndDanmakuSettingsViewModel.StatusText):
+                StatusText.Text = _generalViewModel.StatusText;
+                break;
+            case nameof(GeneralAndDanmakuSettingsViewModel.StatusKind):
+                StatusText.Foreground = _generalViewModel.StatusKind switch
+                {
+                    GeneralAndDanmakuStatusKind.Success => SuccessStatusBrush,
+                    GeneralAndDanmakuStatusKind.Error => ErrorStatusBrush,
+                    _ => NeutralStatusBrush
+                };
+                break;
+        }
+    }
+
     private async void OnSaveAsrSettings(object? sender, RoutedEventArgs e)
         => await _asrViewModel.SaveAsync();
 
-    /// <summary>读取 Twitch 去广告代理模板（V0.5-G）；留空表示不使用外部代理。</summary>
-    private async Task LoadTwitchProxyAsync()
-    {
-        var template = await _services.Settings.GetAsync(AppSettingKeys.TwitchPlaylistProxyUrl);
-        TwitchProxyBox.Text = template ?? string.Empty;
-        ApplyTwitchProxyTemplate(template);
-    }
-
-    private async void OnSaveTwitchProxy(object? sender, RoutedEventArgs e)
-    {
-        var template = TwitchProxyBox.Text?.Trim() ?? string.Empty;
-        try
-        {
-            await _services.Settings.SetAsync(AppSettingKeys.TwitchPlaylistProxyUrl, template);
-            ApplyTwitchProxyTemplate(template);
-            StatusText.Text = string.IsNullOrWhiteSpace(template)
-                ? "已保存：Twitch 仅使用内置原生播放列表（GQL + Usher）。"
-                : "已保存：Twitch 将优先使用自定义去广告代理。";
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"保存 Twitch 代理失败：{ex.Message}";
-        }
-    }
-
-    private static void ApplyTwitchProxyTemplate(string? template)
-    {
-        var normalized = string.IsNullOrWhiteSpace(template) ? null : template.Trim();
-        TwitchAdConfig.PlaylistProxyTemplateProvider = () => normalized;
-    }
-
     private async void OnTestAsrConnection(object? sender, RoutedEventArgs e)
         => await _asrViewModel.TestConnectionAsync();
+
+    // ---- 通用与弹幕子块的事件转发（状态与读/存逻辑在 ViewModel）。----
+
+    private async void OnAddKeyword(object? sender, RoutedEventArgs e)
+        => await _generalViewModel.AddKeywordAsync();
+
+    private async void OnRemoveKeyword(object? sender, RoutedEventArgs e)
+        => await _generalViewModel.RemoveKeywordAsync();
+
+    private async void OnSaveHighlight(object? sender, RoutedEventArgs e)
+        => await _generalViewModel.SaveHighlightAsync();
+
+    private async void OnResetHighlight(object? sender, RoutedEventArgs e)
+        => await _generalViewModel.ResetHighlightAsync();
+
+    private async void OnSaveTwitchProxy(object? sender, RoutedEventArgs e)
+        => await _generalViewModel.SaveTwitchProxyAsync();
+
+    private async void OnUnicycleChanged(object? sender, RoutedEventArgs e)
+        => await _generalViewModel.SetUnicycleEnabledAsync(UnicycleToggle.IsChecked == true);
+
+    private async void OnDanmakuPreviewChanged(object? sender, RoutedEventArgs e)
+        => await _generalViewModel.SetDanmakuPreviewEnabledAsync(DanmakuPreviewToggle.IsChecked == true);
+
+    private async void OnDanmakuStickerChanged(object? sender, RoutedEventArgs e)
+        => await _generalViewModel.SetDanmakuStickerVisibleAsync(DanmakuStickerToggle.IsChecked == true);
+
+    private async void OnDanmakuEmoteImagesChanged(object? sender, RoutedEventArgs e)
+        => await _generalViewModel.SetDanmakuEmoteImagesVisibleAsync(DanmakuEmoteImagesToggle.IsChecked == true);
+
+    // ---- 平台账号登录/清除：保留在 View（WebView2 临时窗口与 Cookie 轮询属宿主交互）。----
 
     private async void OnPlatformLogin(object? sender, RoutedEventArgs e)
     {
@@ -314,23 +282,23 @@ public partial class SettingsWindow : Window
     private async Task LoginAsync(PlatformType platform)
     {
         var displayName = WebViewLoginService.DisplayName(platform);
-        StatusText.Text = $"正在打开 {displayName} 登录窗…";
+        SetStatusBar($"正在打开 {displayName} 登录窗…", NeutralStatusBrush);
         try
         {
             var cookie = await _loginService.LoginAsync(platform);
             if (string.IsNullOrWhiteSpace(cookie))
             {
-                StatusText.Text = "登录窗已关闭，未捕获到登录 Cookie。";
+                SetStatusBar("登录窗已关闭，未捕获到登录 Cookie。", NeutralStatusBrush);
                 return;
             }
 
             await _services.Credentials.SaveAsync(platform, null, cookie);
             await LoadAccountStatusAsync();
-            StatusText.Text = $"{displayName} 登录态已保存（DPAPI）。";
+            SetStatusBar($"{displayName} 登录态已保存（DPAPI）。", NeutralStatusBrush);
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"登录失败：{ex.Message}";
+            SetStatusBar($"登录失败：{ex.Message}", NeutralStatusBrush);
         }
     }
 
@@ -348,154 +316,11 @@ public partial class SettingsWindow : Window
         {
             await _services.Credentials.RemoveAsync(platform);
             await LoadAccountStatusAsync();
-            StatusText.Text = $"{WebViewLoginService.DisplayName(platform)} 登录态已清除。";
+            SetStatusBar($"{WebViewLoginService.DisplayName(platform)} 登录态已清除。", NeutralStatusBrush);
         }
         catch (Exception ex)
         {
-            StatusText.Text = $"清除失败：{ex.Message}";
-        }
-    }
-
-    private async void OnAddKeyword(object? sender, RoutedEventArgs e)
-    {
-        var text = KeywordBox.Text?.Trim();
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return;
-        }
-
-        try
-        {
-            if (await _services.Blocklist.ExistsAsync(text))
-            {
-                StatusText.Text = "这个词已经在屏蔽词库中。";
-                return;
-            }
-
-            var isRegex = KeywordIsRegexCheck.IsChecked == true;
-            await _services.Blocklist.AddAsync(new DanmakuBlockKeyword
-            {
-                Id = Guid.NewGuid(),
-                Keyword = text,
-                IsRegex = isRegex,
-                CreatedAt = DateTime.UtcNow
-            });
-            KeywordBox.Text = string.Empty;
-            KeywordIsRegexCheck.IsChecked = false;
-            await ReloadKeywordsAsync();
-            StatusText.Text = isRegex ? "已添加正则屏蔽词。" : "已添加屏蔽词。";
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"添加失败：{ex.Message}";
-        }
-    }
-
-    private async void OnRemoveKeyword(object? sender, RoutedEventArgs e)
-    {
-        if (KeywordList.SelectedItem is not DanmakuBlockKeyword keyword)
-        {
-            StatusText.Text = "请先选中一个屏蔽词。";
-            return;
-        }
-
-        try
-        {
-            await _services.Blocklist.DeleteAsync(keyword.Id);
-            await ReloadKeywordsAsync();
-            StatusText.Text = "已删除屏蔽词。";
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"删除失败：{ex.Message}";
-        }
-    }
-
-    private async void OnUnicycleChanged(object? sender, RoutedEventArgs e)
-    {
-        if (_loading || _services is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await _services.Settings.SetAsync(
-                AppSettingKeys.BlockUnicycleEnabled,
-                UnicycleToggle.IsChecked == true ? "true" : "false");
-            StatusText.Text = UnicycleToggle.IsChecked == true
-                ? "独轮车自动屏蔽已开启。"
-                : "独轮车自动屏蔽已关闭。";
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"保存开关失败：{ex.Message}";
-        }
-    }
-
-    private async void OnDanmakuPreviewChanged(object? sender, RoutedEventArgs e)
-    {
-        if (_loading || _services is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await _services.Settings.SetAsync(
-                AppSettingKeys.DanmakuPreviewEnabled,
-                DanmakuPreviewToggle.IsChecked == true ? "true" : "false");
-            StatusText.Text = DanmakuPreviewToggle.IsChecked == true
-                ? "监控画面弹幕预览已开启。"
-                : "监控画面弹幕预览已关闭。";
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"保存弹幕预览开关失败：{ex.Message}";
-        }
-    }
-
-    private async void OnDanmakuStickerChanged(object? sender, RoutedEventArgs e)
-    {
-        if (_loading || _services is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await _services.Settings.SetAsync(
-                AppSettingKeys.DanmakuStickerVisible,
-                DanmakuStickerToggle.IsChecked == true ? "true" : "false");
-            StatusText.Text = DanmakuStickerToggle.IsChecked == true
-                ? "纯表情包会渲染为 [表情名] 文本。"
-                : "纯表情包仅参与统计与高能检测，不再渲染。";
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"保存表情包渲染开关失败：{ex.Message}";
-        }
-    }
-
-    private async void OnDanmakuEmoteImagesChanged(object? sender, RoutedEventArgs e)
-    {
-        if (_loading || _services is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await _services.Settings.SetAsync(
-                AppSettingKeys.DanmakuEmoteImagesVisible,
-                DanmakuEmoteImagesToggle.IsChecked == true ? "true" : "false");
-            StatusText.Text = DanmakuEmoteImagesToggle.IsChecked == true
-                ? "表情图片已开启（仅渲染静态帧，未加载成功的表情先显示 [表情名]）。"
-                : "表情图片已关闭，表情按 [表情] 文本显示。";
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"保存表情图片开关失败：{ex.Message}";
+            SetStatusBar($"清除失败：{ex.Message}", NeutralStatusBrush);
         }
     }
 
@@ -525,20 +350,11 @@ public partial class SettingsWindow : Window
         }
     }
 
-    /// <summary>更新分区状态语气变化时把 ViewModel 的类别映射为分区状态文本颜色。</summary>
-    private void OnUpdateViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    /// <summary>底部状态栏：输入文案并把前景色设为对应语气画刷（语气类别由各 ViewModel 给出）。</summary>
+    private void SetStatusBar(string text, IBrush brush)
     {
-        if (e.PropertyName != nameof(PluginAndToolUpdateViewModel.StatusKind))
-        {
-            return;
-        }
-
-        UpdateStatusText.Foreground = _updateViewModel.StatusKind switch
-        {
-            UpdateStatusKind.Success => SuccessStatusBrush,
-            UpdateStatusKind.Error => ErrorStatusBrush,
-            _ => NeutralStatusBrush
-        };
+        StatusText.Text = text;
+        StatusText.Foreground = brush;
     }
 
     private void OnClose(object? sender, RoutedEventArgs e) => Close();
