@@ -4,6 +4,10 @@
     <RootNamespace>LiveMonitor.Media</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <!-- RecordingTargetPoller 是内聚到录制中心的内部实现，其内部接缝仅对媒体测试工程开放。 -->
+    <InternalsVisibleTo Include="LiveMonitor.Media.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\LiveMonitor.Core\LiveMonitor.Core.csproj" />
     <ProjectReference Include="..\LiveMonitor.Danmaku\LiveMonitor.Danmaku.csproj" />
   </ItemGroup>
