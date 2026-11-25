@@ -22,6 +22,11 @@ using DragDropEffects = Avalonia.Input.DragDropEffects;
 
 namespace LiveMonitor.Desktop.Views;
 
+/// <summary>
+/// 主壳视图（code-behind）。只负责 Avalonia 视觉树与窗口交互：Dock/自由画布宿主挂载与切换、
+/// 窗口外壳与沉浸/全屏 chrome、系统对话框（StorageProvider）、指针手势与事件转发。
+/// 业务状态与数据流转在 <see cref="MainWindowViewModel"/> 及更下层服务；边界规则见 ARCHITECTURE.md §10.7。
+/// </summary>
 public partial class MainWindow : Window
 {
     private MainWindowViewModel? _viewModel;
