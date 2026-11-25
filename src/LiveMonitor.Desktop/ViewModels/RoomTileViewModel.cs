@@ -16,7 +16,7 @@ public sealed class RoomTileViewModel : ObservableObject
     private string _stateText = "空窗格";
     private string _detailText = "从左侧双击直播间，或拖入此窗格";
     private bool _isDanmakuVisible;
-    private MpvPlayerView? _playerView;
+    private IWorkspacePlayer? _playerView;
 
     public RoomTileViewModel()
     {
@@ -141,9 +141,9 @@ public sealed class RoomTileViewModel : ObservableObject
         set => SetProperty(ref _isDanmakuVisible, value);
     }
 
-    /// <summary>播放器控件。Dock 序列化必须忽略；方案切换时由 WorkspacePlayerManager 重新挂载。</summary>
+    /// <summary>播放器句柄。Dock 序列化必须忽略；方案切换时由 WorkspacePlayerManager 重新挂载。</summary>
     [JsonIgnore]
-    public MpvPlayerView? PlayerView
+    public IWorkspacePlayer? PlayerView
     {
         get => _playerView;
         set
@@ -151,9 +151,9 @@ public sealed class RoomTileViewModel : ObservableObject
             if (SetProperty(ref _playerView, value))
             {
                 // 播放器底部控制条绑定本窗格的弹幕开关；PlayerView 不参与 Dock 序列化。
-                if (value is not null)
+                if (value?.View is { } view)
                 {
-                    value.DataContext = this;
+                    view.DataContext = this;
                 }
 
                 OnPropertyChanged(nameof(HasPlayer));
