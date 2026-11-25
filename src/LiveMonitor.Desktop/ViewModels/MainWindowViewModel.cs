@@ -40,7 +40,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private LayoutProfile? _loadedProfile;
     private IRootDock? _layout;
     private string _searchText = string.Empty;
-    private string _statusText = "就绪";
     private string _toastText = string.Empty;
     private bool _isToastVisible;
     private CancellationTokenSource? _toastCts;
@@ -67,17 +66,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private RoomTileViewModel? _focusedTile;
     private MpvPlayerView? _focusPlayer;
     private Dictionary<string, bool>? _focusMuteSnapshot;
-    private readonly SystemMetricsService _metrics = new();
     private Dictionary<string, bool>? _masterMuteSnapshot;
     private bool _isMasterMuted;
     private string _groupFilter = "全部";
     private DispatcherTimer? _healthTimer;
-    private readonly HealthSummaryCoordinator _healthCoordinator = new();
-    private string _healthText = "解码正常 (0% 丢帧)";
-    private bool _isHealthWarning;
     private DispatcherTimer? _focusHintTimer;
     private bool _isFocusHintVisible;
-    private bool _isHighlightPanelVisible;
 
     // V0.6：侧栏主播开播状态独立轮询。工作区只覆盖当前打开的房间，
     // 未放入工作区的房间也要能显示直播/未开播，不能一直停在「状态未知」。
@@ -90,8 +84,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isRecordingCenterVisible;
 
-    private int _unicycleBlockedUserCount;
-    private const int MaxHighlightEvents = 200;
+    /// <summary>底部状态栏只读子视图模型；主 VM 在指标 / 健康 / 工作区计数更新处写入，并向窗口转发变更。</summary>
+    public SystemStatusBarViewModel SystemStatus { get; } = new();
+
+    /// <summary>右侧高能事件面板只读子视图模型；主 VM 在事件入库 / 回填 / 清空处写入。</summary>
+    public HighlightFeedViewModel HighlightFeed { get; } = new();
 
     // V0.2 弹幕：订阅所有权放在 ViewModel（不挂视觉树），每个窗格一条引用计数句柄。
     // 同一 (平台, 房间) 由 DanmakuManager 去重，焦点浮层不额外订阅。
@@ -112,6 +109,36 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         _services = services;
         _players = new WorkspacePlayerManager(services);
+
+        // 两个子视图模型对外只读；主 VM 订阅其变更并转发为窗口级 PropertyChanged，
+        // 使既有绑定、代码后置与测试无需改动。转发在子 VM 的原始线程（UI 线程）同步完成。
+        SystemStatus.PropertyChanged += OnSystemStatusPropertyChanged;
+        HighlightFeed.PropertyChanged += OnHighlightFeedPropertyChanged;
+        SystemStatus.UpdateWorkspaceSummary(
+            Rooms.Count,
+            IsHeroLayout,
+            WorkspaceLayoutCoordinator.CountOccupiedPanes(Layout),
+            GridRows,
+            GridColumns);
+    }
+
+    private void OnSystemStatusPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        // 状态栏子 VM 的属性名与主 VM 转发属性同名，直接按名转发。
+        OnPropertyChanged(e.PropertyName);
+    }
+
+    private void OnHighlightFeedPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(HighlightFeedViewModel.IsEmpty):
+                OnPropertyChanged(nameof(IsHighlightEventsEmpty));
+                break;
+            case nameof(HighlightFeedViewModel.IsVisible):
+                OnPropertyChanged(nameof(IsHighlightPanelVisible));
+                break;
+        }
     }
 
     public ObservableCollection<RoomListItemViewModel> Rooms { get; } = new();
@@ -239,27 +266,20 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string HealthText
-    {
-        get => _healthText;
-        private set => SetProperty(ref _healthText, value);
-    }
+    /// <summary>解码健康摘要文案（顶栏健康胶囊与状态栏共用 SystemStatus 的数据）。</summary>
+    public string HealthText => SystemStatus.HealthText;
 
-    public bool IsHealthWarning
-    {
-        get => _isHealthWarning;
-        private set => SetProperty(ref _isHealthWarning, value);
-    }
+    public bool IsHealthWarning => SystemStatus.IsHealthWarning;
 
     /// <summary>V0.2：由 DanmakuManager 推送的累计被拦截用户数。</summary>
-    public string UnicycleBlockedText => WorkspaceLayoutCoordinator.FormatUnicycleBlockedText(_unicycleBlockedUserCount);
+    public string UnicycleBlockedText => SystemStatus.UnicycleBlockedText;
 
     public string StatusText
     {
-        get => _statusText;
+        get => SystemStatus.StatusText;
         private set
         {
-            if (SetProperty(ref _statusText, value))
+            if (SystemStatus.UpdateStatusText(value))
             {
                 ShowToast(value);
             }
@@ -544,7 +564,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _isFocusHintVisible, value);
     }
 
-    public SystemMetricsService Metrics => _metrics;
+    /// <summary>内存 / GPU 指标（由视图在窗口打开时启动采样）。</summary>
+    public SystemMetricsService Metrics => SystemStatus.Metrics;
 
     public bool IsMasterMuted
     {
@@ -572,12 +593,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public string FocusedTitle => _focusedTile?.DisplayTitle ?? string.Empty;
 
-    public string RoomCountText => WorkspaceLayoutCoordinator.FormatRoomCountText(
-        Rooms.Count,
-        IsHeroLayout,
-        WorkspaceLayoutCoordinator.CountOccupiedPanes(Layout),
-        GridRows,
-        GridColumns);
+    /// <summary>主库 / 工作区计数文案（数据在 SystemStatus 子 VM 中）。</summary>
+    public string RoomCountText => SystemStatus.RoomCountText;
 
     /// <summary>工作区当前没有任何已绑定直播间的窗格（空状态引导用）。</summary>
     public bool IsWorkspaceEmpty => WorkspaceLayoutCoordinator.CountOccupiedPanes(Layout) == 0;
@@ -585,7 +602,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     /// <summary>布局/窗格变化后统一刷新状态栏文案与工作区空状态。</summary>
     private void NotifyWorkspaceSummaryChanged()
     {
-        OnPropertyChanged(nameof(RoomCountText));
+        SystemStatus.UpdateWorkspaceSummary(
+            Rooms.Count,
+            IsHeroLayout,
+            WorkspaceLayoutCoordinator.CountOccupiedPanes(Layout),
+            GridRows,
+            GridColumns);
         OnPropertyChanged(nameof(IsWorkspaceEmpty));
         OnPropertyChanged(nameof(ShowDockWorkspace));
     }
@@ -593,14 +615,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     /// <summary>高能事件面板是否展开；只影响主窗口叠加层，不写入方案 / Dock 布局。</summary>
     public bool IsHighlightPanelVisible
     {
-        get => _isHighlightPanelVisible;
-        set => SetProperty(ref _isHighlightPanelVisible, value);
+        get => HighlightFeed.IsVisible;
+        set => HighlightFeed.UpdateIsVisible(value);
     }
 
     /// <summary>高能事件流，最新的在最前面；内存里最多保留 200 条，完整历史在数据库。</summary>
-    public ObservableCollection<HighlightEventItem> HighlightEvents { get; } = new();
+    public ObservableCollection<HighlightEventItem> HighlightEvents => HighlightFeed.Items;
 
-    public bool IsHighlightEventsEmpty => HighlightEvents.Count == 0;
+    public bool IsHighlightEventsEmpty => HighlightFeed.IsEmpty;
 
     /// <summary>更新状态栏「独轮车已拦」用户数（UI 线程或后台线程均可调用）。</summary>
     public void SetUnicycleBlockedUserCount(int count)
@@ -611,14 +633,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var clamped = Math.Max(0, count);
-        if (clamped == _unicycleBlockedUserCount)
-        {
-            return;
-        }
-
-        _unicycleBlockedUserCount = clamped;
-        OnPropertyChanged(nameof(UnicycleBlockedText));
+        SystemStatus.UpdateUnicycleBlockedUserCount(count);
     }
 
     /// <summary>收一条高能事件并插入面板顶部（后台线程安全）。</summary>
@@ -630,33 +645,19 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var item = new HighlightEventItem(highlightEvent, ResolveRoomTitle(highlightEvent.RoomId));
-        HighlightEvents.Insert(0, item);
-        while (HighlightEvents.Count > MaxHighlightEvents)
-        {
-            HighlightEvents.RemoveAt(HighlightEvents.Count - 1);
-        }
-
-        OnPropertyChanged(nameof(IsHighlightEventsEmpty));
+        HighlightFeed.Insert(new HighlightEventItem(highlightEvent, ResolveRoomTitle(highlightEvent.RoomId)));
     }
 
     /// <summary>启动时从数据库回填最近的高能事件（调用方保证按时间倒序）。</summary>
     public void LoadHighlightEvents(IEnumerable<HighlightEvent> highlightEvents)
     {
-        HighlightEvents.Clear();
-        foreach (var highlightEvent in highlightEvents)
-        {
-            HighlightEvents.Add(new HighlightEventItem(highlightEvent, ResolveRoomTitle(highlightEvent.RoomId)));
-        }
-
-        OnPropertyChanged(nameof(IsHighlightEventsEmpty));
+        var items = highlightEvents
+            .Select(highlightEvent => new HighlightEventItem(highlightEvent, ResolveRoomTitle(highlightEvent.RoomId)))
+            .ToList();
+        HighlightFeed.ReplaceAll(items);
     }
 
-    public void ClearHighlightEvents()
-    {
-        HighlightEvents.Clear();
-        OnPropertyChanged(nameof(IsHighlightEventsEmpty));
-    }
+    public void ClearHighlightEvents() => HighlightFeed.Clear();
 
     private string? ResolveRoomTitle(string roomId) =>
         _roomById.Values.FirstOrDefault(room =>
@@ -744,7 +745,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _services.Danmaku.UnicycleBlockedUserCountChanged += SetUnicycleBlockedUserCount;
 
         var recent = await _services.Danmaku
-            .GetRecentHighlightEventsAsync(MaxHighlightEvents, ct)
+            .GetRecentHighlightEventsAsync(HighlightFeedViewModel.MaxItems, ct)
             .ConfigureAwait(true);
         LoadHighlightEvents(recent);
         await ApplyDanmakuMasterSettingAsync(ct).ConfigureAwait(true);
@@ -2174,7 +2175,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         DetachLayoutTracking();
         DisposePlayers(Layout);
         _players.Dispose();
-        _metrics.Dispose();
+        SystemStatus.Dispose();
 
         try
         {
@@ -2519,9 +2520,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 metrics.FramesPerSecond));
         }
 
-        var summary = _healthCoordinator.Update(samples);
-        IsHealthWarning = summary.IsWarning;
-        HealthText = summary.Text;
+        SystemStatus.UpdateHealth(samples);
 
         SyncRoomStatuses();
     }

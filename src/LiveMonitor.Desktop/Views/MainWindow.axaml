@@ -3,7 +3,9 @@
         xmlns:dock="using:Dock.Avalonia.Controls"
         xmlns:views="using:LiveMonitor.Desktop.Views"
         xmlns:controls="using:LiveMonitor.Desktop.Controls"
+        xmlns:vm="using:LiveMonitor.Desktop.ViewModels"
         x:Class="LiveMonitor.Desktop.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
         Icon="avares://LimoClip/Assets/AppIcon.ico"
         Title="LimoClip"
         Width="1440" Height="900"
@@ -313,7 +315,10 @@
 
         <!-- 高能事件悬浮抽屉（不写入 DockLayoutJson） -->
         <Border x:Name="HighlightPanel"
-                IsVisible="{Binding IsHighlightPanelVisible}"
+                x:CompileBindings="True"
+                x:DataType="vm:HighlightFeedViewModel"
+                DataContext="{Binding HighlightFeed}"
+                IsVisible="{Binding IsVisible}"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Stretch"
                 Width="336"
@@ -344,9 +349,9 @@
 
             <Grid>
               <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <ItemsControl ItemsSource="{Binding HighlightEvents}">
+                <ItemsControl ItemsSource="{Binding Items}">
                   <ItemsControl.ItemTemplate>
-                    <DataTemplate>
+                    <DataTemplate x:DataType="vm:HighlightEventItem">
                       <Border Background="{DynamicResource BrushBgSurface}"
                               BorderBrush="{DynamicResource BrushBorderSubtle}"
                               BorderThickness="1"
@@ -376,7 +381,7 @@
                 </ItemsControl>
               </ScrollViewer>
 
-              <StackPanel IsVisible="{Binding IsHighlightEventsEmpty}"
+              <StackPanel IsVisible="{Binding IsEmpty}"
                           HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" Margin="20">
                 <PathIcon Data="{DynamicResource IconSpark}" Width="26" Height="26"
                           Foreground="{DynamicResource BrushTextMuted}" Opacity="0.45" />
@@ -471,6 +476,9 @@
 
     <!-- ==================== 5. 底部状态栏 (28px，等宽数字) ==================== -->
     <Border x:Name="StatusBar" Grid.Row="2" Grid.ColumnSpan="2"
+            x:CompileBindings="True"
+            x:DataType="vm:SystemStatusBarViewModel"
+            DataContext="{Binding SystemStatus}"
             Background="{DynamicResource BrushBgSurface}"
             BorderBrush="{DynamicResource BrushBorderSubtle}"
             BorderThickness="0,1,0,0"
