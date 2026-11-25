@@ -1,10 +1,10 @@
 # LimoClip 架构与模块实现说明
 
 > 本文面向开发者，描述当前代码**如何工作**：解决方案结构、模块边界、关键数据结构与每个模块的具体实现方式。
-> 产品介绍、下载与使用说明见 `README.md`；历史阶段设计文档已归档到 `docs/archive/`（仅用于追溯，不再维护）。
+> 产品介绍、下载与使用说明见 `README.md`；历史阶段设计文档已归档到根目录 `archive/`（仅用于追溯，不再维护）。
 > 运行时以仓库当前代码为准；文中的「模块」均对应 `src/` 下的工程或子目录。
 >
-> 可视化架构图：[静态 SVG](docs/images/architecture.svg) · [可交互版本](https://heyiai02.github.io/LimoClip/architecture.html)（使用 Archify 生成，源 IR 见 `.archify/architecture-limoclip-20261124-1530/candidate.json`）。
+> 可视化架构图：[静态 SVG](docs/images/architecture.svg) · [可交互版本](https://heyiai02.github.io/LimoClip/architecture.html)（使用 Archify 3.3.0 生成，源 IR 见 `docs/architecture.source.json`）。
 
 ---
 
