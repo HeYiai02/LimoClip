@@ -383,6 +383,11 @@ public partial class MainWindow : Window
         RootGrid.RowDefinitions[2].Height =
             overlay || focused || fullscreenShell ? new GridLength(0) : new GridLength(28);
 
+        // 真正的全屏：焦点模式/桌面全屏下把工作区四周的 6px 留白也去掉，画面铺满整屏。
+        WorkspaceHost.Padding = focused || fullscreenShell
+            ? new Thickness(0)
+            : new Thickness(6);
+
         WorkspaceTabButton.Classes.Set("active", !overlay);
         RecordingTabButton.Classes.Set("active", recording);
         ClipTabButton.Classes.Set("active", clipping);

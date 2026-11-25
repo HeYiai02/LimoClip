@@ -99,7 +99,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         new(ReferenceEqualityComparer.Instance);
     private bool _danmakuMasterEnabled = true;
     private bool _danmakuStickersEnabled = true;
-    private bool _danmakuEmoteImagesEnabled;
+    private bool _danmakuEmoteImagesEnabled = true;
     private bool _danmakuReady;
 
     private sealed record DanmakuSubscription(DanmakuSessionHandle Handle, PlatformType Platform, string RoomId);

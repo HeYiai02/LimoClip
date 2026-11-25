@@ -43,7 +43,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
     private RoomTileViewModel? _boundTile;
     private bool _danmakuMasterEnabled = true;
     private bool _danmakuStickersEnabled = true;
-    private bool _danmakuEmoteImagesEnabled;
+    private bool _danmakuEmoteImagesEnabled = true;
 
     private PlayerState _state = PlayerState.Offline;
     private PlayerHealthMetrics _metrics = PlayerHealthMetrics.Empty;
@@ -139,11 +139,11 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
         ToolTip.SetTip(PauseButton, paused ? "继续播放" : "暂停播放");
     }
 
-    public string? RoomTitle
-    {
-        get => TitleText.Text;
-        set => TitleText.Text = string.IsNullOrWhiteSpace(value) ? "未分配房间" : value;
-    }
+    /// <summary>
+    /// 房间/主播名。展示已统一收敛到窗格左上角标题栏，底栏不再重复显示；
+    /// 这里仅保留数据通道（冒烟窗口、焦点浮层等外部设置不丢失）。
+    /// </summary>
+    public string? RoomTitle { get; set; }
 
     public string? QualityLabel
     {

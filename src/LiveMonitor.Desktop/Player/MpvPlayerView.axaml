@@ -78,17 +78,7 @@
                     Spacing="6"
                     VerticalAlignment="Center"
                     ClipToBounds="True">
-          <TextBlock x:Name="TitleText"
-                     Text="未分配房间"
-                     FontSize="11.5"
-                     FontWeight="SemiBold"
-                     Foreground="{DynamicResource BrushTextPrimary}"
-                     TextTrimming="CharacterEllipsis"
-                     VerticalAlignment="Center" />
-          <TextBlock Text="·"
-                     FontSize="10"
-                     Foreground="{DynamicResource BrushTextMuted}"
-                     VerticalAlignment="Center" />
+          <!-- 主播名/窗格编号已在窗格左上角标题栏展示，底栏只保留画质与实测帧率，避免重复。 -->
           <TextBlock x:Name="QualityText"
                      Text="—"
                      Classes="mono"

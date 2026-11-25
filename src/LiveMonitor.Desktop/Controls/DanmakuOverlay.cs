@@ -110,12 +110,11 @@ public sealed class DanmakuOverlay : Control
     public bool ShowStickers { get; set; } = true;
 
     /// <summary>
-    /// 是否把表情渲染成静态图片（V0.2 可选，默认关闭）。
+    /// 是否把表情渲染成静态图片（默认开启；设置页可关闭）。
     /// 关闭时行内表情显示 <c>[doge]</c> 文本、纯大表情显示 <c>[表情名]</c>；
     /// 开启后优先使用图片，未加载成功的表情仍退回文本，不阻塞弹幕出现。
-    /// 多屏时建议保持关闭：图片解码与缓存会额外占用 UI 线程和内存。
     /// </summary>
-    public bool ShowEmoteImages { get; set; }
+    public bool ShowEmoteImages { get; set; } = true;
 
     /// <summary>当前屏幕上的弹幕数（仅诊断用）。</summary>
     public int ActiveCount => _items.Count;

@@ -368,7 +368,7 @@ Program.Main
   - `BilibiliUnicycleFilter`：B 站独轮车识别（同用户高频、复读机式复制弹幕、短文本豁免），命中后仅计数不渲染；
   - `KeywordFilter`：`DanmakuBlockKeywords` 黑名单，支持子串匹配。
 - 高能检测：`SlidingWindowDetector` 以「短窗计数 / 基线窗计数 / 密度倍数 / 最小条数 / 冷却时间 / 加权关键词」判定高能事件，产出 `HighlightEvent`（峰值、基线、倍数、原因、命中词）；`HighlightSettingsStore` 负责参数持久化。
-- 渲染：`DanmakuOverlay` + `DanmakuLaneAllocator`（按时间/高度分配轨道避免重叠）+ `DanmakuRenderTicker`（所有窗格共用一个与合成器 vsync 对齐的帧回调，用 `TopLevel.RequestAnimationFrame` 的时间戳推进滚动，避免 DispatcherTimer 抖动；弹幕空闲时停止循环，带 1s 低频看门狗防止最小化后帧回调丢失导致冻结）；`DanmakuEmoteText` / `DanmakuEmoteImageCache` 处理表情文本与图片缓存（可选开关）。实际更新频率受 Avalonia 渲染循环上限约束（Windows 上默认 `SleepRenderTimer` 固定约 60Hz，`IRenderTimer` 标记为不可由用户实现），因此 120/144/200Hz 显示器上弹幕仍以约 60fps 更新：实测弹幕帧循环与 `Render` 均稳定 60fps、单帧绘制 <0.2ms，循环本身不是瓶颈，高刷屏更顺滑需等 Avalonia 上游支持按显示器刷新率驱动渲染循环。
+- 渲染：`DanmakuOverlay` + `DanmakuLaneAllocator`（按时间/高度分配轨道避免重叠）+ `DanmakuRenderTicker`（所有窗格共用一个与合成器 vsync 对齐的帧回调，用 `TopLevel.RequestAnimationFrame` 的时间戳推进滚动，避免 DispatcherTimer 抖动；弹幕空闲时停止循环，带 1s 低频看门狗防止最小化后帧回调丢失导致冻结）；`DanmakuEmoteText` / `DanmakuEmoteImageCache` 处理表情文本与图片缓存（图片渲染默认开启，设置页可关；下载地址先归一化协议相对 URL `//host/...` 为 https，失败按 60s 冷却重试，避免 B 站协议相对地址导致整场表情退回 `[表情名]` 文本）。实际更新频率受 Avalonia 渲染循环上限约束（Windows 上默认 `SleepRenderTimer` 固定约 60Hz，`IRenderTimer` 标记为不可由用户实现），因此 120/144/200Hz 显示器上弹幕仍以约 60fps 更新：实测弹幕帧循环与 `Render` 均稳定 60fps、单帧绘制 <0.2ms，循环本身不是瓶颈，高刷屏更顺滑需等 Avalonia 上游支持按显示器刷新率驱动渲染循环。
 - 落地：录制时 `DanmakuJsonlRecorder` 逐行写 JSONL（含时间戳与高能标记）；剪辑回放由 `DanmakuJsonlReader` + `DanmakuPlaybackCursor` 按时间轴读取，并支持导出 `.ass` 字幕（`DanmakuAssConverter`）。
 
 ---
@@ -440,7 +440,8 @@ Program.Main
 
 - `MainWindow` 四态：**监控工作区**（默认）、**录制中心**（全屏覆盖层）、**剪辑台**（全屏覆盖层）、**设置窗**（独立窗口）；
 - `ApplyShellLayout()` 统一计算显示状态：`overlay`（录制/剪辑）、`focused`（单窗格全屏）、`fullscreenShell`（桌面级全屏）、侧栏可见性；据此设置顶栏/侧栏/状态栏可见性与 `RootGrid` 行高列宽；
-- **沉浸模式**：焦点模式或桌面全屏下，鼠标空闲 2.5s 自动隐藏各播放器底部控制条、隐藏顶部提示；鼠标/按键活动立即恢复（`_immersiveIdleTimer` + 逐窗格 `SetChromeVisible`）。逐窗格遍历同时覆盖 Dock 与自由画布两个宿主（`Dock` + `FreeformCanvas` 的视觉子树），否则自由布局下控制条不会隐藏；
+- **沉浸模式**：焦点模式或桌面全屏下，鼠标空闲 2.5s 自动隐藏各播放器底部控制条、隐藏顶部提示；鼠标/按键活动立即恢复（`_immersiveIdleTimer` + 逐窗格 `SetChromeVisible`）。逐窗格遍历同时覆盖 Dock 与自由画布两个宿主（`Dock` + `FreeformCanvas` 的视觉子树），否则自由布局下控制条不会隐藏；同时把工作区四周 6px 留白置 0（`WorkspaceHost.Padding`），让画面真正铺满整屏；
+- 播放器底栏只保留画质与实测 fps（如 `1080P · 60fps`），主播名/编号统一由窗格标题栏展示，避免同一信息重复出现；
 - **桌面级全屏**：F11 或顶栏「桌面全屏」按钮；记录进入前的 `WindowState`，进入 `WindowState.FullScreen` 并隐藏外壳，顶部提示仅在鼠标移到屏幕顶部（Y≤90）时出现；Esc 退出（自带 400ms 去抖避免重复触发）；
 - 侧栏：房间库搜索、分组药丸（`WrapPanel` 自动换行 + `ScrollViewer` 限高）、房间条目操作（编辑/删除/双击加入工作区）。
 - 工作区空闲底色：`DesignTokens.axaml` 的 `BrushBgWorkspace`（`#141A26`，与窗格黑底区分）用于工作区 Border 与自由画布；`MainWindow.Resources` 同时覆盖 Dock 主题的 `DockThemeBackgroundBrush`/`DockThemeControlBackgroundBrush`/`DockSurfaceWorkbenchBrush`/`DockSurfacePanelBrush`，保证平铺模式窗格间隙与无窗格区域同样显示该底色。

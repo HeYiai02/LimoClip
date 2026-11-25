@@ -15,17 +15,35 @@ internal static class DanmakuEmoteImageCache
 {
     private const int MaxMemoryEntries = 200;
     private const int DiskCacheMaxFiles = 2_000;
+    /// <summary>失败后允许重试的冷却时间：网络抖动/临时 403 不应让某个表情整场都只显示文本。</summary>
+    private const long FailedRetryMilliseconds = 60_000;
     private static readonly object Gate = new();
     private static readonly Dictionary<string, LinkedListNode<(string Url, Bitmap Bitmap)>> Entries = new(StringComparer.Ordinal);
     private static readonly LinkedList<(string Url, Bitmap Bitmap)> Lru = new();
     private static readonly HashSet<string> Loading = new(StringComparer.Ordinal);
-    private static readonly HashSet<string> Failed = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, long> FailedAt = new(StringComparer.Ordinal);
     private static readonly HttpClient Http = CreateHttpClient();
     private static string? _diskDirectory;
+
+    /// <summary>
+    /// 平台下发的表情地址可能是协议相对 URL（<c>//i0.hdslb.com/...</c>，B 站常见）或带空白。
+    /// 统一补全为 https 绝对地址，否则 HttpClient 会直接抛异常、整场表情都退回文本。
+    /// </summary>
+    private static string NormalizeUrl(string url)
+    {
+        var trimmed = url.Trim();
+        if (trimmed.StartsWith("//", StringComparison.Ordinal))
+        {
+            return "https:" + trimmed;
+        }
+
+        return trimmed;
+    }
 
     /// <summary>命中内存缓存时返回 true；未命中时由调用方退回文本渲染。</summary>
     internal static bool TryGet(string url, out Bitmap? bitmap)
     {
+        url = NormalizeUrl(url);
         lock (Gate)
         {
             if (Entries.TryGetValue(url, out var node))
@@ -41,9 +59,10 @@ internal static class DanmakuEmoteImageCache
         return false;
     }
 
-    /// <summary>发起后台加载；同一 URL 只会加载一次，失败后本进程内不再重试。</summary>
+    /// <summary>发起后台加载；同一 URL 只并发加载一次，失败后冷却 <see cref="FailedRetryMilliseconds"/> 再重试。</summary>
     internal static void Request(string url)
     {
+        url = NormalizeUrl(url);
         if (!Dispatcher.UIThread.CheckAccess())
         {
             Dispatcher.UIThread.Post(() => Request(url));
@@ -52,9 +71,19 @@ internal static class DanmakuEmoteImageCache
 
         lock (Gate)
         {
-            if (Entries.ContainsKey(url) || Loading.Contains(url) || Failed.Contains(url))
+            if (Entries.ContainsKey(url) || Loading.Contains(url))
             {
                 return;
+            }
+
+            if (FailedAt.TryGetValue(url, out var failedAt))
+            {
+                if (Environment.TickCount64 - failedAt < FailedRetryMilliseconds)
+                {
+                    return;
+                }
+
+                FailedAt.Remove(url);
             }
 
             Loading.Add(url);
@@ -162,7 +191,7 @@ internal static class DanmakuEmoteImageCache
         lock (Gate)
         {
             Loading.Remove(url);
-            Failed.Add(url);
+            FailedAt[url] = Environment.TickCount64;
         }
     }
 

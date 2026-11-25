@@ -281,7 +281,7 @@
     </Border>
 
     <!-- ==================== 3. 右侧平铺监控工作区 ==================== -->
-    <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource BrushBgWorkspace}" Padding="6">
+    <Border x:Name="WorkspaceHost" Grid.Row="1" Grid.Column="1" Background="{DynamicResource BrushBgWorkspace}" Padding="6">
       <Grid>
         <dock:DockControl x:Name="Dock" Layout="{Binding Layout}"
                           IsVisible="{Binding ShowDockWorkspace}" />
