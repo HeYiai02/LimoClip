@@ -460,7 +460,7 @@ Program.Main
   - 自适应排布按钮：结构变化走重建（`FitRoomsAsync`），仅比例变化则 `ResetProportions` 原地归位；
   - 主副屏按钮：`ApplyHeroLayoutAsync` → `CreateHeroAndSideColumn` 重建 + 记忆 `IsHeroLayout`（模式文本、底栏房间数展示不同）；
   - 拖拽/分割条变化 → `SetCustomLayout(true)`（`LayoutModeText` 显示「自定义比例 / 主副屏 · 自定义」），保存/恢复快照 `Capture/RestoreCustomLayoutAsync`；
-  - 窗格增删（双击房间、关闭窗格）与 `AppendPaneAsync`；关闭窗格在自由布局/自定义比例下走 `WorkspaceDockBuilder.RemovePane` 从模型中真正移除（不留空窗格，见 §10.6）。
+  - 窗格增删（双击房间、关闭窗格）与 `AppendPaneAsync`；关闭窗格：自由布局删除文档 placement，Dock 宿主（自动/主副屏/自定义）统一整树重建后起播，避免播放器控件被新旧 `ContentPresenter` 同时引用导致闪退（见 §10.4「移出窗格」）。
 
 ### 10.3 播放器与监控
 
@@ -508,7 +508,7 @@ Program.Main
   - `SnapGuidesOverlay`：磁吸参考线 + 落位框 + HUD 浮层（蓝普通线 1.5px / 琥珀虚线中心线 + 端帽，不参与命中测试）。
 - `MainWindowViewModel` 集成：`IsFreeformMode`/`FreeformDocument`/`WorkspaceTiles` 事件；`EnterFreeformMode`/`ToggleFreeformMode`/`ApplyFreeformPreset`/`UpdateFreeformDocument`；保存方案时自由布局写 v2 JSON（`SerializeCurrentLayout`），加载时自动识别并进入自由模式；`一键自适应排布` 自动退出自由模式。
 - 拖拽放入：左侧列表按下拖动（`DataObject` 键 `limoclip/room-id`，移动 >4px 才算拖拽）→ 画布 `DragOver` 实时显示落位框/HUD → 松手：已在画布则 `SetPlacement`，否则 `AddRoomToWorkspaceAsync` 后落到指针处（默认 0.42×0.42 居中并 clamp），并更新自由布局文档。
-- 移出窗格：自由布局删除文档 placement；自定义比例下 `WorkspaceDockBuilder.RemovePane` 从 Dock 模型移除窗格并剪掉空行/多余分割条；`LayoutStructureChanged` 驱动视图刷新，画布模式同步 `SyncFreeformTiles`，不留空窗格。
+- 移出窗格：自由布局删除文档 placement；Dock 宿主（自动适配 / 主副屏 / 自定义比例）统一走「整树重建」：先 `CaptureRoomStates` 保存状态、`DisposePlayers` 解绑并销毁旧播放器、`DetachLayoutTracking`，再按当前模式 `CreateAutoFit` / `CreateHeroAndSideColumn` / `CloneStructure + RemovePane` 生成新树并 `ApplyRebuiltLayoutAsync` 起播，最后 `LayoutStructureChanged` 驱动视图刷新；原因是直接 `RemovePane` 后原地替换 `Dock.Layout` 会让同一个 `MpvPlayerView` 同时被新旧两个 `ContentPresenter` 引用，下一次布局测量抛 `already has a visual parent` 导致白屏后闪退。画布模式同步 `SyncFreeformTiles`，不留空窗格。
 - 宿主切换：Dock 与画布互斥显示（`ShowDockWorkspace = !IsWorkspaceEmpty && !IsFreeformMode`）。播放器控件（`MpvPlayerView`）不能同时被两个 `ContentPresenter` 挂载，切换时先 `DetachWorkspacePlayers()`（停止+解绑旧控件）→ 切换宿主并等一轮布局 → `StartWorkspacePlayersAsync()` 重新创建并起播；Dock 在自由模式下保持 `Layout=null`。
 - 顶栏：`自由布局`（开/关，显示当前模式提示）、`画中画预设`（未进入自由布局时先进入再应用）；状态栏显示「已进入/退出自由布局」「已应用自由布局预设」。方案中的自由布局结构与平铺布局共用 `LayoutProfile`，保存/重启后可恢复。
 

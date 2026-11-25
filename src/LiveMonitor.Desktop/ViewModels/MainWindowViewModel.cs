@@ -1774,33 +1774,122 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var title = tile.DisplayTitle;
-        _players.Stop(tile.PaneId);
-        if (tile.PlayerView is { } player)
+
+        if (IsFreeformMode || Layout is null)
         {
-            tile.PlayerView = null;
-            player.Dispose();
+            _players.Stop(tile.PaneId);
+            if (tile.PlayerView is { } player)
+            {
+                tile.PlayerView = null;
+                player.Dispose();
+            }
+
+            tile.ClearRoom();
+
+            // 自由布局：窗格挂在 FreeformCanvas 上，改 Dock 模型并让画布同步即可，不重建 Dock 宿主。
+            var removedFromModel = WorkspaceDockBuilder.RemovePane(Layout, tile.PaneId);
+            if (removedFromModel)
+            {
+                NotifyWorkspaceTilesChanged();
+                LayoutStructureChanged?.Invoke(this, EventArgs.Empty);
+            }
+
+            if (!IsFreeformMode)
+            {
+                await ReflowAutoAsync(CancellationToken.None).ConfigureAwait(true);
+            }
+
+            SyncDanmakuSubscriptions();
+            IsDirty = true;
+            StatusText = $"已移出 {title}";
+            NotifyWorkspaceSummaryChanged();
+            return;
         }
 
+        // Dock 宿主（自动适配 / 主副屏 / 自定义比例）：
+        // 不能只 RemovePane 后原地换 Dock.Layout —— 旧 ContentPresenter 还没释放子控件，
+        // 新 ContentPresenter 就再次绑定同一个 MpvPlayerView，下一次布局测量会抛
+        // "already has a visual parent" 并导致白屏后闪退。这里复用自适应/主副屏的安全重建路径：
+        // 先保存状态与剩余房间，销毁旧播放器并解绑跟踪，再用全新窗格模型重建整棵树。
+        var keepHero = IsHeroLayout;
+        var keepCustom = IsCustomLayout;
+        var (playbackStates, audioStates) = CaptureRoomStates(Layout);
+        var remainingTiles = WorkspaceDockBuilder.EnumerateTiles(Layout)
+            .Where(candidate => candidate.HasRoom && !ReferenceEquals(candidate, tile))
+            .ToList();
+        var rooms = remainingTiles
+            .Select(candidate => _roomById.GetValueOrDefault(candidate.LiveRoomId))
+            .Where(room => room is not null)
+            .Select(room => room!)
+            .ToList();
+
+        ExitFocus();
+        DisposePlayers(Layout);
+        DetachLayoutTracking();
         tile.ClearRoom();
 
-        // 自由布局/自定义比例：从 Dock 模型里真正移除该窗格，避免留下空窗格；
-        // 自动模式仍走重排，保证格数随房间数收缩。
-        var removedFromModel = WorkspaceDockBuilder.RemovePane(Layout, tile.PaneId);
-        if (removedFromModel)
+        IRootDock rebuilt;
+        if (rooms.Count == 0)
         {
-            NotifyWorkspaceTilesChanged();
-            LayoutStructureChanged?.Invoke(this, EventArgs.Empty);
+            rebuilt = _dockBuilder.CreateAutoFit(0, _workspaceAspect, paneId => CreateRebuiltTile(paneId, null, playbackStates));
+            keepHero = false;
+            keepCustom = false;
+        }
+        else if (keepHero)
+        {
+            var index = 0;
+            rebuilt = _dockBuilder.CreateHeroAndSideColumn(rooms.Count, paneId =>
+            {
+                var room = index < rooms.Count ? rooms[index++] : null;
+                return CreateRebuiltTile(paneId, room, playbackStates);
+            });
+            keepHero = rooms.Count > 2;
+        }
+        else if (keepCustom)
+        {
+            // 自定义比例：克隆现有结构后删掉目标窗格，保留其余比例与拆分行列。
+            var tileByPaneId = remainingTiles.ToDictionary(candidate => candidate.PaneId, StringComparer.Ordinal);
+            rebuilt = _dockBuilder.CloneStructure(Layout, paneId =>
+            {
+                var old = tileByPaneId.GetValueOrDefault(paneId);
+                var room = old is null ? null : _roomById.GetValueOrDefault(old.LiveRoomId);
+                return CreateRebuiltTile(paneId, room, playbackStates);
+            });
+
+            if (!WorkspaceDockBuilder.RemovePane(rebuilt, tile.PaneId))
+            {
+                // 结构异常时退回自动适配，保证仍然能安全移除。
+                var index = 0;
+                rebuilt = _dockBuilder.CreateAutoFit(rooms.Count, _workspaceAspect, paneId =>
+                {
+                    var room = index < rooms.Count ? rooms[index++] : null;
+                    return CreateRebuiltTile(paneId, room, playbackStates);
+                });
+                keepCustom = false;
+            }
+        }
+        else
+        {
+            var index = 0;
+            rebuilt = _dockBuilder.CreateAutoFit(rooms.Count, _workspaceAspect, paneId =>
+            {
+                var room = index < rooms.Count ? rooms[index++] : null;
+                return CreateRebuiltTile(paneId, room, playbackStates);
+            });
         }
 
-        if (!IsCustomLayout && !IsFreeformMode)
-        {
-            await ReflowAutoAsync(CancellationToken.None).ConfigureAwait(true);
-        }
+        var status = keepCustom && rooms.Count > 0
+            ? $"已移出 {title}（保留自定义比例）"
+            : $"已移出 {title}";
 
-        SyncDanmakuSubscriptions();
-        IsDirty = true;
-        StatusText = $"已移出 {title}";
-        NotifyWorkspaceSummaryChanged();
+        await ApplyRebuiltLayoutAsync(
+            rebuilt,
+            audioStates,
+            status,
+            startPlayback: true,
+            isHero: keepHero,
+            ct: CancellationToken.None,
+            customLayout: keepCustom).ConfigureAwait(true);
     }
 
     /// <summary>自动模式下，房间被删除/移出后立即按剩余房间重排；自定义比例保持原结构。</summary>
@@ -1946,7 +2035,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         string status,
         bool startPlayback,
         bool isHero,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool customLayout = false)
     {
         _suppressLayoutTracking = true;
         _dockBuilder.InitLayout(layout);
@@ -1955,7 +2045,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         GridRows = dimensions.Rows;
         GridColumns = dimensions.Columns;
         SetHeroLayout(isHero);
-        SetCustomLayout(false);
+        SetCustomLayout(customLayout);
         IsDirty = true;
         _suppressLayoutTracking = false;
         AttachLayoutTracking(layout);
