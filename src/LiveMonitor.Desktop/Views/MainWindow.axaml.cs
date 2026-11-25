@@ -1,4 +1,4 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
@@ -458,7 +458,10 @@ public partial class MainWindow : Window
     /// </summary>
     private void SetPlayerControlBarsVisible(bool visible)
     {
-        var players = Dock.GetVisualDescendants().OfType<Player.MpvPlayerView>().ToList();
+        // 平铺模式窗格在 Dock 视觉树里，自由布局模式窗格在 FreeformCanvas 里，两个宿主都要处理。
+        var players = Dock.GetVisualDescendants()
+            .OfType<Player.MpvPlayerView>()
+            .Concat(FreeformCanvas.GetVisualDescendants().OfType<Player.MpvPlayerView>());
         foreach (var player in players)
         {
             player.SetChromeVisible(visible);

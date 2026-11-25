@@ -1094,14 +1094,6 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
                 hwdec,
                 DateTimeOffset.Now);
 
-            // container-fps 是解码器实际收到的源帧率；读不到时只报硬解/软解，不瞎猜。
-            HealthText.Text = fps > 0
-                ? (hardware ? $"硬解 · 源{fps:0}fps" : $"软解 · 源{fps:0}fps")
-                : (hardware ? "硬解" : "软解");
-            HealthText.Foreground = hardware
-                ? new SolidColorBrush(Avalonia.Media.Color.Parse("#5BD68A"))
-                : new SolidColorBrush(Avalonia.Media.Color.Parse("#E0B15C"));
-
             UpdateQualityFps(fps);
         }
         catch
@@ -1181,22 +1173,14 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
             _ => string.Empty,
         };
 
-        HealthBadge.IsVisible = state == PlayerState.Playing;
-        if (state == PlayerState.Loading)
-        {
-            HealthText.Text = "连接中";
-            HealthText.Foreground = new SolidColorBrush(Avalonia.Media.Color.Parse("#7C8596"));
-        }
     }
 
     /// <summary>
-    /// 沉浸模式（桌面全屏 / 焦点模式）下由主窗口控制底部控制条与右上角状态角标的显隐；
-    /// 恢复显示时按当前播放状态重新决定角标是否可见。
+    /// 沉浸模式（桌面全屏 / 焦点模式）下由主窗口控制底部控制条的显隐。
     /// </summary>
     public void SetChromeVisible(bool visible)
     {
         ControlBar.IsVisible = visible;
-        HealthBadge.IsVisible = visible && _state == PlayerState.Playing;
     }
 
     /// <summary>

@@ -193,18 +193,5 @@
       </Grid>
     </Border>
 
-    <Border x:Name="HealthBadge"
-            HorizontalAlignment="Right"
-            VerticalAlignment="Top"
-            Margin="0,8,66,0"
-            Padding="6,2"
-            CornerRadius="4"
-            Background="#A6070A10">
-      <TextBlock x:Name="HealthText"
-                 Text="等待"
-                 Classes="mono"
-                 FontSize="9.5"
-                 Foreground="{DynamicResource BrushTextMuted}" />
-    </Border>
   </Grid>
 </UserControl>
