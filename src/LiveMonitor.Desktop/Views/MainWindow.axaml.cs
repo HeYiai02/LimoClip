@@ -609,6 +609,8 @@ public partial class MainWindow : Window
             }
 
             FreeformCanvas.SetPlacement(tile.PaneId, e.Rect);
+            // 新拖入的窗格必须立刻置顶：否则它与背景大窗同层时，左键/右键会命中大窗。
+            FreeformCanvas.BringToFront(tile.PaneId);
             _viewModel.UpdateFreeformDocument(FreeformCanvas.CaptureDocument());
             _viewModel.SetStatus($"已把「{tile.DisplayTitle}」放到指定位置");
         }

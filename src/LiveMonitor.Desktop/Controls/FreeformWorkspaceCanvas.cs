@@ -1,4 +1,4 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
@@ -135,6 +135,11 @@ public sealed class FreeformWorkspaceCanvas : Panel
             if (_childByPaneId.TryGetValue(tile.PaneId, out var existing))
             {
                 existing.Content = tile;
+                if (_placements.TryGetValue(tile.PaneId, out var existingPlacement))
+                {
+                    existing.ZIndex = existingPlacement.EffectiveZIndex;
+                }
+
                 continue;
             }
 
@@ -153,7 +158,12 @@ public sealed class FreeformWorkspaceCanvas : Panel
                 var rect = index < autoRects.Count
                     ? autoRects[index]
                     : FreeformLayoutPresets.DefaultLanding(index, tile.PaneId).ToRect();
-                placement = FreeformTilePlacement.Create(tile.PaneId, rect, zIndex: index + 1);
+                // 新窗格必须拿到唯一的普通层级：否则与背景大窗同层时，
+                // 视觉上小窗在上（后加入），命中判定却可能反向选中大窗。
+                placement = FreeformTilePlacement.Create(
+                    tile.PaneId,
+                    rect,
+                    zIndex: FreeformPaneHitTest.NextNormalZIndex(_placements.Values));
                 _placements[tile.PaneId] = placement;
             }
 
@@ -161,6 +171,8 @@ public sealed class FreeformWorkspaceCanvas : Panel
         }
 
         _overlay.ZIndex = 9999;
+        // 历史布局文档可能留下重复层级：统一压成唯一序列，保证渲染顺序与命中顺序一致。
+        NormalizeZIndexes();
         InvalidateMeasure();
         InvalidateArrange();
         InvalidateVisual();
@@ -179,18 +191,20 @@ public sealed class FreeformWorkspaceCanvas : Panel
         {
             var placement = document.Tiles.FirstOrDefault(item => string.Equals(item.PaneId, paneId, StringComparison.Ordinal));
             var rect = placement?.ToRect() ?? FreeformLayoutPresets.DefaultLanding(index, paneId).ToRect();
-            var target = placement ?? FreeformTilePlacement.Create(paneId, rect);
+            // 文档里缺失的窗格（例如刚开始录制后拖入的新窗格）不能用默认 ZIndex=1 兜底，
+            // 否则会与铺满画布的背景大窗同层，命中时被大窗抢走。
+            var target = placement ?? FreeformTilePlacement.Create(
+                paneId,
+                rect,
+                zIndex: FreeformPaneHitTest.NextNormalZIndex(_placements.Values));
             target.PaneId = paneId;
             target.SetRect(rect);
             _placements[paneId] = target;
-            if (_childByPaneId.TryGetValue(paneId, out var child))
-            {
-                child.ZIndex = target.EffectiveZIndex;
-            }
-
             index++;
         }
 
+        // 旧文档中可能出现重复层级：归一化后再同步到子项 ZIndex。
+        NormalizeZIndexes();
         _isFirstArrange = false;
         InvalidateMeasure();
         InvalidateArrange();
@@ -557,26 +571,29 @@ public sealed class FreeformWorkspaceCanvas : Panel
 
     private string? FindTopmostPaneAt(Point position)
     {
-        var width = Bounds.Width;
-        var height = Bounds.Height;
-        if (width <= 0 || height <= 0)
-        {
-            return null;
-        }
-
-        foreach (var placement in _placements.Values.OrderByDescending(item => item.EffectiveZIndex))
-        {
-            var (x, y, w, h) = placement.ToRect().ToPixels(width, height);
-            if (position.X >= x && position.X <= x + w && position.Y >= y && position.Y <= y + h)
-            {
-                return placement.PaneId;
-            }
-        }
-
-        return null;
+        var placement = FreeformPaneHitTest.FindTopmost(
+            _placements.Values,
+            VisualOrderOf,
+            Bounds.Width,
+            Bounds.Height,
+            position.X,
+            position.Y);
+        return placement?.PaneId;
     }
 
-    private void BringToFront(string paneId)
+    /// <summary>子项在画布 Children 中的加入顺序（越大越晚加入，渲染时越靠上）。</summary>
+    private int VisualOrderOf(string paneId) =>
+        _childByPaneId.TryGetValue(paneId, out var child) ? Children.IndexOf(child) : -1;
+
+    /// <summary>把窗格 ZIndex 归一化为唯一序列并同步到子项。</summary>
+    private void NormalizeZIndexes()
+    {
+        FreeformPaneHitTest.NormalizeZIndexes(_placements.Values, VisualOrderOf);
+        ApplyZIndexes();
+    }
+
+    /// <summary>把指定窗格提到所在层级组的最上层。</summary>
+    public void BringToFront(string paneId)
     {
         if (!_placements.TryGetValue(paneId, out var placement))
         {
@@ -590,7 +607,7 @@ public sealed class FreeformWorkspaceCanvas : Panel
             .DefaultIfEmpty(pinned ? 0 : 1)
             .Max();
         placement.ZIndex = pinned ? Math.Min(PinnedZMax - (int)PinnedZBase, maxZ + 1) : Math.Min(NormalZMax, maxZ + 1);
-        ApplyZIndexes();
+        NormalizeZIndexes();
     }
 
     private void SendToBack(string paneId)
@@ -604,10 +621,10 @@ public sealed class FreeformWorkspaceCanvas : Panel
         var minZ = _placements.Values
             .Where(item => item.IsPinned == pinned && !string.Equals(item.PaneId, paneId, StringComparison.Ordinal))
             .Select(item => item.ZIndex)
-            .DefaultIfEmpty(pinned ? 1 : 1)
+            .DefaultIfEmpty(1)
             .Min();
         placement.ZIndex = Math.Max(1, minZ - 1);
-        ApplyZIndexes();
+        NormalizeZIndexes();
     }
 
     private void ApplyZIndexes()
@@ -657,7 +674,7 @@ public sealed class FreeformWorkspaceCanvas : Panel
         var placement = _placements[paneId];
         placement.IsPinned = !placement.IsPinned;
         placement.ZIndex = placement.IsPinned ? 1 : Math.Min(NormalZMax, placement.ZIndex);
-        ApplyZIndexes();
+        NormalizeZIndexes();
         InvalidateArrange();
         LayoutChanged?.Invoke(this, EventArgs.Empty);
     }
