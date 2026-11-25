@@ -30,7 +30,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | WebView 登录 | WebView2（临时用户目录，登录后采集 Cookie） |
 | 平台解析 | 各家 HTTP API + Jint（斗鱼签名、抖音 sign.js）；yt-dlp 作为 YouTube/Twitch 兜底 |
 | 插件签名 | Ed25519（BouncyCastle）+ SHA256 清单校验 |
-| 测试 | xUnit（6 个测试工程，当前共 940 个用例） |
+| 测试 | xUnit（6 个测试工程，当前共 983 个用例） |
 
 ### 平台支持矩阵
 
@@ -383,11 +383,11 @@ Program.Main
 | --- | --- |
 | `IFullStreamRecorder` | 一个实例录一段；事件：首帧锚点、进度、退出；`StartAsync(quality, outputMkvPath, ct)`、`StopGracefullyAsync(timeout)` |
 | `FfmpegFullRecorder` | 启动/管理单个 ffmpeg 进程：参数构造、`-progress pipe:1` 解析进度与锚点、`stderr` 环形尾缓存（4000 字）、stdin 写 `q` 优雅停录（超时 Kill 进程树） |
-| `FfmpegArgumentBuilder` | 构造参数：`-rw_timeout 15000000`、UA、`-headers`（Referer/Cookie）、仅 https 的 `-ca_file`、可选第二路音频输入（`-map 0:v:0 -map 1:a:0`）、`-c copy -f matroska -progress pipe:1 -y`；刻意不带 `-reconnect`（见下） |
+| `FfmpegArgumentBuilder` | 构造参数：`-rw_timeout 15000000`、UA、`-headers`（Referer/Cookie）、仅 https 的 `-ca_file`、可选第二路音频输入（`-map 0:v:0 -map 1:a:0`）、录制输出前追加 `-cluster_time_limit 2000`（细粒度 cluster，录制中 MKV 尾部可被实时读取，支撑边录边剪）、`-c copy -f matroska -progress pipe:1 -y`；刻意不带 `-reconnect`（见下） |
 | `ProcessJobGuard` | Windows Job Object，异常退出时确保 ffmpeg 子进程一并结束，避免孤儿进程 |
 | `RecordingDirectoryGuard` | 开录前目录可写预检（探针文件）、ffmpeg 失败原因中文翻译（权限/路径/编码器缺失等） |
 | `RecordingFileNaming` | 输出文件名规则：`{开始时间}_{房间显示名}_{平台房间号}.mkv`（非法字符替换、长度限制） |
-| `RecordingManager` | 录制状态机与调度：自动录制轮询、会话持久化、失败重试、卡死检测、分段续录、合并收尾、历史删除 |
+| `RecordingManager` | 录制状态机与调度：自动录制轮询、会话持久化、失败重试、卡死检测、分段续录、合并收尾、历史删除；实现 `ILiveRecordingMonitor`——`GetLiveRecordings()` / `TryGetLiveRecording(sessionId, out LiveRecordingInfo)` 在锁内复制活动会话并 `BuildLiveRecordingInfo`（实时已完成时长、当前分片路径/分片号、累计时长、文件大小、弹幕数、高能数），供剪辑台边录边剪轮询 |
 | `SegmentMerger` / `SegmentOverlapPlanner` | 分段录制后的合并与重叠裁剪 |
 | `DanmakuJsonlRecorder` | 录制期间弹幕落盘（JSONL） |
 | `RecordingHighlightTracker` | 录制期间把高能事件关联到会话（弹幕过滤 + 高能检测的录制侧桥接） |
@@ -424,12 +424,23 @@ Program.Main
 - `DanmakuAssConverter`：把区段内的弹幕/礼物转成 ASS 字幕（颜色、位置、大小、时间轴偏移）；
 - `DanmakuJsonlReader` / `DanmakuPlaybackCursor`：剪辑台预览时按时间轴回放录制时落盘的弹幕。
 
+**边录边剪（V0.7.1）**
+
+录制尚未结束时即可在剪辑台打开「🔴 录制中」场次，对已落盘部分预览、定位、选区与语音识别：
+
+- `ILiveRecordingMonitor`（Core 契约）：`RecordingManager` 实现，提供活动会话的实时信息（见 §9.1）；`LiveRecordingInfo` 含实时已录时长、当前 `.partNNN.mkv` 路径、弹幕/高能计数。
+- `LiveWaveformDeltaExtractor`：按「上次已分析到的秒数 → 安全上界」向 ffmpeg 追加一次增量解码（`-ss/-t` + 4kHz 单声道 s16le 输出到 stdout），只产出新增区间的峰值桶；无临时文件；取消时杀整个进程树；分片尾部数据不完整或 `-ss` 落在关键帧之后时按「本次无数据」降级，下次继续。
+- `DanmakuJsonlReader.ReadIncrementalAsync(path, fromByteOffset)`：`FileShare.ReadWrite` 打开正在写的 JSONL，按字节偏移增量读取；只在遇到完整换行时消费并推进偏移（半行留待下次），文件被截断/重建（offset > 长度）时从头重读；单次读取上限 16MB。
+- `ClipStudioViewModel` live 模式：选中录制中场次后进入「本地预览 + 实时刷新」——10s 定时 `TryGetLiveRecording` 同步进度；安全可剪上界始终钳在「已完成时长 − 安全余量」（分片尾部 cluster 可能尚未写完）；增量波形按 0.5s 桶追加、增量弹幕按偏移追加；`F5`/「同步最新进度」立即刷新并重载播放器；录制结束（`SessionCompleted`）自动切换为完整 MKV（保留当前选区与播放位置）。
+- `LocalClipPlayerView`：live 模式下对 mpv 设 `force-seekable=yes`，`ReloadAtPositionAsync` 以 `loadfile replace` + 精确 seek 重载已写文件；位置推进钳到安全上界（`safe − 100ms`），避免 seek 到尚未 flush 的尾部。
+
 ### 9.3 云端 ASR（Asr/）
 
 - 契约：`IAsrProvider.TranscribeAsync(audioPath/bytes, options, ct)` → `AsrTranscriptResult(Text, Segments, Language, Provider…)`。
 - 实现 `OpenAiCompatibleAsrProvider`：调用 OpenAI 兼容 `POST /v1/audio/transcriptions`（multipart：`file` + `model` + `language` + `response_format=json`），解析 `segments[]`（起止时间 + 文本）与 `text` 两种返回；
 - 音频提取：FFmpeg 将源 MKV 按区间抽 16kHz 单声道 MP3 后上传；超长区间限制 15 分钟；
 - 缓存：按「源文件 + 区间 + 模型/接口」的 SHA256 缓存转写结果（本地文件），避免重复计费；
+- 逐句拆分（V0.7.1）：接口只返回整段 `text`（无 `segments[]`）时，`SplitIntoSentences` 按硬标点（`。！？!?；;…` 与换行，`……` 合并不断句）与软标点（`，,、：:`，累计 ≥48 字才断）拆句，无标点时每 48 字强制切块；各句起止时间按字符数比例分配到参考区间（`Relative*` 相对片段起点），最后一句收到区间末尾；旧缓存（只有 1 段）在读取时由 `UpgradeCachedResult` 原地补拆，无需重新请求；
 - 错误：HTTP 错误体解析为中文提示（鉴权失败/额度不足/模型不存在/网络超时等）；API Key 由 Desktop 注入（Media 不直接读库）。
 
 ---
@@ -484,8 +495,8 @@ Program.Main
 ### 10.4 录制中心 / 剪辑台 / 设置
 
 - `AddRoomWindow` / `EditRoomWindow`：普通平台按链接识别平台；粘贴清流直链（或勾选「作为自定义清流添加」）时按清流保存，可填 Referer/User-Agent；编辑清流时可直接替换播放地址（保留槽位与录制配置）并触发当前窗格重新拉流。
-- `RecordingCenterViewModel`：目标列表（自动录制开关、目录修改、立即开录/停止、当前录制进度）、历史列表（去剪辑、打开文件夹、删除；删除会同时删视频与 jsonl）。清流目标不显示「自动录制」开关。
-- `ClipStudioViewModel`：录制场次选择 / 打开本地文件、片段播放（`LocalClipPlayerView`）、时间轴（波形+弹幕密度+选区）、导出面板（模式/编码器/目录/文件名/进度）、语音识别面板（转写当前选区、逐句跳转播放、复制文本）。
+- `RecordingCenterViewModel`：目标列表（自动录制开关、目录修改、立即开录/停止、当前录制进度）、历史列表（去剪辑、打开文件夹、删除；删除会同时删视频与 jsonl）。清流目标不显示「自动录制」开关。目标排序（V0.7.1）：`RecordingTargetOrdering.Rank` 按「正在录制 (0) → 直播中 (1) → 其他 (2)」分组，组内再按显示序号稳定排序，保证正在录制/直播中的房间永远排在最前且同序号相对顺序不变。
+- `ClipStudioViewModel`：录制场次选择 / 打开本地文件、片段播放（`LocalClipPlayerView`）、时间轴（波形+弹幕密度+选区）、导出面板（模式/编码器/目录/文件名/进度）、语音识别面板（转写当前选区、逐句跳转播放、复制文本）。场次下拉顶部追加「🔴 录制中」实时会话（V0.7.1），选中即进入边录边剪模式（安全区、增量波形/弹幕、F5 同步最新进度、录制结束自动切换完整文件，见 §9.2）。
 - `SettingsWindow`：平台账号（六平台 WebView2 登录/清除，状态显示 Cookie 是否绑定）、弹幕与高能参数、录制默认目录与轮询间隔、ASR 预设/Key、Twitch 去广告代理、组件与插件更新（yt-dlp/插件检查与安装）。
 - `WebViewLoginService` + `PlatformLoginProfiles`：按平台加载登录页（Twitch/YouTube 等内存态页），底部「我已登录，采集 Cookie」按钮；命名平台自动轮询关键 Cookie（B 站 `SESSDATA`、Twitch `auth-token`、YouTube `SAPISID/__Secure-3PSID` 等），虎牙/斗鱼/抖音采集全部 Cookie；采集结果经 `CredentialStore.SaveAsync` DPAPI 加密入库；临时 WebView2 用户目录用后删除。
 
@@ -561,15 +572,15 @@ dotnet build LiveMonitor.sln --no-restore
 - 工程目标框架：除 `Desktop`/`Media` 为 `net8.0-windows` 外均为 `net8.0`；测试工程对应同目标框架。
 - 需要 `tools/` 下的 ffmpeg/mpv 才能运行应用（`scripts/fetch-tools.ps1` 自动下载并校验）。
 
-### 13.2 测试（当前 940 个用例）
+### 13.2 测试（当前 983 个用例）
 
 | 测试工程 | 覆盖范围 | 用例数 |
 | --- | --- | --- |
 | `tests/LiveMonitor.Data.Tests` | 数据库/仓储/凭据（DPAPI）、清流请求头迁移 | 38 |
 | `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退、自定义清流 Provider | 483 |
 | `tests/LiveMonitor.Danmaku.Tests` | 过滤器、高能检测、会话管理 | 98 |
-| `tests/LiveMonitor.Media.Tests` | 录制状态机、分段合并、剪辑导出、波形、FFmpeg 参数协议分支 | 183 |
-| `tests/LiveMonitor.Desktop.Tests` | ViewModel、Dock/自由画布布局、登录配置、播放状态文本、录制目标状态 | 138 |
+| `tests/LiveMonitor.Media.Tests` | 录制状态机、分段合并、剪辑导出、波形、增量波形/增量弹幕读取、FFmpeg 参数协议分支 | 198 |
+| `tests/LiveMonitor.Desktop.Tests` | ViewModel、Dock/自由画布布局、登录配置、播放状态文本、录制目标排序、边录边剪剪辑台 | 166 |
 
 运行方式（使用已构建的测试 dll，避免重复构建）：
 
