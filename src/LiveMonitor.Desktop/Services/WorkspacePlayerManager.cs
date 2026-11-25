@@ -40,10 +40,12 @@ public sealed class WorkspacePlayerManager : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (tile.PlayerView is not null)
+        // 本 PR 槽位句柄仍由本类独占创建，句柄的实际实现只会是 MpvPlayerView；
+        // 待 PR2 抽象化后再把字典/工厂整体切到 IWorkspacePlayer。
+        if (tile.PlayerView is MpvPlayerView existing)
         {
-            _playerByPane[tile.PaneId] = tile.PlayerView;
-            return tile.PlayerView;
+            _playerByPane[tile.PaneId] = existing;
+            return existing;
         }
 
         var player = new MpvPlayerView();
@@ -59,7 +61,8 @@ public sealed class WorkspacePlayerManager : IDisposable
     /// </summary>
     public bool TransferPlayer(RoomTileViewModel oldTile, RoomTileViewModel newTile)
     {
-        if (oldTile.PlayerView is not { } oldPlayer)
+        // 同上：句柄实现只会是 MpvPlayerView，跨方案转移需要 TakeContext/AdoptContext。
+        if (oldTile.PlayerView is not MpvPlayerView oldPlayer)
         {
             return false;
         }

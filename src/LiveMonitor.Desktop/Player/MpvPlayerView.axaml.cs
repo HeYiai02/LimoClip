@@ -10,7 +10,6 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using LibMpv.Client;
 using LiveMonitor.Core.Enums;
-using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Core.Models;
 using LiveMonitor.Desktop.ViewModels;
 
@@ -21,7 +20,7 @@ namespace LiveMonitor.Desktop.Player;
 /// 注意：不在 OnDetachedFromVisualTree 里 Dispose；拖拽、方案切换只是把控件
 /// 从旧视觉父级解绑，真正销毁由 WorkspacePlayerManager 显式调用 Dispose。
 /// </summary>
-public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerController, IDisposable
+public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePlayer
 {
     private static readonly TimeSpan RenderReadyTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StartPlaybackTimeout = TimeSpan.FromSeconds(20);
@@ -120,6 +119,9 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IPlayerContr
             // 旧渲染上下文可能已经随窗口销毁，忽略。
         }
     }
+
+    /// <summary>供 XAML / 视觉树挂载的控件句柄：播放器本身就是 UserControl，返回自身。</summary>
+    public Avalonia.Controls.Control? View => this;
 
     public PlayerState State => _state;
 
