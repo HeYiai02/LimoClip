@@ -439,12 +439,14 @@ obj/
 .cache/
 .dev/
 .scratch/
+.archify/
 spikes/**/bin/
 spikes/**/obj/
 tools/yt-dlp.exe
 tools/libmpv-2.dll
 tools/ffmpeg/
 tools/mpv/
-tools/*.part# V0.5-B platform plugin signing keys (never commit)
+tools/*.part
+# V0.5-B platform plugin signing keys (never commit)
 plugins/**/*.key
 *.ed25519.key
