@@ -93,6 +93,71 @@ public sealed class DouyinDanmakuClientTests
         Assert.Equal(WebSocketState.None, WebSocketState.None);
     }
 
+    [Fact]
+    public async Task HeartbeatSendFailure_RaisesDisconnectedExactlyOnce()
+    {
+        var scriptPath = DouyinTestData.CreateStubSignScript();
+        var handler = new DouyinTestData.StubHandler(request =>
+            request.RequestUri!.AbsolutePath == "/"
+                ? DouyinTestData.HomepageResponse()
+                : DouyinTestData.JsonResponse(DouyinTestData.LiveJson));
+        using var http = DouyinTestData.CreateHttpClient(handler);
+        using var api = new DouyinApiClient(http);
+        using var signer = new DouyinSigner(scriptPath: scriptPath, cacheDirectory: Path.GetDirectoryName(scriptPath)!);
+        var connection = new FailingSendConnection();
+        await using var client = new DouyinDanmakuClient(
+            "141601416352",
+            null,
+            null,
+            api,
+            signer,
+            () => connection);
+
+        var disconnected = 0;
+        Exception? captured = null;
+        var raised = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        client.Disconnected += exception =>
+        {
+            Interlocked.Increment(ref disconnected);
+            captured = exception;
+            raised.TrySetResult();
+        };
+
+        await client.ConnectAsync();
+
+        var completed = await Task.WhenAny(raised.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+        Assert.Same(raised.Task, completed);
+
+        await client.DisconnectAsync();
+
+        Assert.Equal(1, Volatile.Read(ref disconnected));
+        var failure = Assert.IsType<WebSocketException>(captured);
+        Assert.Contains("simulated heartbeat failure", failure.Message, StringComparison.Ordinal);
+    }
+
+    private sealed class FailingSendConnection : IDouyinWebSocketConnection
+    {
+        public WebSocketState State => WebSocketState.Open;
+
+        public Task ConnectAsync(Uri uri, IReadOnlyDictionary<string, string> headers, CancellationToken ct)
+            => Task.CompletedTask;
+
+        public Task SendAsync(ReadOnlyMemory<byte> payload, CancellationToken ct)
+            => Task.FromException(new WebSocketException("simulated heartbeat failure"));
+
+        public async Task<byte[]?> ReceiveMessageAsync(CancellationToken ct)
+        {
+            await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
+            return null;
+        }
+
+        public void Abort()
+        {
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private sealed class ThrowingHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

@@ -15,20 +15,21 @@ public sealed class DouyinDanmakuClient : IDanmakuClient
 {
     private const string WebSocketHost = "wss://webcast100-ws-web-lq.douyin.com/webcast/im/push/v2/";
     private const string WebSocketUserAgent = DouyinApiClient.UserAgent;
-    private const int MaxFrameBytes = 8 * 1024 * 1024;
+    internal const int MaxFrameBytes = 8 * 1024 * 1024;
 
     private readonly DouyinApiClient _api;
     private readonly DouyinSigner _signer;
     private readonly bool _ownsApi;
     private readonly bool _ownsSigner;
     private readonly string? _authCookie;
-    private readonly Func<WebSocket>? _socketFactory;
+    private readonly Func<IDouyinWebSocketConnection> _connectionFactory;
 
     private readonly CancellationTokenSource _lifetime = new();
     private readonly SemaphoreSlim _sendLock = new(1, 1);
-    private WebSocket? _socket;
+    private IDouyinWebSocketConnection? _connection;
     private int _state; // 0=idle 1=connecting/connected 2=disposed
-    private bool _disconnectRequested;
+    private volatile bool _disconnectRequested;
+    private int _disconnectedRaised;
     private string? _resolvedRoomId;
     private string? _ttwid;
     private Task? _receiveTask;
@@ -39,8 +40,19 @@ public sealed class DouyinDanmakuClient : IDanmakuClient
         string? authCookie = null,
         HttpClient? httpClient = null,
         DouyinApiClient? api = null,
-        DouyinSigner? signer = null,
-        Func<WebSocket>? socketFactory = null)
+        DouyinSigner? signer = null)
+        : this(roomId, authCookie, httpClient, api, signer, connectionFactory: null)
+    {
+    }
+
+    /// <param name="connectionFactory">WebSocket 连接工厂，测试注入；null 时使用真实 ClientWebSocket。</param>
+    internal DouyinDanmakuClient(
+        string roomId,
+        string? authCookie,
+        HttpClient? httpClient,
+        DouyinApiClient? api,
+        DouyinSigner? signer,
+        Func<IDouyinWebSocketConnection>? connectionFactory)
     {
         if (string.IsNullOrWhiteSpace(roomId))
             throw new ArgumentException("抖音直播间号不能为空。", nameof(roomId));
@@ -52,7 +64,7 @@ public sealed class DouyinDanmakuClient : IDanmakuClient
             throw new ArgumentException($"无法识别的抖音直播间号：{roomId}", nameof(roomId));
 
         _authCookie = string.IsNullOrWhiteSpace(authCookie) ? null : authCookie;
-        _socketFactory = socketFactory;
+        _connectionFactory = connectionFactory ?? (static () => new ClientWebSocketDouyinConnection(MaxFrameBytes));
         _api = api ?? new DouyinApiClient(httpClient);
         _ownsApi = api is null;
         _signer = signer ?? new DouyinSigner(httpClient);
@@ -75,6 +87,7 @@ public sealed class DouyinDanmakuClient : IDanmakuClient
         if (Interlocked.CompareExchange(ref _state, 1, 0) != 0)
             throw new InvalidOperationException("抖音弹幕连接已经建立或正在建立。");
 
+        IDouyinWebSocketConnection? connection = null;
         try
         {
             var snapshot = await _api.GetRoomAsync(RoomId, _authCookie, cancellationToken).ConfigureAwait(false);
@@ -92,26 +105,42 @@ public sealed class DouyinDanmakuClient : IDanmakuClient
             var signature = _signer.Sign(url);
             url += "&signature=" + Uri.EscapeDataString(signature);
 
-            var socket = _socketFactory?.Invoke() ?? new ClientWebSocket();
-            if (socket is ClientWebSocket clientSocket)
+            connection = _connectionFactory();
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                clientSocket.Options.SetRequestHeader("User-Agent", WebSocketUserAgent);
-                clientSocket.Options.SetRequestHeader("Referer", "https://live.douyin.com/");
-                clientSocket.Options.SetRequestHeader("Origin", "https://live.douyin.com");
-                clientSocket.Options.SetRequestHeader("Cookie", BuildCookieHeader());
+                ["User-Agent"] = WebSocketUserAgent,
+                ["Referer"] = "https://live.douyin.com/",
+                ["Origin"] = "https://live.douyin.com",
+                ["Cookie"] = BuildCookieHeader(),
+            };
 
-                using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-                connectTimeout.CancelAfter(TimeSpan.FromSeconds(15));
-                await clientSocket.ConnectAsync(new Uri(url), connectTimeout.Token).ConfigureAwait(false);
-            }
+            using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+            connectTimeout.CancelAfter(TimeSpan.FromSeconds(15));
+            await connection.ConnectAsync(new Uri(url), headers, connectTimeout.Token).ConfigureAwait(false);
 
-            _socket = socket;
+            _connection = connection;
+            connection = null; // 所有权已交给实例，失败路径不再释放。
+
+            _disconnectRequested = false;
+            Interlocked.Exchange(ref _disconnectedRaised, 0);
 
             _receiveTask = Task.Run(() => ReceiveLoopAsync(_lifetime.Token));
             _heartbeatTask = Task.Run(() => HeartbeatLoopAsync(_lifetime.Token));
         }
         catch (Exception ex)
         {
+            if (connection is not null)
+            {
+                try
+                {
+                    await connection.DisposeAsync().ConfigureAwait(false);
+                }
+                catch
+                {
+                    // 连接失败路径上清理由本方法负责，释放异常不再叠加抛出。
+                }
+            }
+
             Interlocked.Exchange(ref _state, 0);
             throw new InvalidOperationException(BuildConnectErrorMessage(ex), ex);
         }
@@ -122,24 +151,18 @@ public sealed class DouyinDanmakuClient : IDanmakuClient
         _disconnectRequested = true;
         _lifetime.Cancel();
 
-        var socket = _socket;
-        if (socket is not null)
+        var connection = _connection;
+        _connection = null;
+        if (connection is not null)
         {
             try
             {
-                if (socket.State == WebSocketState.Open)
-                {
-                    using var closeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", closeTimeout.Token)
-                        .ConfigureAwait(false);
-                }
+                await connection.DisposeAsync().ConfigureAwait(false);
             }
             catch
             {
                 // 主动断开时忽略关闭错误。
             }
-
-            try { socket.Dispose(); } catch { }
         }
 
         await WaitLoopsAsync().ConfigureAwait(false);
@@ -197,8 +220,12 @@ public sealed class DouyinDanmakuClient : IDanmakuClient
             {
                 break;
             }
-            catch
+            catch (Exception ex)
             {
+                // 心跳发送失败说明连接已不可用：主动触发一次断线通知（与接收循环共享单次触发保护），
+                // 让上层 DanmakuManager 进入退避重连，而不是静默退出后永不重连。
+                NotifyDisconnected(ex);
+                AbortConnection();
                 break;
             }
         }
@@ -206,32 +233,18 @@ public sealed class DouyinDanmakuClient : IDanmakuClient
 
     private async Task ReceiveLoopAsync(CancellationToken ct)
     {
-        var buffer = new byte[64 * 1024];
-        var accumulator = new MemoryStream();
         Exception? failure = null;
         try
         {
             while (!ct.IsCancellationRequested)
             {
-                var result = await _socket!.ReceiveAsync(buffer, ct).ConfigureAwait(false);
-                if (result.MessageType == WebSocketMessageType.Close)
+                var frameBytes = await _connection!.ReceiveMessageAsync(ct).ConfigureAwait(false);
+                if (frameBytes is null)
                 {
-                    failure = new InvalidOperationException(
-                        $"抖音弹幕服务端关闭了连接（{(int?)result.CloseStatus} {result.CloseStatusDescription}）。");
+                    failure = new InvalidOperationException("抖音弹幕服务端关闭了连接。");
                     break;
                 }
 
-                accumulator.Write(buffer, 0, result.Count);
-                if (accumulator.Length > MaxFrameBytes)
-                {
-                    failure = new InvalidOperationException("抖音弹幕数据帧超过大小限制，已断开。");
-                    break;
-                }
-
-                if (!result.EndOfMessage) continue;
-
-                var frameBytes = accumulator.ToArray();
-                accumulator.SetLength(0);
                 await HandleFrameAsync(frameBytes, ct).ConfigureAwait(false);
             }
         }
@@ -243,12 +256,14 @@ public sealed class DouyinDanmakuClient : IDanmakuClient
         {
             failure = ex;
         }
-
-        if (!_disconnectRequested)
-            Disconnected?.Invoke(failure);
+        finally
+        {
+            NotifyDisconnected(failure);
+        }
     }
 
-    private async Task HandleFrameAsync(byte[] frameBytes, CancellationToken ct)
+    /// <summary>解析并分发一帧数据（internal 供单测覆盖 gzip/回执等帧处理）。</summary>
+    internal async Task HandleFrameAsync(byte[] frameBytes, CancellationToken ct)
     {
         var frame = DouyinProto.ParsePushFrame(frameBytes);
         if (frame.PayloadType is "hb" or "ack") return;
@@ -288,16 +303,46 @@ public sealed class DouyinDanmakuClient : IDanmakuClient
 
     private async Task SendAsync(byte[] payload, CancellationToken ct)
     {
-        var socket = _socket;
-        if (socket is null || socket.State != WebSocketState.Open) return;
+        var connection = _connection;
+        if (connection is null || connection.State != WebSocketState.Open) return;
         await _sendLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await socket.SendAsync(payload, WebSocketMessageType.Binary, true, ct).ConfigureAwait(false);
+            await connection.SendAsync(payload, ct).ConfigureAwait(false);
         }
         finally
         {
             _sendLock.Release();
+        }
+    }
+
+    /// <summary>断线通知只触发一次：接收循环与心跳循环可能同时因同一故障退出。</summary>
+    private void NotifyDisconnected(Exception? failure)
+    {
+        if (Interlocked.Exchange(ref _disconnectedRaised, 1) != 0) return;
+        if (_disconnectRequested) return;
+        Disconnected?.Invoke(failure);
+    }
+
+    /// <summary>中止连接并取消后台循环（由心跳失败路径触发，促使接收循环尽快退出）。</summary>
+    private void AbortConnection()
+    {
+        try
+        {
+            _connection?.Abort();
+        }
+        catch
+        {
+            // 中止异常无需向上传播。
+        }
+
+        try
+        {
+            _lifetime.Cancel();
+        }
+        catch
+        {
+            // 已取消/已释放时忽略。
         }
     }
 

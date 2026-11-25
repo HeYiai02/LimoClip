@@ -78,6 +78,15 @@ function get_sign(md5) { return 'stub-' + md5; }
         }
     }
 
+    internal static string CreateStubSignScript()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "limoclip-douyin-sign-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "sign.js");
+        File.WriteAllText(path, StubSignScript);
+        return path;
+    }
+
     internal static HttpClient CreateHttpClient(StubHandler handler, string ttwid = "test-ttwid")
         => new(handler);
 
