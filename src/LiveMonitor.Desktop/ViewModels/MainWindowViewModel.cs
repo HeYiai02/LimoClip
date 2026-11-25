@@ -72,7 +72,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     private bool _isMasterMuted;
     private string _groupFilter = "全部";
     private DispatcherTimer? _healthTimer;
-    private readonly Dictionary<string, long> _lastDropCounts = new(StringComparer.Ordinal);
+    private readonly HealthSummaryCoordinator _healthCoordinator = new();
     private string _healthText = "解码正常 (0% 丢帧)";
     private bool _isHealthWarning;
     private DispatcherTimer? _focusHintTimer;
@@ -252,7 +252,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>V0.2：由 DanmakuManager 推送的累计被拦截用户数。</summary>
-    public string UnicycleBlockedText => $"独轮车已拦: {_unicycleBlockedUserCount} 人";
+    public string UnicycleBlockedText => WorkspaceLayoutCoordinator.FormatUnicycleBlockedText(_unicycleBlockedUserCount);
 
     public string StatusText
     {
@@ -364,11 +364,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string LayoutModeText => IsFreeformMode
-        ? "自由布局"
-        : IsHeroLayout
-            ? (IsCustomLayout ? "主副屏 · 自定义" : "主副屏")
-            : (IsCustomLayout ? "自定义比例" : "自动适配");
+    public string LayoutModeText =>
+        WorkspaceLayoutCoordinator.FormatLayoutModeText(IsFreeformMode, IsHeroLayout, IsCustomLayout);
 
     /// <summary>点过一键自适应后，是否还能恢复上一次的自定义比例。</summary>
     public bool CanRestoreCustomLayout
@@ -501,7 +498,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var document = BuildFreeformDocument(preset);
+        var document = WorkspaceLayoutCoordinator.BuildFreeformDocument(WorkspaceTiles, preset, _workspaceAspect);
         _freeformDocument = document;
         FreeformApplyRequested?.Invoke(this, document);
         IsDirty = true;
@@ -522,7 +519,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         IsFreeformMode = true;
-        var document = BuildFreeformDocument(preset);
+        var document = WorkspaceLayoutCoordinator.BuildFreeformDocument(WorkspaceTiles, preset, _workspaceAspect);
         _freeformDocument = document;
         FreeformApplyRequested?.Invoke(this, document);
         IsDirty = true;
@@ -532,36 +529,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             FreeformPreset.PictureInPicture => "已进入自由布局（画中画）：拖动/缩放窗格，右键可置顶。",
             _ => "已进入自由布局：拖动/缩放窗格，右键设置画中画。"
         };
-    }
-
-    private FreeformLayoutDocument BuildFreeformDocument(FreeformPreset preset)
-    {
-        var tiles = WorkspaceTiles.OrderBy(tile => tile.PaneId, StringComparer.Ordinal).ToList();
-        var count = Math.Max(1, tiles.Count);
-        var sources = preset switch
-        {
-            FreeformPreset.Hero => FreeformLayoutPresets.Hero(count),
-            FreeformPreset.PictureInPicture => FreeformLayoutPresets.PictureInPicture(count),
-            _ => FreeformLayoutPresets.AutoFit(count, _workspaceAspect)
-        };
-
-        var document = new FreeformLayoutDocument();
-        for (var index = 0; index < tiles.Count; index++)
-        {
-            var tile = tiles[index];
-            var source = index < sources.Count
-                ? sources[index]
-                : FreeformLayoutPresets.DefaultLanding(index, tile.PaneId);
-            document.Tiles.Add(FreeformTilePlacement.Create(
-                tile.PaneId,
-                source.ToRect(),
-                tile.HasRoom ? tile.LiveRoomId : null,
-                source.ZIndex,
-                source.IsPinned,
-                source.IsLocked));
-        }
-
-        return document;
     }
 
     private string SerializeCurrentLayout(IRootDock layout) =>
@@ -605,12 +572,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     public string FocusedTitle => _focusedTile?.DisplayTitle ?? string.Empty;
 
-    public string RoomCountText => IsHeroLayout
-        ? $"主库 {Rooms.Count} 路 · 工作区 主副屏（{WorkspaceDockBuilder.EnumerateTiles(Layout).Count(tile => tile.HasRoom)} 路）"
-        : $"主库 {Rooms.Count} 路 · 工作区 {GridRows}×{GridColumns}";
+    public string RoomCountText => WorkspaceLayoutCoordinator.FormatRoomCountText(
+        Rooms.Count,
+        IsHeroLayout,
+        WorkspaceLayoutCoordinator.CountOccupiedPanes(Layout),
+        GridRows,
+        GridColumns);
 
     /// <summary>工作区当前没有任何已绑定直播间的窗格（空状态引导用）。</summary>
-    public bool IsWorkspaceEmpty => !WorkspaceDockBuilder.EnumerateTiles(Layout).Any(tile => tile.HasRoom);
+    public bool IsWorkspaceEmpty => WorkspaceLayoutCoordinator.CountOccupiedPanes(Layout) == 0;
 
     /// <summary>布局/窗格变化后统一刷新状态栏文案与工作区空状态。</summary>
     private void NotifyWorkspaceSummaryChanged()
@@ -1220,19 +1190,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         _customLayoutSnapshotJson = SerializeLayout(Layout);
-        _customLayoutSnapshotSlots = WorkspaceDockBuilder.EnumerateTiles(Layout)
-            .Where(tile => tile.HasRoom)
-            .Select(tile => new LayoutSlot
-            {
-                LayoutProfileId = Guid.Empty,
-                LiveRoomId = tile.LiveRoomId,
-                PaneId = tile.PaneId,
-                DefaultMuted = true,
-                DefaultDanmakuVisible = tile.IsDanmakuVisible,
-                IsFocusSlot = false,
-                PreferredQualityId = tile.Status?.AvailableQualities.FirstOrDefault()?.Id
-            })
-            .ToList();
+        _customLayoutSnapshotSlots = WorkspaceLayoutCoordinator.CreateLayoutSlots(
+            WorkspaceDockBuilder.EnumerateTiles(Layout),
+            Guid.Empty);
         _customLayoutSnapshotDirty = IsDirty;
         CanRestoreCustomLayout = true;
     }
@@ -1331,20 +1291,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         profile.IsCustomLayout = IsCustomLayout || IsFreeformMode;
         profile.DockLayoutJson = SerializeCurrentLayout(Layout);
         profile.Slots.Clear();
-
-        foreach (var tile in WorkspaceDockBuilder.EnumerateTiles(Layout).Where(tile => tile.HasRoom))
-        {
-            profile.Slots.Add(new LayoutSlot
-            {
-                LayoutProfileId = profile.Id,
-                LiveRoomId = tile.LiveRoomId,
-                PaneId = tile.PaneId,
-                DefaultMuted = true,
-                DefaultDanmakuVisible = tile.IsDanmakuVisible,
-                IsFocusSlot = false,
-                PreferredQualityId = tile.Status?.AvailableQualities.FirstOrDefault()?.Id
-            });
-        }
+        profile.Slots.AddRange(WorkspaceLayoutCoordinator.CreateLayoutSlots(
+            WorkspaceDockBuilder.EnumerateTiles(Layout),
+            profile.Id));
 
         await _services.Profiles.SaveAsync(profile, ct).ConfigureAwait(true);
         if (!Profiles.Contains(profile))
@@ -1378,19 +1327,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             IsCustomLayout = IsCustomLayout || IsFreeformMode
         };
         profile.DockLayoutJson = SerializeCurrentLayout(Layout);
-
-        foreach (var tile in WorkspaceDockBuilder.EnumerateTiles(Layout).Where(tile => tile.HasRoom))
-        {
-            profile.Slots.Add(new LayoutSlot
-            {
-                LayoutProfileId = profile.Id,
-                LiveRoomId = tile.LiveRoomId,
-                PaneId = tile.PaneId,
-                DefaultMuted = true,
-                DefaultDanmakuVisible = tile.IsDanmakuVisible,
-                PreferredQualityId = tile.Status?.AvailableQualities.FirstOrDefault()?.Id
-            });
-        }
+        profile.Slots.AddRange(WorkspaceLayoutCoordinator.CreateLayoutSlots(
+            WorkspaceDockBuilder.EnumerateTiles(Layout),
+            profile.Id));
 
         await _services.Profiles.SaveAsync(profile, ct).ConfigureAwait(true);
         Profiles.Add(profile);
@@ -2173,7 +2112,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         DetachLayoutTracking();
         _layoutTrackingArmed = false;
         _trackedLayout = layout;
-        foreach (var dockable in EnumerateDockables(layout))
+        foreach (var dockable in WorkspaceLayoutCoordinator.EnumerateDockables(layout))
         {
             if (dockable is INotifyPropertyChanged notifier)
             {
@@ -2189,7 +2128,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        foreach (var dockable in EnumerateDockables(_trackedLayout))
+        foreach (var dockable in WorkspaceLayoutCoordinator.EnumerateDockables(_trackedLayout))
         {
             if (dockable is INotifyPropertyChanged notifier)
             {
@@ -2213,21 +2152,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         SetCustomLayout(true);
         IsDirty = true;
         StatusText = "已切换为自定义比例；新增房间只追加，不会重排";
-    }
-
-    private static IEnumerable<IDockable> EnumerateDockables(IDockable root)
-    {
-        yield return root;
-        if (root is IDock dock)
-        {
-            foreach (var child in dock.VisibleDockables ?? Array.Empty<IDockable>())
-            {
-                foreach (var nested in EnumerateDockables(child))
-                {
-                    yield return nested;
-                }
-            }
-        }
     }
 
     public void Dispose()
@@ -2308,19 +2232,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         await LoadProfileAsync(profile).ConfigureAwait(true);
         _loadedProfile = profile;
         ClearCustomLayoutSnapshot();
-    }
-
-    private static bool HasSamePaneIds(IRootDock left, IRootDock right)
-    {
-        var leftIds = WorkspaceDockBuilder.EnumerateTiles(left)
-            .Select(tile => tile.PaneId)
-            .OrderBy(id => id, StringComparer.Ordinal)
-            .ToArray();
-        var rightIds = WorkspaceDockBuilder.EnumerateTiles(right)
-            .Select(tile => tile.PaneId)
-            .OrderBy(id => id, StringComparer.Ordinal)
-            .ToArray();
-        return leftIds.SequenceEqual(rightIds);
     }
 
     private async Task LoadProfileAsync(LayoutProfile? profile)
@@ -2416,7 +2327,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         // 两个方案的窗格集合一致时，不替换 Dock 树，直接复用原窗格和 PlayerView。
         // 这是切换方案最常见的情况，也是零黑屏的关键：控件不移动，底层 MpvContext 不断流。
-        if (previousLayout is not null && HasSamePaneIds(previousLayout, layout))
+        if (previousLayout is not null && WorkspaceLayoutCoordinator.HasSamePaneIds(previousLayout, layout))
         {
             var slotsByPane = profile.Slots.ToDictionary(slot => slot.PaneId);
             foreach (var oldTile in WorkspaceDockBuilder.EnumerateTiles(previousLayout))
@@ -2549,45 +2460,27 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void RefreshFilteredRooms()
     {
-        var query = SearchText.Trim();
+        var filtered = RoomCatalogCoordinator.Filter(Rooms, SearchText, GroupFilter);
         FilteredRooms.Clear();
-
-        foreach (var room in Rooms)
+        foreach (var room in filtered)
         {
-            var groupMatches = GroupFilter == "全部" ||
-                               string.Equals(room.GroupTag, GroupFilter, StringComparison.OrdinalIgnoreCase);
-            if (!groupMatches)
-            {
-                continue;
-            }
-
-            if (query.Length == 0 ||
-                room.SearchText.Contains(query, StringComparison.OrdinalIgnoreCase))
-            {
-                FilteredRooms.Add(room);
-            }
+            FilteredRooms.Add(room);
         }
     }
 
     private void RebuildGroups()
     {
-        var groups = Rooms
-            .Select(room => room.GroupTag)
-            .Where(tag => !string.IsNullOrWhiteSpace(tag))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(tag => tag, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var groups = RoomCatalogCoordinator.BuildGroups(Rooms);
 
         Groups.Clear();
-        Groups.Add("全部");
         foreach (var group in groups)
         {
             Groups.Add(group);
         }
 
-        if (!Groups.Any(group => string.Equals(group, GroupFilter, StringComparison.OrdinalIgnoreCase)))
+        if (!RoomCatalogCoordinator.IsKnownGroup(Groups, GroupFilter))
         {
-            GroupFilter = "全部";
+            GroupFilter = RoomCatalogCoordinator.AllGroupLabel;
         }
     }
 
@@ -2610,10 +2503,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        long dropped = 0;
-        double frames = 0;
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-
+        var samples = new List<PaneHealthSample>();
         foreach (var tile in WorkspaceDockBuilder.EnumerateTiles(Layout))
         {
             var player = tile.PlayerView;
@@ -2623,30 +2513,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             var metrics = player.GetHealthMetrics();
-            var current = metrics.DecoderDroppedFrames + metrics.DroppedFrames;
-            if (!_lastDropCounts.TryGetValue(tile.PaneId, out var previous))
-            {
-                _lastDropCounts[tile.PaneId] = current;
-                seen.Add(tile.PaneId);
-                continue;
-            }
-
-            dropped += Math.Max(0, current - previous);
-            frames += Math.Max(1, metrics.FramesPerSecond) * 2;
-            _lastDropCounts[tile.PaneId] = current;
-            seen.Add(tile.PaneId);
+            samples.Add(new PaneHealthSample(
+                tile.PaneId,
+                metrics.DecoderDroppedFrames + metrics.DroppedFrames,
+                metrics.FramesPerSecond));
         }
 
-        foreach (var stale in _lastDropCounts.Keys.Except(seen).ToList())
-        {
-            _lastDropCounts.Remove(stale);
-        }
-
-        var percent = frames > 0 ? dropped / frames * 100 : 0;
-        IsHealthWarning = percent >= 5;
-        HealthText = IsHealthWarning
-            ? $"解码告警 ({percent:F1}% 丢帧)"
-            : $"解码正常 ({percent:F0}% 丢帧)";
+        var summary = _healthCoordinator.Update(samples);
+        IsHealthWarning = summary.IsWarning;
+        HealthText = summary.Text;
 
         SyncRoomStatuses();
     }
