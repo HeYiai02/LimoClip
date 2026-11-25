@@ -30,7 +30,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | WebView 登录 | WebView2（临时用户目录，登录后采集 Cookie） |
 | 平台解析 | 各家 HTTP API + Jint（斗鱼签名、抖音 sign.js）；yt-dlp 作为 YouTube/Twitch 兜底 |
 | 插件签名 | Ed25519（BouncyCastle）+ SHA256 清单校验 |
-| 测试 | xUnit（6 个测试工程，当前共 998 个用例） |
+| 测试 | xUnit（6 个测试工程，当前共 1191 个用例） |
 
 ### 平台支持矩阵
 
@@ -526,6 +526,18 @@ Program.Main
 - 宿主切换：Dock 与画布互斥显示（`ShowDockWorkspace = !IsWorkspaceEmpty && !IsFreeformMode`）。播放器控件（`MpvPlayerView`）不能同时被两个 `ContentPresenter` 挂载，切换时先 `DetachWorkspacePlayers()`（停止+解绑旧控件）→ 切换宿主并等一轮布局 → `StartWorkspacePlayersAsync()` 重新创建并起播；Dock 在自由模式下保持 `Layout=null`。
 - 顶栏：`自由布局`（开/关，显示当前模式提示）、`画中画预设`（未进入自由布局时先进入再应用）；状态栏显示「已进入/退出自由布局」「已应用自由布局预设」。方案中的自由布局结构与平铺布局共用 `LayoutProfile`，保存/重启后可恢复。
 
+### 10.7 视图宿主边界（MainWindow.axaml.cs）
+
+`MainWindow.axaml.cs` 是主壳视图（code-behind），只承担「Avalonia 视觉树与窗口交互」，业务状态与数据流转一律留在 ViewModel / Service。允许的职责：
+
+- **宿主生命周期**：Dock 平铺与 `FreeformWorkspaceCanvas` 两个宿主的挂载/卸载/显隐（`ShowDockWorkspace` 由 VM 决定，View 只执行 `RefreshWorkspaceHost`/`SyncFreeformTiles`）；宿主切换必须先 `DetachWorkspacePlayers()`（停止并解绑旧 `MpvPlayerView`）→ 切换宿主 → 等一轮布局 → `StartWorkspacePlayersAsync()`，因为同一播放器控件不能同时被两个 `ContentPresenter` 挂载（见 §10.6）。
+- **窗口外壳与 chrome**：一体化标题栏拖动/双击最大化、`EnsureSplitterTemplate`/`SyncVisualProportions`、沉浸模式空闲计时器、桌面级全屏、F11/Esc 等键位到 VM 命令的映射。
+- **系统与平台交互**：`StorageProvider` 文件/目录选择、资源管理器/浏览器打开、确认对话框、`SettingsWindow` 打开；WebView2 登录委托 `WebViewLoginService`。
+- **指针手势**：房间列表拖拽的起落判定、窗格双击进入焦点、自由画布拖动/缩放期间的 `Esc` 取消，只把结果回写 VM 命令。
+- **事件转发与视图态**：`DataContext`/属性变更订阅只做 UI 呈现（状态点、文案、画刷），不直接改数据库或平台会话。
+
+禁止把以下逻辑放进 code-behind：房间/录制/弹幕状态机、布局方案持久化、平台解析与网络请求、播放器/录制的生命周期决策（这些属 `MainWindowViewModel`、`WorkspacePlayerManager`、`RecordingManager` 或更下层服务）。新增交互时先判断能否用 Bool→Bool 绑定/Behavior 放到 VM；确属视图树时序的才留在本文件，并同步更新本节与 §10.1。
+
 ---
 
 ## 11. 关键运行链路
@@ -575,17 +587,17 @@ dotnet build LiveMonitor.sln --no-restore
 - 工程目标框架：`Data`、`Media`、`Desktop` 为 `net8.0-windows`，其余类库为 `net8.0`；测试工程对应同目标框架（`Data`/`Media`/`Desktop` 测试为 `net8.0-windows`，`Platforms`/`Danmaku` 测试为 `net8.0`）。
 - 需要 `tools/` 下的 ffmpeg/mpv 才能运行应用（`scripts/fetch-tools.ps1` 自动下载并校验）。
 
-### 13.2 测试（当前 998 个用例）
+### 13.2 测试（当前 1191 个用例）
 
 | 测试工程 | 覆盖范围 | 用例数 |
 | --- | --- | --- |
 | `tests/LiveMonitor.Data.Tests` | 数据库/仓储/凭据（DPAPI）、清流请求头迁移 | 38 |
-| `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退、自定义清流 Provider | 483 |
-| `tests/LiveMonitor.Danmaku.Tests` | 过滤器、高能检测、会话管理 | 98 |
-| `tests/LiveMonitor.Media.Tests` | 录制状态机、分段合并、剪辑导出、波形、增量波形/增量弹幕读取、FFmpeg 参数协议分支 | 198 |
-| `tests/LiveMonitor.Desktop.Tests` | ViewModel、Dock/自由画布布局、登录配置、播放状态文本、录制目标排序、边录边剪剪辑台、自由布局命中与宿主切换 | 181 |
+| `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退、自定义清流 Provider、斗鱼流接缝、抖音帧接缝与断线通知、弹幕重连退避 | 505 |
+| `tests/LiveMonitor.Danmaku.Tests` | 过滤器、高能检测、会话管理、重连/释放竞态 | 100 |
+| `tests/LiveMonitor.Media.Tests` | 录制状态机与并发收尾、分段合并、剪辑导出、波形、增量波形/增量弹幕读取、FFmpeg 参数协议分支 | 215 |
+| `tests/LiveMonitor.Desktop.Tests` | ViewModel、Dock/自由画布布局、时间轴几何、AppServices 释放、设置页 ASR/组件更新、登录配置、播放状态文本、录制目标排序、边录边剪剪辑台、自由布局命中与宿主切换 | 333 |
 
-合计 **998** 个用例，五套全部通过（0 失败 0 跳过）。
+合计 **1191** 个用例，五套全部通过（0 失败 0 跳过）。
 
 运行方式（使用已构建的测试 dll，避免重复构建）：
 
