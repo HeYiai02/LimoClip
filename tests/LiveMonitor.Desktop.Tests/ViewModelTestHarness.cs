@@ -77,6 +77,10 @@ internal static class ViewModelTestHarness
             }
         });
 
+    /// <summary>只准备隔离的服务容器（不创建 ViewModel），供管理器等非 ViewModel 组件测试使用。</summary>
+    public static Task RunServicesAsync(string className, Func<ViewModelTestContext, Task> body) =>
+        RunAsync(className, body);
+
     public static RecordingCenterViewModel CreateRecordingCenter(AppServices services) =>
         new(
             services.Rooms,
