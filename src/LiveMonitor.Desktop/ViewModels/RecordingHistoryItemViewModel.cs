@@ -93,6 +93,16 @@ public sealed partial class RecordingHistoryItemViewModel : ObservableObject
                            && !string.IsNullOrWhiteSpace(Session.VideoFilePath)
                            && File.Exists(Session.VideoFilePath);
 
+    /// <summary>
+    /// 录制进行中时历史行不显示「去剪辑」（文件尚未合并完成），改为显示「✂ 边录边剪」入口。
+    /// </summary>
+    public bool IsLive => IsActive;
+
+    /// <summary>历史行「去剪辑」按钮的可见性：录制中的行由边录边剪入口替代。</summary>
+    public bool CanShowClip => !IsActive;
+
+    public string LiveClipTip => "边录边剪：对正在写入的录像实时剪辑，无需等录制结束";
+
     public string ClipTip => IsActive
         ? "该录制仍在进行中，请先停止录制再进入剪辑台"
         : CanClip
@@ -107,4 +117,11 @@ public sealed partial class RecordingHistoryItemViewModel : ObservableObject
 
     [RelayCommand]
     private Task ClipAsync() => _parent.RequestOpenClipAsync(this);
+
+    /// <summary>边录边剪：把该场次正在写入的分片直接送进剪辑台实时剪辑。</summary>
+    [RelayCommand]
+    private Task LiveClipAsync()
+        => Session.LiveRoomId is { } liveRoomId
+            ? _parent.RequestOpenLiveClipAsync(liveRoomId)
+            : Task.CompletedTask;
 }

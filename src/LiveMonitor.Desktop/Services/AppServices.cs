@@ -33,6 +33,7 @@ public sealed class AppServices
         RecordingManager recordings,
         VideoProbeService videoProbe,
         IWaveformService waveforms,
+        ILiveWaveformExtractor liveWaveforms,
         IHardwareEncoderDetector encoders,
         IClipExporter clips,
         IAsrProvider asr,
@@ -58,6 +59,7 @@ public sealed class AppServices
         Recordings = recordings;
         VideoProbe = videoProbe;
         Waveforms = waveforms;
+        LiveWaveforms = liveWaveforms;
         Encoders = encoders;
         Clips = clips;
         Asr = asr;
@@ -106,6 +108,9 @@ public sealed class AppServices
 
     /// <summary>V0.4 时间轴双波形（音频峰值 + 弹幕密度）流式提取与缓存。</summary>
     public IWaveformService Waveforms { get; }
+
+    /// <summary>边录边剪：录制中分片的增量波形提取（不落缓存，按安全可剪区间追加）。</summary>
+    public ILiveWaveformExtractor LiveWaveforms { get; }
 
     /// <summary>V0.4 硬件编码器实测探测（nvenc/qsv/amf → libx264 回退）。</summary>
     public IHardwareEncoderDetector Encoders { get; }
@@ -295,6 +300,7 @@ public sealed class AppServices
             : Path.Combine(AppContext.BaseDirectory, FfmpegLocator.RelativePath);
         var videoProbe = new VideoProbeService(ffmpegPath);
         var waveforms = new WaveformService(ffmpegPath);
+        var liveWaveforms = new LiveWaveformDeltaExtractor(ffmpegPath);
         var encoders = new HardwareEncoderDetector(ffmpegPath);
         var clipJobGuard = new ProcessJobGuard();
         var clips = new ClipExporter(
@@ -355,6 +361,7 @@ public sealed class AppServices
             recordings,
             videoProbe,
             waveforms,
+            liveWaveforms,
             encoders,
             clips,
             asr,

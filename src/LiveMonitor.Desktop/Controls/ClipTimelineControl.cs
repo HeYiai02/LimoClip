@@ -85,6 +85,8 @@ public sealed class ClipTimelineControl : Control
     private static readonly IBrush SelectionFillBrush = new SolidColorBrush(Color.Parse("#2E3B82F6"));
     private static readonly IBrush SelectionBorderBrush = new SolidColorBrush(Color.Parse("#60A5FA"));
     private static readonly IBrush MaskBrush = new SolidColorBrush(Color.Parse("#3305070A")); // 20% 近黑，抬高选区对比
+    private static readonly IBrush LiveEdgeMaskBrush = new SolidColorBrush(Color.FromArgb(0x3D, 0x94, 0xA3, 0xB8)); // 边录边剪：极淡灰安全区外遮罩
+    private static readonly IPen LiveEdgeStripePen = new Pen(new SolidColorBrush(Color.FromArgb(0x40, 0x94, 0xA3, 0xB8)), 1); // 45° 细斜纹
     private static readonly IBrush PlayheadBrush = new SolidColorBrush(Color.Parse("#EF4444")); // BrushDanger
     private static readonly IBrush HoverBrush = new SolidColorBrush(Color.Parse("#665A6B85"));
     private static readonly IBrush HandleLabelBrush = new SolidColorBrush(Color.Parse("#DBEAFE"));
@@ -133,6 +135,7 @@ public sealed class ClipTimelineControl : Control
     private TimeSpan _position;
     private TimeSpan _inPoint;
     private TimeSpan _outPoint;
+    private TimeSpan _safeDuration;
     private IReadOnlyList<ClipHighlightMarker>? _highlights;
     private double _zoom = MinZoom;
     private double _viewStartSeconds;
@@ -181,7 +184,9 @@ public sealed class ClipTimelineControl : Control
         get => _duration;
         set
         {
-            var next = ClampTime(value);
+            // 注意：这里不能用 ClampTime —— 边录边剪同步时 Duration 需要逐步增长，
+            // 而 ClampTime 会把超出旧时长的新值钳回旧值，导致时间轴永远停在初始时长。
+            var next = value <= TimeSpan.Zero ? TimeSpan.Zero : value;
             var firstSet = _duration <= TimeSpan.Zero && next > TimeSpan.Zero;
             if (next == _duration && !firstSet)
             {
@@ -206,7 +211,7 @@ public sealed class ClipTimelineControl : Control
         get => _position;
         set
         {
-            var next = ClampTime(value);
+            var next = ClampToSafe(ClampTime(value));
             if (next == _position)
             {
                 return;
@@ -223,7 +228,7 @@ public sealed class ClipTimelineControl : Control
         get => _inPoint;
         set
         {
-            var next = ClampTime(value);
+            var next = ClampToSafe(ClampTime(value));
             var maxIn = Math.Max(0, _outPoint.TotalSeconds - MinSelectionSeconds);
             if (next.TotalSeconds > maxIn)
             {
@@ -246,12 +251,14 @@ public sealed class ClipTimelineControl : Control
         get => _outPoint;
         set
         {
-            var next = ClampTime(value);
+            var next = ClampToSafe(ClampTime(value));
             var minOut = _inPoint.TotalSeconds + MinSelectionSeconds;
             if (next.TotalSeconds < minOut)
             {
                 next = TimeSpan.FromSeconds(minOut);
             }
+
+            next = ClampToSafe(next);
 
             if (next == _outPoint)
             {
@@ -270,6 +277,26 @@ public sealed class ClipTimelineControl : Control
         set
         {
             _highlights = value;
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>
+    /// 边录边剪的安全可剪截止时间：默认 Zero 表示不启用；
+    /// 启用时在 [SafeDuration, Duration) 区间绘制极淡遮罩 + 斜纹，提示该段尚未安全写入。
+    /// </summary>
+    public TimeSpan SafeDuration
+    {
+        get => _safeDuration;
+        set
+        {
+            var next = ClampTime(value);
+            if (next == _safeDuration)
+            {
+                return;
+            }
+
+            _safeDuration = next;
             InvalidateVisual();
         }
     }
@@ -459,7 +486,7 @@ public sealed class ClipTimelineControl : Control
         }
         else if (TryHitHighlight(pos, layout, out var marker))
         {
-            _position = ClampTime(marker!.Position);
+            _position = ClampToSafe(ClampTime(marker!.Position));
             InvalidateVisual();
             SeekRequested?.Invoke(_position);
             e.Handled = true;
@@ -472,7 +499,7 @@ public sealed class ClipTimelineControl : Control
         else
         {
             _dragMode = DragMode.Playhead;
-            _position = XToTime(pos.X);
+            _position = ClampToSafe(XToTime(pos.X));
             InvalidateVisual();
         }
 
@@ -515,6 +542,7 @@ public sealed class ClipTimelineControl : Control
                 var t = XToTime(pos.X);
                 var maxIn = _outPoint.TotalSeconds - MinSelectionSeconds;
                 t = TimeSpan.FromSeconds(Clamp(t.TotalSeconds, 0, Math.Max(0, maxIn)));
+                t = ClampToSafe(t);
                 if (t != _inPoint)
                 {
                     _inPoint = t;
@@ -529,7 +557,13 @@ public sealed class ClipTimelineControl : Control
             {
                 var t = XToTime(pos.X);
                 var minOut = _inPoint.TotalSeconds + MinSelectionSeconds;
-                t = TimeSpan.FromSeconds(Clamp(t.TotalSeconds, minOut, Math.Max(minOut, _duration.TotalSeconds)));
+                var maxOut = Math.Max(minOut, _duration.TotalSeconds);
+                if (_safeDuration > TimeSpan.Zero)
+                {
+                    maxOut = Math.Min(maxOut, Math.Max(minOut, _safeDuration.TotalSeconds));
+                }
+
+                t = TimeSpan.FromSeconds(Clamp(t.TotalSeconds, minOut, maxOut));
                 if (t != _outPoint)
                 {
                     _outPoint = t;
@@ -542,7 +576,7 @@ public sealed class ClipTimelineControl : Control
 
             case DragMode.Playhead:
             {
-                var t = XToTime(pos.X);
+                var t = ClampToSafe(XToTime(pos.X));
                 if (t != _position)
                 {
                     _position = t;
@@ -626,6 +660,7 @@ public sealed class ClipTimelineControl : Control
             DrawDensity(context, layout);
             DrawHighlights(context, layout);
             DrawSelection(context, layout);
+            DrawLiveEdgeMask(context, layout);
             playheadBubble = DrawPlayhead(context, layout);
             DrawHover(context, layout);
         }
@@ -867,6 +902,51 @@ public sealed class ClipTimelineControl : Control
             var text = CreateText("OUT " + FormatClock(_outPoint), 9.5, HandleLabelBrush);
             var textX = Math.Max(layout.Plot.Left + 2, Math.Min(outX - text.Width - 6, layout.Plot.Right - text.Width - 2));
             context.DrawText(text, new Point(textX, top + 3));
+        }
+    }
+
+    /// <summary>
+    /// 边录边剪：在 [SafeDuration, Duration) 的热区绘制极淡灰遮罩 + 45° 斜纹，
+    /// 明确“这之后的录制内容尚未安全可剪”。SafeDuration 为 0 或已覆盖全片时不绘制。
+    /// </summary>
+    private void DrawLiveEdgeMask(DrawingContext context, TimelineLayout layout)
+    {
+        if (_safeDuration <= TimeSpan.Zero || _duration <= TimeSpan.Zero || _safeDuration >= _duration)
+        {
+            return;
+        }
+
+        var safeX = TimeToX(_safeDuration);
+        if (safeX >= layout.Plot.Right)
+        {
+            return;
+        }
+
+        var left = Math.Max(layout.Plot.Left, safeX);
+        var top = layout.Wave.Top;
+        var bottom = layout.Highlight.Bottom;
+        var width = layout.Plot.Right - left;
+        var height = bottom - top;
+        if (width <= 0.5 || height <= 0.5)
+        {
+            return;
+        }
+
+        var area = new Rect(left, top, width, height);
+        context.FillRectangle(LiveEdgeMaskBrush, area);
+
+        // 45° 细斜纹：间距约 8px，只画在遮罩范围内；用 clip 防止溢出到刻度/圆角外。
+        const double stripeSpacing = 8.0;
+        using (context.PushClip(area))
+        {
+            for (var offset = 0.0; offset <= width + height; offset += stripeSpacing)
+            {
+                var startX = left + offset;
+                context.DrawLine(
+                    LiveEdgeStripePen,
+                    new Point(startX, top),
+                    new Point(startX - height, bottom));
+            }
         }
     }
 
@@ -1145,6 +1225,17 @@ public sealed class ClipTimelineControl : Control
         if (_duration > TimeSpan.Zero && time > _duration)
         {
             return _duration;
+        }
+
+        return time;
+    }
+
+    /// <summary>边录边剪时把播放头/选区限制在安全可剪截止时间内；未启用（Zero）时原样返回。</summary>
+    private TimeSpan ClampToSafe(TimeSpan time)
+    {
+        if (_safeDuration > TimeSpan.Zero && time > _safeDuration)
+        {
+            return _safeDuration;
         }
 
         return time;

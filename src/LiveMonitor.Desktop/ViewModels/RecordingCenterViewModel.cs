@@ -467,6 +467,50 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         }
     }
 
+    /// <summary>
+    /// 边录边剪：把正在录制的直播间送进剪辑台（读取仍在写入的分片）。
+    /// 录制刚结束、拿不到实时信息时退化为刷新列表。
+    /// </summary>
+    internal async Task RequestOpenLiveClipAsync(Guid liveRoomId)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        var live = _recordings.GetLiveRecordings()
+            .FirstOrDefault(recording => recording.LiveRoomId == liveRoomId);
+        if (live is null)
+        {
+            ReportStatus("该录制刚刚结束，正在刷新录制列表…");
+            await RefreshAsync().ConfigureAwait(true);
+            return;
+        }
+
+        if (OpenClipStudioAsync is null)
+        {
+            ReportStatus("当前界面未接入剪辑台。");
+            return;
+        }
+
+        try
+        {
+            var session = await _sessions.GetByIdAsync(live.SessionId).ConfigureAwait(true);
+            if (session is null)
+            {
+                ReportStatus("该录制刚刚结束，正在刷新录制列表…");
+                await RefreshAsync().ConfigureAwait(true);
+                return;
+            }
+
+            await OpenClipStudioAsync(session).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            ReportStatus($"打开剪辑台失败：{ex.Message}");
+        }
+    }
+
     internal void ReportStatus(string message)
     {
         if (!_disposed)

@@ -60,6 +60,8 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
     private ClipPlayerState _state = ClipPlayerState.Empty;
     private bool _paused = true;
     private bool _completionRaised;
+    private bool _isLive;
+    private TimeSpan _liveSafeDuration;
 
     public LocalClipPlayerView()
     {
@@ -98,6 +100,27 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
     public TimeSpan Duration => _duration;
 
     public double Speed => _speed;
+
+    /// <summary>当前是否以“边录边剪”模式加载（分片仍在写入）。</summary>
+    public bool IsLive => _isLive;
+
+    /// <summary>边录边剪的安全可剪截止时间（Seek 上界）。</summary>
+    public TimeSpan SafeDuration => _liveSafeDuration;
+
+    /// <summary>
+    /// 刷新边录边剪的安全可剪截止时间：同步后安全区会前移，调用方无需重载文件即可放宽 seek 上界。
+    /// 非 live 模式下忽略。
+    /// </summary>
+    public void UpdateLiveSafeDuration(TimeSpan safeDuration)
+    {
+        ThrowIfDisposed();
+        if (!_isLive)
+        {
+            return;
+        }
+
+        _liveSafeDuration = safeDuration < TimeSpan.Zero ? TimeSpan.Zero : safeDuration;
+    }
 
     protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
     {
@@ -143,7 +166,155 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
             return;
         }
 
+        // 普通离线文件：退出 live 模式的 seek 上界限制。
+        _isLive = false;
+        _liveSafeDuration = TimeSpan.Zero;
         await LoadAsyncCore(filePath, ct).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// 以“边录边剪”方式加载正在写入的分片：先强制 mpv 把文件当可 seek，
+    /// 其余流程复用 <see cref="LoadAsync"/>。seek 上界由 <paramref name="safeDuration"/> 决定。
+    /// </summary>
+    public async Task LoadLiveRecordingAsync(string filePath, TimeSpan safeDuration, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        ThrowIfDisposed();
+
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => LoadLiveRecordingAsync(filePath, safeDuration, ct));
+            return;
+        }
+
+        _isLive = true;
+        _liveSafeDuration = safeDuration < TimeSpan.Zero ? TimeSpan.Zero : safeDuration;
+        try
+        {
+            var context = EnsureContext();
+            // 录制中的 mkv 仍在前端追加 cluster：强制按可 seek 处理，避免 seek 被直接拒绝。
+            try
+            {
+                context.SetOptionString("force-seekable", "yes");
+            }
+            catch
+            {
+                try
+                {
+                    context.SetPropertyFlag("force-seekable", true);
+                }
+                catch
+                {
+                    // 运行期不支持该选项时忽略：仍可用重载 + 轮询位置兜底。
+                }
+            }
+
+            await LoadAsyncCore(filePath, ct).ConfigureAwait(true);
+        }
+        catch
+        {
+            _isLive = false;
+            _liveSafeDuration = TimeSpan.Zero;
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 边录边剪同步后无感重载分片：保持暂停状态与倍速，并跳到 <paramref name="position"/>。
+    /// 先 loadfile 再精确 seek，避免同步瞬间闪回首帧。
+    /// </summary>
+    public async Task ReloadAtPositionAsync(TimeSpan position, TimeSpan? safeDuration = null, CancellationToken ct = default)
+    {
+        ThrowIfDisposed();
+
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => ReloadAtPositionAsync(position, safeDuration, ct));
+            return;
+        }
+
+        // 同步后安全区前移：重载前先刷新上界，否则 ClampPosition 仍按旧的 safe 限制。
+        if (_isLive && safeDuration is { } safe)
+        {
+            _liveSafeDuration = safe < TimeSpan.Zero ? TimeSpan.Zero : safe;
+        }
+
+        var filePath = _filePath;
+        if (filePath is null)
+        {
+            return;
+        }
+
+        var previousState = _state;
+        var wasPlaying = previousState == ClipPlayerState.Playing;
+        var target = ClampPosition(position);
+
+        var loadTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _loadTcs = loadTcs;
+        try
+        {
+            var context = EnsureContext();
+            context.SetPropertyFlag("pause", true);
+            context.Command("loadfile", filePath, "replace");
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(LoadTimeout);
+            using var registration = timeout.Token.Register(
+                () => loadTcs.TrySetException(new TimeoutException("边录边剪同步重载超时")));
+
+            await loadTcs.Task.ConfigureAwait(true);
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                return;
+            }
+
+            ApplySpeed();
+            _duration = ReadDuration();
+            _position = target;
+            _completionRaised = false;
+
+            // 先精确 seek 到原位置，再恢复暂停/播放状态与弹幕层。
+            try
+            {
+                context.Command(
+                    "seek",
+                    target.TotalSeconds.ToString("F3", CultureInfo.InvariantCulture),
+                    "absolute+exact");
+            }
+            catch
+            {
+                // mpv 释放中忽略。
+            }
+
+            if (wasPlaying)
+            {
+                Play();
+            }
+            else
+            {
+                _paused = true;
+                SetState(previousState == ClipPlayerState.Ended ? ClipPlayerState.Ended : ClipPlayerState.Paused, null);
+            }
+
+            DurationChanged?.Invoke(this, EventArgs.Empty);
+            PositionChanged?.Invoke(this, EventArgs.Empty);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            SetState(ClipPlayerState.Failed, ex.Message);
+            PlaybackFailed?.Invoke(ex.Message);
+        }
+        finally
+        {
+            if (ReferenceEquals(_loadTcs, loadTcs))
+            {
+                _loadTcs = null;
+            }
+        }
     }
 
     private async Task LoadAsyncCore(string filePath, CancellationToken ct)
@@ -436,6 +607,29 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
             }
 
             var position = TimeSpan.FromSeconds(Math.Max(0, seconds.Value));
+
+            // 边录边剪：分片仍在前端增长，mpv 的 EOF 只代表“当前已写入尾部”，不能当作播放完成；
+            // 同时把播放位置钳在安全可剪范围内，避免播放头/界面位置进入尚未安全写入的尾部。
+            if (_isLive)
+            {
+                if (_liveSafeDuration > TimeSpan.Zero)
+                {
+                    var liveMax = _liveSafeDuration - TimeSpan.FromMilliseconds(100);
+                    position = liveMax <= TimeSpan.Zero
+                        ? TimeSpan.Zero
+                        : position > liveMax ? liveMax : position;
+                }
+
+                if (Math.Abs((position - _position).TotalMilliseconds) < 1)
+                {
+                    return;
+                }
+
+                _position = position;
+                PositionChanged?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+
             if (_duration <= TimeSpan.Zero)
             {
                 _duration = ReadDuration();
@@ -491,6 +685,18 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
         if (position < TimeSpan.Zero)
         {
             return TimeSpan.Zero;
+        }
+
+        // 边录边剪：只允许跳到安全可剪截止前 0.1 秒，避免读到尚未写入文件的尾部。
+        if (_isLive && _liveSafeDuration > TimeSpan.Zero)
+        {
+            var liveMax = _liveSafeDuration - TimeSpan.FromMilliseconds(100);
+            if (liveMax <= TimeSpan.Zero)
+            {
+                return TimeSpan.Zero;
+            }
+
+            return position > liveMax ? liveMax : position;
         }
 
         if (_duration > TimeSpan.Zero && position > _duration)

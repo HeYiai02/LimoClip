@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using LiveMonitor.Core.Models;
@@ -30,6 +31,9 @@ public partial class ClipStudioView : Avalonia.Controls.UserControl
         Player.PlaybackFailed += OnPlayerFailed;
 
         DetachedFromVisualTree += OnDetachedFromVisualTree;
+
+        // 剪辑台内 F5 手动同步录制进度：隧道事件保证焦点在子控件时也能收到。
+        AddHandler(KeyDownEvent, OnClipStudioKeyDown, RoutingStrategies.Tunnel);
     }
 
     /// <summary>窗口关闭前调用：暂停并释放 libmpv 上下文。</summary>
@@ -67,6 +71,9 @@ public partial class ClipStudioView : Avalonia.Controls.UserControl
         viewModel.SpeedChangeRequested += OnSpeedChangeRequested;
         viewModel.DanmakuEnabledChanged += OnDanmakuEnabledChanged;
         viewModel.DanmakuSyncRequested += OnDanmakuSyncRequested;
+        viewModel.LoadLiveVideoRequested += OnLoadLiveVideoRequested;
+        viewModel.LiveReloadRequested += OnLiveReloadRequested;
+        viewModel.LiveSafeDurationChanged += OnLiveSafeDurationChanged;
     }
 
     private void Detach(ClipStudioViewModel viewModel)
@@ -79,6 +86,9 @@ public partial class ClipStudioView : Avalonia.Controls.UserControl
         viewModel.SpeedChangeRequested -= OnSpeedChangeRequested;
         viewModel.DanmakuEnabledChanged -= OnDanmakuEnabledChanged;
         viewModel.DanmakuSyncRequested -= OnDanmakuSyncRequested;
+        viewModel.LoadLiveVideoRequested -= OnLoadLiveVideoRequested;
+        viewModel.LiveReloadRequested -= OnLiveReloadRequested;
+        viewModel.LiveSafeDurationChanged -= OnLiveSafeDurationChanged;
     }
 
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
@@ -99,6 +109,81 @@ public partial class ClipStudioView : Avalonia.Controls.UserControl
         {
             _viewModel?.OnPlayerFailed(ex.Message);
         }
+    }
+
+    /// <summary>边录边剪：让播放器加载正在写入的分片，并带上安全可剪上界。</summary>
+    private async void OnLoadLiveVideoRequested(string filePath)
+    {
+        var viewModel = _viewModel;
+        if (viewModel is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await Player.LoadLiveRecordingAsync(filePath, viewModel.SafeClipDuration);
+            Player.SetDanmakuEnabled(viewModel.DanmakuPlaybackEnabled);
+            Player.SetSpeed(viewModel.Speed);
+        }
+        catch (Exception ex)
+        {
+            viewModel.OnPlayerFailed(ex.Message);
+        }
+    }
+
+    /// <summary>边录边剪：同步进度后按原播放位置无感重载分片，避免画面闪回。</summary>
+    private async void OnLiveReloadRequested()
+    {
+        var viewModel = _viewModel;
+        if (viewModel is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await Player.ReloadAtPositionAsync(viewModel.Position, viewModel.SafeClipDuration);
+        }
+        catch (Exception ex)
+        {
+            viewModel.OnPlayerFailed(ex.Message);
+        }
+    }
+
+    /// <summary>边录边剪：安全截止时间前移后，同步放宽播放器的 seek 上界（无需重载文件）。</summary>
+    private void OnLiveSafeDurationChanged()
+    {
+        var viewModel = _viewModel;
+        if (viewModel is null)
+        {
+            return;
+        }
+
+        Player.UpdateLiveSafeDuration(viewModel.SafeClipDuration);
+    }
+
+    /// <summary>剪辑台内快捷键：F5 同步最新录制进度（仅剪辑台可见且非文本输入时生效）。</summary>
+    private void OnClipStudioKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
+    {
+        if (e.Key != Key.F5 || !IsVisible || _viewModel is null)
+        {
+            return;
+        }
+
+        if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement()
+            is Avalonia.Controls.TextBox or Avalonia.Controls.ComboBox)
+        {
+            return;
+        }
+
+        if (!_viewModel.SyncLiveProgressCommand.CanExecute(null))
+        {
+            return;
+        }
+
+        _viewModel.SyncLiveProgressCommand.Execute(null);
+        e.Handled = true;
     }
 
     private void OnPlayPauseRequested() => Player.TogglePlayPause();
@@ -140,6 +225,8 @@ public partial class ClipStudioView : Avalonia.Controls.UserControl
         }
 
         _viewModel.UpdateSelection(Timeline.InPoint, Timeline.OutPoint);
+        // ViewModel 会把选区钳制到安全截止/最小时长内：回写一次，避免手柄继续停在灰区。
+        ApplyTimeline();
     }
 
     private void OnPlayerPositionChanged(object? sender, EventArgs e)
@@ -249,6 +336,8 @@ public partial class ClipStudioView : Avalonia.Controls.UserControl
         try
         {
             Timeline.Duration = _viewModel.Duration;
+            // 边录边剪：时间轴尾部显示安全可剪截止，避免用户把出点拖进仍在写入的区域。
+            Timeline.SafeDuration = _viewModel.IsLiveSession ? _viewModel.SafeClipDuration : TimeSpan.Zero;
             Timeline.Waveform = _viewModel.Waveform;
             Timeline.InPoint = _viewModel.InPoint;
             Timeline.OutPoint = _viewModel.OutPoint;

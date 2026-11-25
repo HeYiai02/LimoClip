@@ -228,6 +228,10 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
         }
     }
 
+    /// <summary>边录边剪：把该直播间正在写入的分片直接送进剪辑台实时剪辑。</summary>
+    [RelayCommand]
+    private Task LiveClipAsync() => _parent.RequestOpenLiveClipAsync(Room.Id);
+
     [RelayCommand]
     private Task ChooseDirectoryAsync() => _parent.ChooseRoomDirectoryAsync(this);
 

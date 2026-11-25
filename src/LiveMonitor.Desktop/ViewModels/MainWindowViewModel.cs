@@ -191,6 +191,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             _services.Waveforms,
             _services.Encoders,
             _services.Clips,
+            _services.Recordings,
+            _services.LiveWaveforms,
             _services.Asr);
         studio.PickVideoFileAsync = () =>
             PickClipVideoFileAsync?.Invoke() ?? Task.FromResult<string?>(null);

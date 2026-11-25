@@ -297,24 +297,50 @@
         <!-- ==================== 中：本地预览播放器 ==================== -->
         <Border Grid.Row="0" Grid.Column="1" Classes="card" Padding="12" Margin="0,0,10,10">
             <Grid RowDefinitions="Auto,*,Auto">
-                <Grid ColumnDefinitions="*,Auto">
-                    <StackPanel Spacing="2">
-                        <TextBlock Text="{Binding VideoTitle}" FontSize="13.5" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource BrushTextPrimary}"
-                                   TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="{Binding VideoSubtitle}" FontSize="10" Classes="mono"
-                                   Foreground="{DynamicResource BrushTextMuted}"
-                                   TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
-                    <Border Grid.Column="1" Classes="chip" Margin="10,0,0,0">
-                        <StackPanel Orientation="Horizontal" Spacing="5">
-                            <Border Width="6" Height="6" CornerRadius="3" VerticalAlignment="Center"
-                                    Background="{DynamicResource BrushAccent}" />
-                            <TextBlock Text="本地预览" FontSize="9.5" VerticalAlignment="Center"
-                                       Foreground="{DynamicResource BrushTextSecondary}" />
+                <StackPanel>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="{Binding VideoTitle}" FontSize="13.5" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource BrushTextPrimary}"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding VideoSubtitle}" FontSize="10" Classes="mono"
+                                       Foreground="{DynamicResource BrushTextMuted}"
+                                       TextTrimming="CharacterEllipsis" />
                         </StackPanel>
+                        <Border Grid.Column="1" Classes="chip" Margin="10,0,0,0">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <Border Width="6" Height="6" CornerRadius="3" VerticalAlignment="Center"
+                                        Background="{DynamicResource BrushAccent}" />
+                                <TextBlock Text="本地预览" FontSize="9.5" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource BrushTextSecondary}" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- 边录边剪：录制中实时状态条（F5 或右侧按钮手动同步，勾选后每 10 秒自动同步） -->
+                    <Border IsVisible="{Binding IsLiveSession}" Margin="0,8,0,0" Padding="8,6"
+                            CornerRadius="6" Background="#1AEF4444"
+                            BorderBrush="{DynamicResource BrushDanger}" BorderThickness="1">
+                        <Grid ColumnDefinitions="Auto,*,Auto">
+                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                <Border Width="7" Height="7" CornerRadius="3.5"
+                                        Background="{DynamicResource BrushDanger}" />
+                                <TextBlock Text="{Binding LiveStatusText}" FontSize="10.5" Classes="mono"
+                                           Foreground="{DynamicResource BrushTextSecondary}"
+                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8"
+                                        VerticalAlignment="Center">
+                                <CheckBox Classes="studio-check" Content="自动同步高能/弹幕"
+                                          IsChecked="{Binding IsAutoSyncEnabled}"
+                                          ToolTip.Tip="每 10 秒自动同步最新录制进度（不打断播放）" />
+                                <Button Classes="ghost-btn" Content="🔄 同步最新进度" Padding="8,4"
+                                        FontSize="10.5" Command="{Binding SyncLiveProgressCommand}"
+                                        ToolTip.Tip="立即同步最新录制进度（快捷键 F5）" />
+                            </StackPanel>
+                        </Grid>
                     </Border>
-                </Grid>
+                </StackPanel>
 
                 <!-- 暗房播放器：外围 #0A0C10，画面由 LocalClipPlayerView 自适应居中 -->
                 <Border Grid.Row="1" Margin="0,10,0,0" Background="#0A0C10"
