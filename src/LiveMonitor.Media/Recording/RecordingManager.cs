@@ -241,17 +241,31 @@ public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor
     public async Task StopAsync(Guid liveRoomId, CancellationToken ct = default)
     {
         ActiveRecording? active;
-        lock (_gate)
+
+        // 只把「查活动会话 + 置停止标记」放进 _startGate：启动窗口内（活动会话已登记、
+        // recorder.StartAsync 尚未返回）若先收尾，StartCore 的后续代码会把已 Completed 的
+        // 会话重新置为 Recording 并补发 SessionStarted，产生「Recording 但已写 EndedAt」的脏数据。
+        // 拿到 _startGate 时启动流程必然已结束；耗时的优雅停止放在锁外，避免阻塞其它房间起录。
+        await _startGate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            _active.TryGetValue(liveRoomId, out active);
+            lock (_gate)
+            {
+                _active.TryGetValue(liveRoomId, out active);
+            }
+
+            if (active is null)
+            {
+                return;
+            }
+
+            active.StopRequested = true;
+        }
+        finally
+        {
+            _startGate.Release();
         }
 
-        if (active is null)
-        {
-            return;
-        }
-
-        active.StopRequested = true;
         await SuppressAutoRestartAsync(active.Room).ConfigureAwait(false);
         _log($"正在停止录制：{FormatRoom(active.Room)}");
 
