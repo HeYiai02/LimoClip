@@ -441,6 +441,34 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// 由视图注入：把工作区宿主从自由画布切回平铺 Dock（清空画布、恢复 Dock 布局绑定、重新挂载前解绑播放器）。
+    /// 宿主切换只能由视图完成，ViewModel 在执行平铺布局命令前通过此回调协调。
+    /// </summary>
+    public Func<Task>? LeaveFreeformHostAsync { get; set; }
+
+    /// <summary>
+    /// 平铺布局命令（一键自适应/主副屏/恢复比例/切换平铺方案）执行前调用：
+    /// 若当前在自由画布中，先让视图把宿主切回 Dock，再翻转模式。否则销毁仍挂在可见画布上的
+    /// MpvPlayerView 会让原生渲染控件与视觉树不一致，导致闪退；而只改模式又会让新布局落在隐藏的 Dock 上，看起来没有效果。
+    /// </summary>
+    public async Task<bool> ExitFreeformForTiledLayoutAsync()
+    {
+        if (!IsFreeformMode)
+        {
+            return false;
+        }
+
+        if (LeaveFreeformHostAsync is { } leave)
+        {
+            await leave().ConfigureAwait(true);
+        }
+
+        IsFreeformMode = false;
+        _freeformDocument = null;
+        return true;
+    }
+
     /// <summary>画布拖动/缩放/层级变化后由视图回写最新文档。</summary>
     public void UpdateFreeformDocument(FreeformLayoutDocument? document)
     {
@@ -1140,11 +1168,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (IsFreeformMode)
-        {
-            IsFreeformMode = false;
-            _freeformDocument = null;
-        }
+        // 自由画布与 Dock 是两个宿主：必须先由视图把宿主切回 Dock 再重建布局，
+        // 否则仍挂在画布视觉树上的播放器被销毁会闪退。
+        await ExitFreeformForTiledLayoutAsync().ConfigureAwait(true);
 
         CaptureCustomLayoutSnapshot();
 
@@ -1215,6 +1241,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             return;
         }
+
+        // 自由布局下恢复比例：先把宿主切回 Dock，否则比例会套到隐藏的 Dock 树上。
+        await ExitFreeformForTiledLayoutAsync().ConfigureAwait(true);
 
         // 同一批 PaneId 的方案切换会走 LoadProfileAsync 的原地复用分支，
         // 该分支不替换 Dock 树，因此不会应用快照里的 Proportion。
@@ -2000,12 +2029,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     /// 切到「主副屏」布局：第一路作为主画面，其余房间在右侧纵向排列。
     /// 与一键自适应共用重建路径，房间顺序沿用当前工作区窗格顺序；播放器会重新起播以避免 OpenGL 控件搬运。
     /// </summary>
-    public async Task ApplyHeroLayoutAsync(CancellationToken ct = default)
+    public async Task ApplyHeroLayoutAsync(CancellationToken ct = default, bool startPlayback = true)
     {
         if (Layout is null)
         {
             return;
         }
+
+        // 与一键自适应一致：自由布局下先切回 Dock 宿主，否则新布局只落在隐藏的 Dock 上，用户看不到效果。
+        await ExitFreeformForTiledLayoutAsync().ConfigureAwait(true);
 
         ExitFocus();
         var rooms = WorkspaceDockBuilder.EnumerateTiles(Layout)
@@ -2029,7 +2061,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var status = rooms.Count <= 2
             ? "房间不足 3 路，主副屏布局暂按单行排布"
             : $"已切换为主副屏布局（{rooms.Count} 路）";
-        await ApplyRebuiltLayoutAsync(layout, audioStates, status, startPlayback: true, isHero: rooms.Count > 2, ct)
+        await ApplyRebuiltLayoutAsync(layout, audioStates, status, startPlayback, isHero: rooms.Count > 2, ct)
             .ConfigureAwait(true);
     }
 
@@ -2342,6 +2374,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var freeformDocument = FreeformLayoutDocument.LooksLikeFreeform(profile.DockLayoutJson)
             ? FreeformLayoutDocument.TryParse(profile.DockLayoutJson)
             : null;
+        if (freeformDocument is null && IsFreeformMode)
+        {
+            // 从自由画布切换到平铺方案：同样要先让视图把宿主切回 Dock，再替换布局树。
+            await ExitFreeformForTiledLayoutAsync().ConfigureAwait(true);
+        }
+
         IsFreeformMode = freeformDocument is not null;
         _freeformDocument = freeformDocument;
         var previousLayout = Layout;
@@ -2427,6 +2465,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 oldTile.IsDanmakuVisible = slot?.DefaultDanmakuVisible ?? false;
                 if (oldTile.LiveRoomId == (room?.Id ?? Guid.Empty))
                 {
+                    if (oldTile.PlayerView is null && oldTile.HasRoom)
+                    {
+                        // 宿主刚从自由画布切回 Dock：旧控件已在画布侧解绑，必须重新挂载播放器。
+                        _ = _players.StartAsync(oldTile);
+                    }
+
                     continue;
                 }
 

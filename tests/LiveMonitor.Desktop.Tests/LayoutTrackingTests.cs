@@ -7,6 +7,7 @@ using Xunit;
 
 namespace LiveMonitor.Desktop.Tests;
 
+[Collection(AppServicesDatabaseCollection.Name)]
 public sealed class LayoutTrackingTests
 {
     [Fact]

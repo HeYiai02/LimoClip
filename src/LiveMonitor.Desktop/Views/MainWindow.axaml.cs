@@ -256,6 +256,7 @@ public partial class MainWindow : Window
             _viewModel.Groups.CollectionChanged += (_, _) => RefreshGroupPills();
             _viewModel.WorkspaceTilesChanged += (_, _) => SyncFreeformTiles();
             _viewModel.LayoutStructureChanged += (_, _) => RefreshWorkspaceHost();
+            _viewModel.LeaveFreeformHostAsync = LeaveFreeformHostAsync;
             FreeformCanvas.RoomDropped += OnFreeformRoomDropped;
             _viewModel.FreeformApplyRequested += (_, document) =>
             {
@@ -628,22 +629,9 @@ public partial class MainWindow : Window
         {
             if (_viewModel.IsFreeformMode)
             {
-                // 退出自由布局：先清空画布并等一轮布局，确保旧窗格视图不再绑定 PlayerView，
-                // 再恢复 Dock 结构、重新创建播放器（PlayerView 不能在两个宿主之间复用）。
-                FreeformCanvas.SetTiles(Array.Empty<RoomTileViewModel>());
-                FreeformCanvas.IsVisible = false;
-                FreeformCanvas.UpdateLayout();
-                await Task.Delay(120);
-
-                _viewModel.DetachWorkspacePlayers();
+                // 退出自由布局：先把宿主切回 Dock 并重新挂载播放器。
+                await LeaveFreeformHostAsync();
                 _viewModel.ToggleFreeformMode();
-                Dock.Layout = _savedDockLayout;
-                Dock.Bind(DockControl.LayoutProperty,
-                    new Avalonia.Data.Binding(nameof(MainWindowViewModel.Layout)));
-                Dock.IsVisible = !_viewModel.IsWorkspaceEmpty;
-                EnsureSplitterTemplate();
-                Dock.UpdateLayout();
-                await Task.Delay(120);
                 await _viewModel.StartWorkspacePlayersAsync();
             }
             else
@@ -675,9 +663,40 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void OnFreeformPipPreset(object? sender, RoutedEventArgs e)
+    /// <summary>
+    /// 把工作区宿主从自由画布切回平铺 Dock（只做视图层清理：不翻转 ViewModel 模式、不起播）。
+    /// ViewModel 在「一键自适应 / 主副屏 / 恢复比例 / 切换到平铺方案」前通过 LeaveFreeformHostAsync 回调它，
+    /// 避免播放器被销毁在仍可见的画布视觉树上导致闪退，也避免新布局落在隐藏的 Dock 上导致“没有效果”。
+    /// </summary>
+    private async Task LeaveFreeformHostAsync()
     {
-        if (_viewModel is null || _initializing)
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        // 先清空画布并等一轮布局，确保旧窗格视图不再绑定 PlayerView；
+        // 播放器不能在两个宿主之间复用，必须解绑后由调用方重新挂载。
+        FreeformCanvas.SetTiles(Array.Empty<RoomTileViewModel>());
+        FreeformCanvas.IsVisible = false;
+        FreeformCanvas.UpdateLayout();
+        await Task.Delay(120);
+
+        _viewModel.DetachWorkspacePlayers();
+        Dock.Layout = _savedDockLayout ?? _viewModel.Layout;
+        Dock.Bind(DockControl.LayoutProperty,
+            new Avalonia.Data.Binding(nameof(MainWindowViewModel.Layout)));
+        Dock.IsVisible = !_viewModel.IsWorkspaceEmpty;
+        EnsureSplitterTemplate();
+        Dock.UpdateLayout();
+        await Task.Delay(120);
+
+        // Dock 刚恢复可见，重新采样一次宽高比，供随后的自适应重建使用。
+        _viewModel.SetWorkspaceAspect(Dock.Bounds.Width, Dock.Bounds.Height);
+    }
+
+    private async void OnFreeformPipPreset(object? sender, RoutedEventArgs e)
+    {        if (_viewModel is null || _initializing)
         {
             return;
         }
