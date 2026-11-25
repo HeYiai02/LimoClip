@@ -88,6 +88,8 @@ public sealed class RecordingTargetStateTests
     /// <summary>
     /// 自由布局下点「一键自适应」：必须先回调视图把宿主切回 Dock，再翻模式/重建布局，
     /// 否则仍挂在画布上的播放器被销毁会闪退；平铺状态下则不应触发宿主切换。
+    /// 视图切宿主时会解绑播放器，因此即使行列数与目标一致也必须重建布局（重新挂播放器并起播），
+    /// 不能只归位比例——否则窗格里没有播放器，直播间不会自动加载。
     /// </summary>
     [Fact]
     public async Task AutoFitFromFreeform_LeavesHostBeforeRebuild()
@@ -102,20 +104,46 @@ public sealed class RecordingTargetStateTests
                 leaveCalls++;
                 // 回调必须发生在模式翻转之前：视图此时仍能按自由布局状态清理画布宿主。
                 Assert.True(viewModel.IsFreeformMode);
+                // 真实视图在退出自由布局时会停播并解绑每个窗格的播放器。
+                viewModel.DetachWorkspacePlayers();
                 return Task.CompletedTask;
             };
 
             // 平铺状态下点自适应不应触达宿主切换。
-            await viewModel.AutoFitAsync();
+            await viewModel.AutoFitAsync(startPlayback: false);
             Assert.Equal(0, leaveCalls);
 
+            // 进入自由布局（真实视图此时也会解绑播放器）。
+            viewModel.DetachWorkspacePlayers();
             viewModel.ToggleFreeformMode();
             Assert.True(viewModel.IsFreeformMode);
 
-            await viewModel.AutoFitAsync();
+            var freeformLayout = viewModel.Layout;
+            await viewModel.AutoFitAsync(startPlayback: false);
 
             Assert.Equal(1, leaveCalls);
             Assert.False(viewModel.IsFreeformMode);
+            Assert.Equal("自动适配", viewModel.LayoutModeText);
+            // 播放器已解绑：必须重建布局，而不是沿用旧布局只归位比例。
+            Assert.NotSame(freeformLayout, viewModel.Layout);
+        });
+    }
+
+    /// <summary>
+    /// 平铺状态下网格行列未变时点「一键自适应」：应保持现有布局实例，只归位比例，
+    /// 不销毁播放器（音频/画面状态不重置）。
+    /// </summary>
+    [Fact]
+    public async Task AutoFitWhenTiledAndGridUnchanged_OnlyRestoresProportions()
+    {
+        await WithWorkspaceAsync(async (services, viewModel) =>
+        {
+            await AddRoomsToWorkspaceAsync(services, viewModel, count: 2);
+
+            var tiledLayout = viewModel.Layout;
+            await viewModel.AutoFitAsync(startPlayback: false);
+
+            Assert.Same(tiledLayout, viewModel.Layout);
             Assert.Equal("自动适配", viewModel.LayoutModeText);
         });
     }

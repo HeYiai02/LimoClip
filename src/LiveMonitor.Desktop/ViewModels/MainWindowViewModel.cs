@@ -1161,7 +1161,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>一键自适应：按当前活跃房间数重排，并清除“自定义比例”标记。</summary>
-    public async Task AutoFitAsync(CancellationToken ct = default)
+    public async Task AutoFitAsync(CancellationToken ct = default, bool startPlayback = true)
     {
         if (Layout is null)
         {
@@ -1170,7 +1170,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         // 自由画布与 Dock 是两个宿主：必须先由视图把宿主切回 Dock 再重建布局，
         // 否则仍挂在画布视觉树上的播放器被销毁会闪退。
-        await ExitFreeformForTiledLayoutAsync().ConfigureAwait(true);
+        var exitedFreeform = await ExitFreeformForTiledLayoutAsync().ConfigureAwait(true);
 
         CaptureCustomLayoutSnapshot();
 
@@ -1190,7 +1190,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var currentRoomCount = allTiles.Count(tile => tile.HasRoom);
         // 有空格时必须重建：否则会把空窗格留在网格里，3 路无法收成“上 1 下 2”。
         // 主副屏布局的行列口径与网格不同，统一走重建，避免把主副屏当成“行列未变”的网格。
-        if (!IsHeroLayout &&
+        // 从自由画布退回平铺时，宿主切换会解绑每一格的播放器（tile.PlayerView = null）；
+        // 此时即使行列数与目标一致也不能只归位比例，否则窗格里没有播放器、直播间不会自动加载。
+        if (!exitedFreeform &&
+            !IsHeroLayout &&
             rooms.Count == currentRoomCount &&
             allTiles.Count == rooms.Count &&
             current.Rows == desiredRows &&
@@ -1204,7 +1207,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await FitRoomsAsync(rooms, rooms.Count == 0 ? "已重置为自动适配" : $"已自适应 {rooms.Count} 路", ct)
+        await FitRoomsAsync(rooms, rooms.Count == 0 ? "已重置为自动适配" : $"已自适应 {rooms.Count} 路", ct, startPlayback)
             .ConfigureAwait(true);
     }
 
@@ -1243,7 +1246,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         // 自由布局下恢复比例：先把宿主切回 Dock，否则比例会套到隐藏的 Dock 树上。
-        await ExitFreeformForTiledLayoutAsync().ConfigureAwait(true);
+        var exitedFreeform = await ExitFreeformForTiledLayoutAsync().ConfigureAwait(true);
 
         // 同一批 PaneId 的方案切换会走 LoadProfileAsync 的原地复用分支，
         // 该分支不替换 Dock 树，因此不会应用快照里的 Proportion。
@@ -1268,6 +1271,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 ClearCustomLayoutSnapshot();
                 StatusText = "已恢复自定义比例";
                 ProportionsRestored?.Invoke(this, EventArgs.Empty);
+                // 从自由画布切回时宿主切换已解绑播放器，恢复比例不会重建布局，必须补一次起播。
+                if (exitedFreeform)
+                {
+                    await StartWorkspacePlayersAsync(ct).ConfigureAwait(true);
+                }
+
                 return;
             }
         }
