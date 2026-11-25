@@ -1,4 +1,3 @@
-using System.Globalization;
 using LiveMonitor.Core;
 using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Enums;
@@ -25,17 +24,17 @@ public sealed record ActiveRecordingSnapshot(LiveRoom Room, RecordingProgress Pr
 /// DanmakuManager 可以为 null（例如无弹幕场景），此时不写弹幕伴随文件。
 /// </para>
 /// </summary>
-public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor
+public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor, IRecordingTargetPollerHost
 {
     /// <summary>缺省保存目录的末尾相对路径，拼接在用户目录下。</summary>
     public const string DefaultRelativeDirectory = @"Videos\LimoClip";
 
     /// <summary>缺省开播轮询间隔（秒）。</summary>
-    public const int DefaultPollIntervalSeconds = 60;
+    public const int DefaultPollIntervalSeconds = RecordingTargetPoller.DefaultPollIntervalSeconds;
 
-    public const int MinPollIntervalSeconds = 10;
+    public const int MinPollIntervalSeconds = RecordingTargetPoller.MinPollIntervalSeconds;
 
-    public const int MaxPollIntervalSeconds = 600;
+    public const int MaxPollIntervalSeconds = RecordingTargetPoller.MaxPollIntervalSeconds;
 
     /// <summary>断流续录的最大重试次数，超过后交给下一轮开播轮询。</summary>
     public const int MaxRetryAttempts = 5;
@@ -47,7 +46,6 @@ public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor
     private static readonly TimeSpan RetryBaseDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RetryMaxDelay = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan RetryLoopInterval = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan InitialPollDelay = TimeSpan.FromSeconds(3);
 
     /// <summary>分段续录：ffmpeg 因 CDN 断流退出后，重启下一段前的等待时间。</summary>
     private static readonly TimeSpan PartRestartDelay = TimeSpan.FromSeconds(2);
@@ -74,20 +72,17 @@ public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly Action<string> _log;
     private readonly TimeSpan _monitorInterval;
-    private readonly TimeSpan? _pollIntervalOverride;
     private readonly ProcessJobGuard _jobGuard;
+    private readonly RecordingTargetPoller _poller;
 
     private readonly object _gate = new();
     private readonly Dictionary<Guid, ActiveRecording> _active = new();
     private readonly Dictionary<Guid, RetryState> _retries = new();
     private readonly HashSet<Guid> _suppressedRooms = new();
     private readonly SemaphoreSlim _startGate = new(1, 1);
-    private readonly SemaphoreSlim _pollGate = new(4, 4);
 
     private CancellationTokenSource? _lifetimeCts;
-    private Task? _pollTask;
     private Task? _retryTask;
-    private TimeSpan _pollInterval = TimeSpan.FromSeconds(DefaultPollIntervalSeconds);
     private int _initialized;
     private int _disposed;
 
@@ -120,15 +115,19 @@ public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor
         _delay = delay ?? ((timeSpan, token) => Task.Delay(timeSpan, token));
         _log = log ?? (_ => { });
         _monitorInterval = monitorInterval ?? DefaultMonitorInterval;
-        _pollIntervalOverride = pollIntervalOverride;
-        if (_pollIntervalOverride is { } pollInterval)
-        {
-            _pollInterval = ClampPollInterval(pollInterval);
-        }
 
         _jobGuard = new ProcessJobGuard();
         _recorderFactory = recorderFactory ?? CreateDefaultRecorder;
         _segmentMerger = segmentMerger;
+        _poller = new RecordingTargetPoller(
+            _rooms,
+            _targets,
+            _settings,
+            _providerResolver,
+            ReadCookieAsync,
+            this,
+            pollIntervalOverride,
+            _delay);
     }
 
     /// <summary>
@@ -147,16 +146,7 @@ public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor
     public RecordingHighlightTracker HighlightTracker { get; } = new();
 
     /// <summary>当前开播轮询间隔。</summary>
-    public TimeSpan PollInterval
-    {
-        get
-        {
-            lock (_gate)
-            {
-                return _pollInterval;
-            }
-        }
-    }
+    public TimeSpan PollInterval => _poller.PollInterval;
 
     /// <summary>录制进度更新；第一个参数为直播间主库 Id。</summary>
     public event Action<Guid, RecordingProgress>? ProgressUpdated;
@@ -184,15 +174,7 @@ public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor
         try
         {
             await RecoverUnfinishedSessionsAsync(ct).ConfigureAwait(false);
-
-            if (_pollIntervalOverride is null)
-            {
-                var interval = await ReadPollIntervalAsync(ct).ConfigureAwait(false);
-                lock (_gate)
-                {
-                    _pollInterval = interval;
-                }
-            }
+            await _poller.ConfigureAsync(ct).ConfigureAwait(false);
 
             if (_danmaku is not null)
             {
@@ -201,7 +183,7 @@ public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor
 
             _lifetimeCts = new CancellationTokenSource();
             var token = _lifetimeCts.Token;
-            _pollTask = Task.Run(() => PollLoopAsync(token), token);
+            _poller.Start(token);
             _retryTask = Task.Run(() => RetryLoopAsync(token), token);
             _log($"录制引擎已启动：开播轮询间隔 {PollInterval.TotalSeconds:0} 秒，默认目录 {DefaultDirectory}。");
         }
@@ -327,46 +309,7 @@ public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor
             throw new InvalidOperationException("录制引擎尚未初始化，请先调用 InitializeAsync。");
         }
 
-        IReadOnlyList<LiveRoom> rooms;
-        IReadOnlyList<RecordingTarget> targets;
-        try
-        {
-            rooms = await _rooms.GetAllAsync(ct).ConfigureAwait(false);
-            targets = await _targets.GetAllAsync(ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _log($"读取直播间/录制偏好失败，本轮开播检查跳过：{ex.Message}");
-            return;
-        }
-
-        var roomMap = new Dictionary<Guid, LiveRoom>();
-        foreach (var room in rooms)
-        {
-            roomMap[room.Id] = room;
-        }
-
-        var tasks = new List<Task>();
-        foreach (var target in targets)
-        {
-            if (!target.AutoRecordEnabled || !roomMap.TryGetValue(target.LiveRoomId, out var room))
-            {
-                continue;
-            }
-
-            if (IsRecording(room.Id))
-            {
-                continue;
-            }
-
-            tasks.Add(PollRoomAsync(room, ct));
-        }
-
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+        await _poller.PollOnceAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>直播间当前是否正在录制。</summary>
@@ -547,16 +490,13 @@ public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor
         {
         }
 
-        foreach (var task in new[] { _pollTask, _retryTask })
-        {
-            if (task is null)
-            {
-                continue;
-            }
+        await _poller.StopAsync().ConfigureAwait(false);
 
+        if (_retryTask is not null)
+        {
             try
             {
-                await task.ConfigureAwait(false);
+                await _retryTask.ConfigureAwait(false);
             }
             catch (Exception)
             {
@@ -603,10 +543,45 @@ public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor
 
         cts?.Dispose();
         _startGate.Dispose();
-        _pollGate.Dispose();
+        await _poller.DisposeAsync().ConfigureAwait(false);
         _jobGuard.Dispose();
         _log("录制引擎已停止。");
     }
+
+    // ---- 开播轮询接缝（RecordingTargetPoller 的宿主实现，仅程序集内可见） ----
+
+    bool IRecordingTargetPollerHost.IsRecording(Guid liveRoomId) => IsRecording(liveRoomId);
+
+    bool IRecordingTargetPollerHost.IsAutoRestartSuppressed(Guid liveRoomId)
+    {
+        lock (_gate)
+        {
+            return _suppressedRooms.Contains(liveRoomId);
+        }
+    }
+
+    void IRecordingTargetPollerHost.ResetRoomPollingState(Guid liveRoomId)
+    {
+        lock (_gate)
+        {
+            _suppressedRooms.Remove(liveRoomId);
+            _retries.Remove(liveRoomId);
+        }
+    }
+
+    Task IRecordingTargetPollerHost.StartAutoRecordingAsync(
+        LiveRoom room,
+        IPlatformProvider provider,
+        string? cookie,
+        RoomStatus status,
+        CancellationToken ct)
+        => StartCoreAsync(room, provider, cookie, status, ct);
+
+    void IRecordingTargetPollerHost.Log(string message) => _log(message);
+
+    void IRecordingTargetPollerHost.NotifyStatus(string message) => NotifyStatus(message);
+
+    string IRecordingTargetPollerHost.FormatRoomDisplayName(LiveRoom room) => FormatRoomDisplayName(room);
 
     // ---- 启动 ----
 
@@ -1552,34 +1527,6 @@ public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor
 
     // ---- 后台循环 ----
 
-    private async Task PollLoopAsync(CancellationToken token)
-    {
-        try
-        {
-            await _delay(InitialPollDelay, token).ConfigureAwait(false);
-            while (!token.IsCancellationRequested)
-            {
-                try
-                {
-                    await PollOnceAsync(token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (token.IsCancellationRequested)
-                {
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    _log($"开播轮询失败：{ex.Message}");
-                }
-
-                await _delay(PollInterval, token).ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-    }
-
     private async Task RetryLoopAsync(CancellationToken token)
     {
         try
@@ -1688,67 +1635,6 @@ public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor
         }
     }
 
-    private async Task PollRoomAsync(LiveRoom room, CancellationToken ct)
-    {
-        await _pollGate.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            if (IsRecording(room.Id))
-            {
-                return;
-            }
-
-            var provider = _providerResolver(room.Platform);
-            if (provider is null)
-            {
-                _log($"未注册平台 {room.Platform} 的 Provider，跳过自动录制检查。");
-                return;
-            }
-
-            // 自定义清流没有开播查询接口（GetRoomStatusAsync 恒返回 live），自动录制会导致
-            // 程序启动即开录、失败后无限重试；清流只支持手动开录。
-            if (room.Platform == PlatformType.CustomStream)
-            {
-                return;
-            }
-
-            var cookie = await ReadCookieAsync(room.Platform, ct).ConfigureAwait(false);
-            var status = await provider.GetRoomStatusAsync(room.RoomId, cookie, ct).ConfigureAwait(false);
-            if (!status.IsLive)
-            {
-                lock (_gate)
-                {
-                    _suppressedRooms.Remove(room.Id);
-                    _retries.Remove(room.Id);
-                }
-
-                return;
-            }
-
-            lock (_gate)
-            {
-                if (_suppressedRooms.Contains(room.Id))
-                {
-                    return;
-                }
-            }
-
-            await StartCoreAsync(room, provider, cookie, status, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-        }
-        catch (Exception ex)
-        {
-            _log($"自动录制检查失败（{FormatRoom(room)}）：{ex.Message}");
-            NotifyStatus($"自动录制失败（{FormatRoomDisplayName(room)}）：{ex.Message}");
-        }
-        finally
-        {
-            _pollGate.Release();
-        }
-    }
-
     // ---- 辅助 ----
 
     private async Task RecoverUnfinishedSessionsAsync(CancellationToken ct)
@@ -1788,35 +1674,6 @@ public sealed class RecordingManager : IAsyncDisposable, ILiveRecordingMonitor
         }
 
         _log($"崩溃恢复：已把 {unfinished.Count} 个未收尾的录制会话标记为 Failed。");
-    }
-
-    private async Task<TimeSpan> ReadPollIntervalAsync(CancellationToken ct)
-    {
-        try
-        {
-            var raw = await _settings.GetAsync(AppSettingKeys.RecordingPollIntervalSeconds, ct).ConfigureAwait(false);
-            if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var seconds))
-            {
-                return ClampPollInterval(TimeSpan.FromSeconds(seconds));
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _log($"读取录制轮询间隔失败，使用默认值：{ex.Message}");
-        }
-
-        return TimeSpan.FromSeconds(DefaultPollIntervalSeconds);
-    }
-
-    private static TimeSpan ClampPollInterval(TimeSpan value)
-    {
-        var seconds = (int)Math.Round(value.TotalSeconds);
-        seconds = Math.Clamp(seconds, MinPollIntervalSeconds, MaxPollIntervalSeconds);
-        return TimeSpan.FromSeconds(seconds);
     }
 
     private async Task<string> ResolveOutputDirectoryAsync(RecordingTarget? target, CancellationToken ct)
