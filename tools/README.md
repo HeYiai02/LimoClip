@@ -14,6 +14,6 @@ powershell -ExecutionPolicy Bypass -File ..\scripts\fetch-tools.ps1
 - `libmpv-2.dll` — `LibMpv.Avalonia` 加载的 libmpv 运行时。上游：<https://github.com/shinchiro/mpv-winbuild-cmake/releases> 里的 `mpv-dev-x86_64-*.7z`（取非 `-v3-` 版本，避免要求 AVX2）
 - `ffmpeg/ffmpeg.exe` — 探测/兜底，可选，应用当前未直接调用。上游：<https://www.gyan.dev/ffmpeg/builds/>（essentials zip）
 - `mpv/mpv.exe` 及其 DLL — 可选的独立 mpv 运行时（脚本不下载，需要时自行解包）
-- `cacert.crt` — 传给 mpv 的 CA 根证书清单（仓库跟踪，约 229 KB）
+- `cacert.crt` — 传给 mpv 的 CA 根证书清单（**唯一受版本跟踪的例外**，约 229 KB）。上游：<https://curl.se/ca/cacert.pem>（由 `scripts/fetch-tools.ps1` 下载）；更新命令：`powershell -ExecutionPolicy Bypass -File ..\scripts\fetch-tools.ps1 -Force`（`-Force` 会强制重新下载 cacert 与其它可选组件）。
 
 应用按输出目录中的相对路径解析这些文件；发布时保持同样的相对布局即可。第三方许可各自归上游项目所有，正式分发（GitHub Releases 压缩包）时请一并附上对应许可证文本。

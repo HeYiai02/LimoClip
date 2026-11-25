@@ -2,7 +2,7 @@
 
 本目录保存 LimoClip 各阶段的设计、验收与交接文档，**仅用于追溯**，内容可能已与当前代码不一致。
 
-当前项目架构与模块实现请以根目录 [`ARCHITECTURE.md`](../../ARCHITECTURE.md) 为准；产品介绍与使用说明见 [`README.md`](../../README.md)。
+当前项目架构与模块实现请以根目录 [`ARCHITECTURE.md`](../ARCHITECTURE.md) 为准；产品介绍与使用说明见 [`README.md`](../README.md)。
 
 | 文件 | 说明 |
 | --- | --- |

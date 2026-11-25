@@ -30,7 +30,7 @@ LimoClip 是一款面向 Windows 桌面端的开源直播工具（基于 .NET + 
 
 | 多屏监控工作区 | 独立录制中心 | 双波形剪辑台 + 语音转写 |
 | :---: | :---: | :---: |
-| ![多屏监控工作区](docs/images/monitor.png) | ![独立录制中心](docs/images/recording.png) | ![双波形剪辑台](docs/images/studio.png) |
+| ![多屏监控工作区](docs/images/monitor.webp) | ![独立录制中心](docs/images/recording.webp) | ![双波形剪辑台](docs/images/studio.webp) |
 
 ---
 
@@ -43,6 +43,8 @@ LimoClip 是一款面向 Windows 桌面端的开源直播工具（基于 .NET + 
 </p>
 
 > 上图为项目架构总览（使用 [Archify](https://github.com/tt-a1i/archify) 生成）：从桌面壳、监控工作区、libmpv 播放、弹幕引擎、平台插件层，到录制/剪辑/ASR 与本地数据层的完整链路。点击图片打开**可交互版本**（节点聚焦、上下游追踪、路径高亮、明暗主题切换），各模块的具体实现方式见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+>
+> 架构图源 IR 保存在 [`docs/architecture.source.json`](docs/architecture.source.json)（Archify 3.3.0 源文件，`meta.output` 指向 `docs/architecture.html`）。更新时需使用 Archify 3.3.0 从该源重新生成，产物保持单文件自包含（内联资源），无需拆分 viewer 脚本或样式。
 
 ---
 
@@ -148,7 +150,7 @@ dotnet run --project src/LiveMonitor.Desktop/LiveMonitor.Desktop.csproj
 powershell -ExecutionPolicy Bypass -File .\scripts\package-release.ps1 -Version v0.5.0
 ```
 
-> 项目架构与各模块实现方式见根目录 `ARCHITECTURE.md`；历史阶段设计文档已归档到 `docs/archive/`，仅用于追溯。
+> 项目架构与各模块实现方式见根目录 `ARCHITECTURE.md`；历史阶段设计文档已归档到根目录 `archive/`，仅用于追溯。
 
 ---
 

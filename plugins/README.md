@@ -10,6 +10,16 @@
 | `providers-manifest.json` | 插件清单（首次构建插件后由 `scripts/build-plugins.ps1` 生成/更新，与插件 DLL 一起提交） |
 | `README.md` | 本文档 |
 
+## 当前清单状态（为什么 `plugins` 是空数组）
+
+仓库内的 `providers-manifest.json` 目前为 `"plugins": []`：六个平台（B站、Twitch、YouTube、虎牙、斗鱼、抖音）的实现均已内置于客户端，**真实签名插件尚未正式发布**，因此清单为空是正常状态——客户端检查更新时会显示「已是最新」（与根 `README.md` 的插件说明一致）。
+
+首次发布插件时的填充步骤：
+
+1. 用 `scripts/build-plugins.ps1` 构建并签名插件（Ed25519 私钥只放本地/Actions Secrets，**绝不入库**），脚本会把条目写入本清单。
+2. 把签名后的 `plugin.dll` 上传到 GitHub Release 资产，保证清单中的 `downloadUrl` 指向该资产；如启用大陆镜像，再把同一份 DLL 推到 Gitee 并用 `-MirrorDownloadUrl` 写入镜像地址。
+3. 复核 `sha256` / `ed25519Signature` 后提交 `providers-manifest.json` 与 `plugin.json`，客户端即可在「账号与设置 → 组件与插件更新」中检测到。
+
 ## 清单格式
 
 ```json
