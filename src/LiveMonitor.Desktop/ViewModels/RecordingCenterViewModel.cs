@@ -56,6 +56,12 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
     /// <summary>V0.4：由 MainWindowViewModel 注入，录制中心请求把指定场次送进剪辑台。</summary>
     public Func<RecordingSession, Task>? OpenClipStudioAsync { get; set; }
 
+    /// <summary>
+    /// 由 MainWindowViewModel 注入：读取主库已知的直播间开播状态（true=直播中、false=未开播、null=未知）。
+    /// 用于「录制中优先、直播中其次」的排序，以及卡片上的「直播中」徽章。
+    /// </summary>
+    public Func<Guid, bool?>? TryGetLiveStatus { get; set; }
+
     internal RecordingManager Recordings => _recordings;
 
     public string GlobalDirectory
@@ -141,6 +147,9 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
                 targetMap.TryGetValue(room.Id, out var target);
                 Targets.Add(new RecordingTargetItemViewModel(room, target, this));
             }
+
+            // 首屏先按主库已知开播状态回填并排序：录制中 > 直播中 > 其他（组内按显示序号）。
+            RefreshLiveStatuses();
 
             NotifyCollectionsChanged();
             await RefreshHistoryAsync(ct).ConfigureAwait(true);
@@ -609,6 +618,8 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
             }
         }
 
+        // 该房间刚进入录制态：立即提到列表最前。
+        SortTargets();
         StatusText = $"开始录制：{session.RoomDisplayName} → {session.VideoFilePath}";
         OnPropertyChanged(nameof(TargetSummary));
         _ = RefreshHistoryAsync();
@@ -632,12 +643,61 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
             }
         }
 
+        // 录制结束：该行从「录制中」降级，按直播中/显示序号重新归位。
+        SortTargets();
         var status = RecordingUiFormat.StatusText(session.Status);
         StatusText = string.IsNullOrWhiteSpace(session.ErrorMessage)
             ? $"录制结束（{status}）：{session.RoomDisplayName}"
             : $"录制结束（{status}）：{session.RoomDisplayName} · {session.ErrorMessage}";
         OnPropertyChanged(nameof(TargetSummary));
         _ = RefreshHistoryAsync();
+    }
+
+    /// <summary>
+    /// 用主库已知开播状态回填所有目标行并重新排序（不重建行，滚动位置与行内状态保持）。
+    /// MainWindowViewModel 在开播状态轮询后调用；录制开始/结束时也会走一次。
+    /// </summary>
+    internal void RefreshLiveStatuses()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        var probe = TryGetLiveStatus;
+        foreach (var item in Targets)
+        {
+            item.ApplyLiveStatus(probe?.Invoke(item.RoomId));
+        }
+
+        SortTargets();
+    }
+
+    /// <summary>
+    /// 就地重排目标列表：录制中 &gt; 直播中 &gt; 其他，组内按显示序号升序。
+    /// 用 <see cref="ObservableCollection{T}.Move"/> 移动已有行实例，避免重建导致行内指标与命令状态闪断。
+    /// </summary>
+    private void SortTargets()
+    {
+        if (_disposed || Targets.Count <= 1)
+        {
+            return;
+        }
+
+        var ordered = RecordingTargetOrdering.OrderByPriority(
+            Targets,
+            item => item.IsRecording,
+            item => item.IsLive,
+            item => item.Room.DisplayNumber);
+
+        for (var index = 0; index < ordered.Count; index++)
+        {
+            var currentIndex = Targets.IndexOf(ordered[index]);
+            if (currentIndex != index)
+            {
+                Targets.Move(currentIndex, index);
+            }
+        }
     }
 
     private void NotifyCollectionsChanged()

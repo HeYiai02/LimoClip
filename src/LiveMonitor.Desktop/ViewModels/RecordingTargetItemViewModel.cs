@@ -19,6 +19,7 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
     private bool _disposed;
     private bool _autoRecordEnabled;
     private bool _isRecording;
+    private bool _isLive;
     private bool _isBusy;
     private string? _customSaveDirectory;
     private string _statusText = "未录制";
@@ -104,7 +105,35 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
             OnPropertyChanged(nameof(StartStopBackground));
             OnPropertyChanged(nameof(StartStopForeground));
             OnPropertyChanged(nameof(CanOperate));
+            OnPropertyChanged(nameof(ShowLiveBadge));
         }
+    }
+
+    /// <summary>
+    /// 主库轮询得到的开播状态（true=直播中）。仅用于列表排序与卡片上的「直播中」徽章，
+    /// 不参与录制状态机；未知状态按未开播处理。
+    /// </summary>
+    public bool IsLive => _isLive;
+
+    /// <summary>卡片上是否显示「直播中」徽章：正在录制时由红色竖条/状态胶囊表达，不再重复显示。</summary>
+    public bool ShowLiveBadge => _isLive && !_isRecording;
+
+    /// <summary>由父 VM 用主库已知开播状态回填；返回状态是否发生变化。</summary>
+    internal bool ApplyLiveStatus(bool? isLive)
+    {
+        if (_disposed)
+        {
+            return false;
+        }
+
+        var live = isLive == true;
+        if (!SetProperty(ref _isLive, live, nameof(IsLive)))
+        {
+            return false;
+        }
+
+        OnPropertyChanged(nameof(ShowLiveBadge));
+        return true;
     }
 
     public bool IsBusy

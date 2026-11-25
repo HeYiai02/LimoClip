@@ -163,6 +163,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         center.PickDirectoryAsync = () =>
             PickRecordingDirectoryAsync?.Invoke() ?? Task.FromResult<string?>(null);
         center.OpenClipStudioAsync = OpenClipStudioAsync;
+        center.TryGetLiveStatus = roomId =>
+            _knownLiveStatus.TryGetValue(roomId, out var live) ? live : null;
         return center;
     }
 
@@ -2721,6 +2723,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 item.SetLiveStatus(live);
             }
         }
+
+        // 录制中心已创建时同步开播状态：让「正在直播」的房间按排序规则上浮。
+        _recordingCenter?.RefreshLiveStatuses();
     }
 
     /// <summary>查询单个房间的开播状态；失败返回 null（保留上一次已知状态，不误报为未开播）。</summary>
@@ -2776,6 +2781,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 item.SetLiveStatus(live);
             }
         }
+
+        // 工作区播放状态也能提供开播信息：录制中心打开时立即套用同一套排序。
+        _recordingCenter?.RefreshLiveStatuses();
     }
 
     private string SerializeLayout(IRootDock layout)
