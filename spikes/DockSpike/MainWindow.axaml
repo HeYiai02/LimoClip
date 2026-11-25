@@ -1,9 +1,0 @@
-<Window xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:dock="using:Dock.Avalonia.Controls"
-        x:Class="DockSpike.MainWindow"
-        Title="DockSpike"
-        Width="1280" Height="800"
-        Background="#0f131b">
-  <dock:DockControl x:Name="Dock" />
-</Window>
