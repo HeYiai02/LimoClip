@@ -20,20 +20,21 @@ public sealed class SegmentMergerTests : IAsyncLifetime
 
     private string? _ffmpegPath;
 
-    public async Task InitializeAsync()
+    public Task InitializeAsync()
     {
         Directory.CreateDirectory(_directory);
 
         if (FfmpegLocator.TryLocate(out var ffmpegPath))
         {
             _ffmpegPath = ffmpegPath;
-            return;
+            return Task.CompletedTask;
         }
 
         // CI 守卫：CI 环境缺少 ffmpeg 时不要静默跳过，直接失败暴露环境缺依赖。
         Assert.False(
             IsCiEnvironment(),
             $"CI 环境必须能定位到 ffmpeg（FfmpegLocator.RelativePath），当前工作目录：{Environment.CurrentDirectory}");
+        return Task.CompletedTask;
     }
 
     public Task DisposeAsync()

@@ -122,7 +122,7 @@ public sealed class MainWindowViewModelTests
         {
             var added = await viewModel.AddRoomAsync("https://example.com/live/stream-1.flv", groupTag: " 游戏 ");
 
-            Assert.Equal(1, viewModel.Rooms.Count);
+            Assert.Single(viewModel.Rooms);
             Assert.Single(viewModel.FilteredRooms);
             Assert.Equal(PlatformType.CustomStream, added.Room.Platform);
             Assert.StartsWith("cs_", added.Room.RoomId, StringComparison.Ordinal);
