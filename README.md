@@ -30,7 +30,7 @@ LimoClip 是一款面向 Windows 桌面端的开源直播工具（基于 .NET + 
 
 | 多屏监控工作区 | 独立录制中心 | 双波形剪辑台 + 语音转写 |
 | :---: | :---: | :---: |
-| ![多屏监控工作区](docs/images/monitor.png) | ![独立录制中心](docs/images/recording.png) | ![双波形剪辑台](docs/images/studio.png) |
+| ![多屏监控工作区](docs/images/monitor.webp) | ![独立录制中心](docs/images/recording.webp) | ![双波形剪辑台](docs/images/studio.webp) |
 
 ---
 
