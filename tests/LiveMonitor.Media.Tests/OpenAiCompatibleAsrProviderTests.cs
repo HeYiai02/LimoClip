@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using LiveMonitor.Core.Models;
 using LiveMonitor.Media.Asr;
 using LiveMonitor.Media.Recording;
 using Xunit;
@@ -145,6 +146,74 @@ public sealed class OpenAiCompatibleAsrProviderTests : IDisposable
         Assert.Equal(TimeSpan.FromSeconds(2), segment.RelativeEnd);
         Assert.Equal(TimeSpan.FromSeconds(0.5), result.ClipStart);
         Assert.Equal(TimeSpan.FromSeconds(2.5), result.ClipEnd);
+    }
+
+    [Fact]
+    public async Task Plain_text_with_sentences_is_split_with_estimated_timestamps()
+    {
+        if (FfmpegPath is null)
+        {
+            return;
+        }
+
+        string video = GenerateAudio("clip.m4a");
+        const string fullText = "大家好。今天我们聊聊边录边剪！这个功能很好用？真的吗？";
+        var handler = new TestHttpMessageHandler(
+            _ => TestHttpMessageHandler.Json($$"""{"text":"{{fullText}}"}"""));
+        var provider = CreateProvider(handler);
+
+        var result = await provider.TranscribeSegmentAsync(video, TimeSpan.Zero, TimeSpan.FromSeconds(10));
+
+        Assert.Equal(fullText, result.FullText);
+        Assert.Equal(4, result.Segments.Count);
+        Assert.Contains("大家好", result.Segments[0].Text);
+        Assert.Equal(TimeSpan.Zero, result.Segments[0].RelativeStart);
+        Assert.Equal(TimeSpan.FromSeconds(10), result.Segments[^1].RelativeEnd);
+        for (int i = 1; i < result.Segments.Count; i++)
+        {
+            Assert.True(
+                result.Segments[i].RelativeStart >= result.Segments[i - 1].RelativeStart,
+                $"第 {i} 句起点必须不小于前一句起点。");
+            Assert.True(
+                result.Segments[i].RelativeEnd >= result.Segments[i].RelativeStart,
+                $"第 {i} 句终点不能小于起点。");
+        }
+    }
+
+    [Fact]
+    public async Task Cached_single_segment_result_is_upgraded_to_sentences()
+    {
+        if (FfmpegPath is null)
+        {
+            return;
+        }
+
+        string video = GenerateAudio("clip.m4a");
+        var handler = new TestHttpMessageHandler(
+            _ => TestHttpMessageHandler.Json("""{"text":"第一句。第二句！"}"""));
+        var provider = CreateProvider(handler);
+        var first = await provider.TranscribeSegmentAsync(video, TimeSpan.Zero, TimeSpan.FromSeconds(4));
+        Assert.Equal(2, first.Segments.Count);
+
+        // 模拟旧版缓存：同一个结果只保存整段一句话。
+        string cacheFile = Assert.Single(Directory.GetFiles(_cacheDir, "*.asr.json"));
+        var legacy = first with
+        {
+            Segments = new List<AsrTranscriptSegment>
+            {
+                new(TimeSpan.Zero, TimeSpan.FromSeconds(4), first.FullText),
+            },
+        };
+        await File.WriteAllTextAsync(cacheFile, JsonSerializer.Serialize(legacy));
+
+        var offlineHandler = new TestHttpMessageHandler(
+            _ => throw new InvalidOperationException("缓存命中时不应发起网络请求"));
+        var upgraded = await CreateProvider(offlineHandler)
+            .TranscribeSegmentAsync(video, TimeSpan.Zero, TimeSpan.FromSeconds(4));
+
+        Assert.Empty(offlineHandler.Requests);
+        Assert.Equal(first.FullText, upgraded.FullText);
+        Assert.Equal(2, upgraded.Segments.Count);
     }
 
     [Fact]

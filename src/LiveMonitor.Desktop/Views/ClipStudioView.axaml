@@ -595,10 +595,6 @@
                                 <Button Grid.Column="1" Classes="studio-mini" Content="复制文本"
                                         Click="OnCopyAsrTextClick" />
                             </Grid>
-                            <TextBlock Text="{Binding AsrFullText}" FontSize="10"
-                                       Foreground="{DynamicResource BrushTextSecondary}"
-                                       TextWrapping="Wrap" MaxHeight="100"
-                                       IsVisible="{Binding HasAsrResult}" />
                             <ItemsControl ItemsSource="{Binding AsrLines}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
