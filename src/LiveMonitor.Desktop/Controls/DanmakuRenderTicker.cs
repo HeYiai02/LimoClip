@@ -15,9 +15,6 @@ namespace LiveMonitor.Desktop.Controls;
 /// </summary>
 internal static class DanmakuRenderTicker
 {
-    private const double MaxFrameDelta = 0.1;
-    private const long FrameStallThresholdMilliseconds = 1200;
-
     private static readonly List<WeakReference<DanmakuOverlay>> Overlays = new();
     private static bool _running;
     private static TimeSpan? _lastTimestamp;
@@ -106,9 +103,7 @@ internal static class DanmakuRenderTicker
 
         _lastFrameTick = Environment.TickCount64;
 
-        var delta = _lastTimestamp.HasValue
-            ? Math.Clamp((timestamp - _lastTimestamp.Value).TotalSeconds, 0.001, MaxFrameDelta)
-            : 1.0 / 60.0;
+        var delta = DanmakuRenderTiming.ResolveFrameDelta(_lastTimestamp, timestamp);
         _lastTimestamp = timestamp;
 
         var hasActiveOverlay = false;
@@ -160,7 +155,7 @@ internal static class DanmakuRenderTicker
             return;
         }
 
-        if (Environment.TickCount64 - _lastFrameTick < FrameStallThresholdMilliseconds)
+        if (!DanmakuRenderTiming.IsFrameStalled(_lastFrameTick, Environment.TickCount64))
         {
             return;
         }
