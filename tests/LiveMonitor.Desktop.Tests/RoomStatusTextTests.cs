@@ -18,6 +18,15 @@ public sealed class RoomStatusTextTests
     [InlineData(RoomStatusText.Reconnecting, "重连中")]
     [InlineData(RoomStatusText.AutoReconnectDetail, "直播流已中断，正在自动重连…")]
     [InlineData(RoomStatusText.StreamInterrupted, "直播流已中断")]
+    [InlineData(RoomStatusText.WaitingForRoom, "等待加入房间")]
+    [InlineData(RoomStatusText.PauseTip, "暂停播放")]
+    [InlineData(RoomStatusText.ResumeTip, "继续播放")]
+    [InlineData(RoomStatusText.OpeningChannel, "正在建立播放通道…")]
+    [InlineData(RoomStatusText.StartTimeout, "mpv 起播超时")]
+    [InlineData(RoomStatusText.Canceled, "已取消")]
+    [InlineData(RoomStatusText.Stopped, "已停止")]
+    [InlineData(RoomStatusText.Connecting, "正在连接…")]
+    [InlineData(RoomStatusText.Buffering, "正在缓冲…")]
     public void Constant_KeepsExpectedWording(string actual, string expected)
     {
         Assert.Equal(expected, actual);
@@ -77,6 +86,17 @@ public sealed class RoomStatusTextTests
 
         Assert.Equal(states.Length, states.Distinct(StringComparer.Ordinal).Count());
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-12)]
+    [InlineData(42)]
+    public void StreamStartFailed_EmbedsMpvErrorCode(int code)
+        => Assert.Equal($"mpv 拉流失败 (code {code})", RoomStatusText.StreamStartFailed(code));
+
+    [Fact]
+    public void PauseAndResumeTips_AreDistinct()
+        => Assert.NotEqual(RoomStatusText.PauseTip, RoomStatusText.ResumeTip);
 
     [Theory]
     [InlineData(PlayerState.Playing)]

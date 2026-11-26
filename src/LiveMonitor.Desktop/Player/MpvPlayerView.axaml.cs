@@ -77,7 +77,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
         _seekPollTimer.Tick += (_, _) => UpdateSeekBar();
         _seekCommitTimer = new DispatcherTimer { Interval = ReplaySeekLogic.CommitDelay };
         _seekCommitTimer.Tick += (_, _) => CommitSeek();
-        ApplyStateVisuals(PlayerState.Offline, "等待加入房间");
+        ApplyStateVisuals(PlayerState.Offline, RoomStatusText.WaitingForRoom);
     }
 
     protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
@@ -150,7 +150,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
         _paused = paused;
         _context?.SetPropertyFlag("pause", paused);
         PauseIcon.Text = paused ? "\uE768" : "\uE769";
-        ToolTip.SetTip(PauseButton, paused ? "继续播放" : "暂停播放");
+        ToolTip.SetTip(PauseButton, paused ? RoomStatusText.ResumeTip : RoomStatusText.PauseTip);
     }
 
     /// <summary>
@@ -191,7 +191,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
         // 平台元数据里的 Fps 是猜测值（B 站等平台解析不到 60 帧时一律兜底 30），
         // 直接显示会和右上角实测帧率冲突。
         QualityLabel = PlayerQualityText.Format(_qualityDisplayName, 0);
-        SetState(PlayerState.Loading, "正在建立播放通道…");
+        SetState(PlayerState.Loading, RoomStatusText.OpeningChannel);
 
         var loadTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _loadTcs = loadTcs;
@@ -215,13 +215,13 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(StartPlaybackTimeout);
             using var registration = timeout.Token.Register(
-                () => loadTcs.TrySetException(new TimeoutException("mpv 起播超时")));
+                () => loadTcs.TrySetException(new TimeoutException(RoomStatusText.StartTimeout)));
 
             await loadTcs.Task.ConfigureAwait(true);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            SetState(PlayerState.Offline, "已取消");
+            SetState(PlayerState.Offline, RoomStatusText.Canceled);
             throw;
         }
         catch (Exception ex)
@@ -261,7 +261,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
             }
         }
 
-        SetState(PlayerState.Offline, "已停止");
+        SetState(PlayerState.Offline, RoomStatusText.Stopped);
         return Task.CompletedTask;
     }
 
@@ -303,7 +303,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
     public void ShowLoading(string? detail = null)
     {
         _userStopped = false;
-        SetState(PlayerState.Loading, detail ?? "正在连接…");
+        SetState(PlayerState.Loading, detail ?? RoomStatusText.Connecting);
     }
 
     private void UpdateMuteVisual(bool muted)
@@ -485,13 +485,13 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
     {
         _userStopped = true;
         _healthTimer?.Stop();
-        SetState(PlayerState.Offline, detail ?? "主播未开播");
+        SetState(PlayerState.Offline, detail ?? RoomStatusText.Offline);
     }
 
     public void ShowFailed(string? detail = null)
     {
         _healthTimer?.Stop();
-        SetState(PlayerState.Failed, detail ?? "播放失败");
+        SetState(PlayerState.Failed, detail ?? RoomStatusText.PlaybackFailed);
     }
 
     public void Dispose()
@@ -999,7 +999,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
         {
             if (!_userStopped)
             {
-                SetState(PlayerState.Loading, "正在缓冲…");
+                SetState(PlayerState.Loading, RoomStatusText.Buffering);
             }
         });
     }
@@ -1043,7 +1043,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
                     return;
                 }
 
-                var message = $"mpv 拉流失败 (code {error})";
+                var message = RoomStatusText.StreamStartFailed(error);
                 SetState(PlayerState.Failed, message);
                 _loadTcs?.TrySetException(new InvalidOperationException(message));
                 ReconnectRequested?.Invoke(this, EventArgs.Empty);
