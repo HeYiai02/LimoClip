@@ -34,36 +34,11 @@ public sealed record AsrConnectionTestResult(bool Success, string Message);
 /// </summary>
 public sealed class AsrSettingsStore
 {
-    public const string DefaultPresetId = "siliconflow_cn";
+    public const string DefaultPresetId = AsrPresetCatalog.DefaultPresetId;
     public const string DefaultLanguage = "auto";
 
-    public static readonly IReadOnlyList<AsrPreset> Presets = new[]
-    {
-        new AsrPreset(
-            "siliconflow_cn",
-            "硅基流动（国内）",
-            "https://api.siliconflow.cn/v1/audio/transcriptions",
-            "FunAudioLLM/SenseVoiceSmall",
-            "整段文本返回（json），无逐句时间戳；国内直连，中文识别效果好。"),
-        new AsrPreset(
-            "siliconflow_global",
-            "硅基流动（国际）",
-            "https://api.siliconflow.com/v1/audio/transcriptions",
-            "FunAudioLLM/SenseVoiceSmall",
-            "与国内站相同模型，适合海外网络。"),
-        new AsrPreset(
-            "groq",
-            "Groq",
-            "https://api.groq.com/openai/v1/audio/transcriptions",
-            "whisper-large-v3-turbo",
-            "verbose_json 返回逐句时间戳，可点击跳转；有免费额度。"),
-        new AsrPreset(
-            "custom",
-            "自定义（OpenAI 兼容）",
-            string.Empty,
-            string.Empty,
-            "手动填写转写接口地址与模型名；优先请求 verbose_json，不支持时自动回退纯文本。"),
-    };
+    /// <summary>全部预设；元数据唯一来源在 <see cref="AsrPresetCatalog"/>。</summary>
+    public static IReadOnlyList<AsrPreset> Presets => AsrPresetCatalog.Presets;
 
     private static readonly HttpClient SharedHttpClient = new() { Timeout = TimeSpan.FromSeconds(30) };
 
@@ -78,21 +53,7 @@ public sealed class AsrSettingsStore
 
     public static string DefaultLanguageValue => DefaultLanguage;
 
-    public static AsrPreset ResolvePreset(string? presetId)
-    {
-        if (!string.IsNullOrWhiteSpace(presetId))
-        {
-            foreach (var preset in Presets)
-            {
-                if (string.Equals(preset.Id, presetId.Trim(), StringComparison.OrdinalIgnoreCase))
-                {
-                    return preset;
-                }
-            }
-        }
-
-        return Presets[0];
-    }
+    public static AsrPreset ResolvePreset(string? presetId) => AsrPresetCatalog.Resolve(presetId);
 
     /// <summary>读取设置页快照；Endpoint/Model 为空时回退到预设默认值。</summary>
     public async Task<AsrSettingsSnapshot> LoadAsync(CancellationToken ct = default)
@@ -163,7 +124,7 @@ public sealed class AsrSettingsStore
         string model = NonEmptyOrFallback(draft.Model, preset.Model).Trim();
         if (endpoint.Length == 0)
         {
-            return new AsrConnectionTestResult(false, "请先填写转写接口地址。");
+            return new AsrConnectionTestResult(false, AsrConnectionStatusText.MissingEndpoint);
         }
 
         string apiKey = draft.PlainApiKey is { } plain && !string.IsNullOrWhiteSpace(plain)
@@ -171,7 +132,7 @@ public sealed class AsrSettingsStore
             : await LoadSavedApiKeyAsync(ct).ConfigureAwait(false);
         if (apiKey.Length == 0)
         {
-            return new AsrConnectionTestResult(false, "请先填写 API Key。");
+            return new AsrConnectionTestResult(false, AsrConnectionStatusText.MissingApiKey);
         }
 
         string modelsUrl;
@@ -181,7 +142,7 @@ public sealed class AsrSettingsStore
         }
         catch (UriFormatException)
         {
-            return new AsrConnectionTestResult(false, $"接口地址不是合法的 URL：{endpoint}");
+            return new AsrConnectionTestResult(false, AsrConnectionStatusText.InvalidEndpoint(endpoint));
         }
 
         try
@@ -195,21 +156,21 @@ public sealed class AsrSettingsStore
             {
                 return new AsrConnectionTestResult(
                     true,
-                    $"连接成功（HTTP {(int)response.StatusCode}），准备使用模型：{model}");
+                    AsrConnectionStatusText.Succeeded((int)response.StatusCode, model));
             }
 
             string body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             return new AsrConnectionTestResult(
                 false,
-                $"连接失败（HTTP {(int)response.StatusCode}）：{Truncate(body.Trim(), 300)}");
+                AsrConnectionStatusText.Failed((int)response.StatusCode, Truncate(body.Trim(), 300)));
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return new AsrConnectionTestResult(false, "连接超时，请检查网络或接口地址。");
+            return new AsrConnectionTestResult(false, AsrConnectionStatusText.Timeout);
         }
         catch (Exception ex) when (ex is HttpRequestException or UriFormatException or InvalidOperationException)
         {
-            return new AsrConnectionTestResult(false, $"连接失败：{ex.Message}");
+            return new AsrConnectionTestResult(false, AsrConnectionStatusText.FailedWithMessage(ex.Message));
         }
     }
 
