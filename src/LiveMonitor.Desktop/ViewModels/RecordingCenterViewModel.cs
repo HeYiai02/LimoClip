@@ -175,7 +175,7 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         }
         catch (Exception ex)
         {
-            StatusText = $"刷新录制中心失败：{ex.Message}";
+            StatusText = RecordingCenterStatusText.RefreshFailed(ex.Message);
         }
         finally
         {
@@ -195,7 +195,7 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
     {
         if (PickDirectoryAsync is null)
         {
-            StatusText = "当前界面未接入目录选择器，无法修改全局目录。";
+            StatusText = RecordingCenterStatusText.GlobalDirectoryPickerMissing();
             return;
         }
 
@@ -206,7 +206,7 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         }
         catch (Exception ex)
         {
-            StatusText = $"打开目录选择器失败：{ex.Message}";
+            StatusText = RecordingCenterStatusText.DirectoryPickerFailed(ex.Message);
             return;
         }
 
@@ -225,11 +225,11 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
                 .SetAsync(AppSettingKeys.RecordingDefaultDirectory, normalized)
                 .ConfigureAwait(true);
             GlobalDirectory = normalized;
-            StatusText = $"全局录像目录已更新：{normalized}（新开始的录制生效）";
+            StatusText = RecordingCenterStatusText.GlobalDirectoryUpdated(normalized);
         }
         catch (Exception ex)
         {
-            StatusText = $"修改全局录像目录失败：{ex.Message}";
+            StatusText = RecordingCenterStatusText.GlobalDirectoryUpdateFailed(ex.Message);
         }
     }
 
@@ -241,7 +241,7 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
             Directory.CreateDirectory(GlobalDirectory);
             if (ExplorerLauncher.TryOpenDirectory(GlobalDirectory, out var error))
             {
-                StatusText = $"已打开目录：{GlobalDirectory}";
+                StatusText = RecordingCenterStatusText.DirectoryOpened(GlobalDirectory);
             }
             else
             {
@@ -250,7 +250,7 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         }
         catch (Exception ex)
         {
-            StatusText = $"打开全局目录失败：{ex.Message}。请手动在资源管理器中打开：{GlobalDirectory}";
+            StatusText = RecordingCenterStatusText.OpenDirectoryFailed(ex.Message, GlobalDirectory);
         }
     }
 
@@ -259,7 +259,7 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
     {
         if (PickDirectoryAsync is null)
         {
-            StatusText = "当前界面未接入目录选择器，无法设置独立目录。";
+            StatusText = RecordingCenterStatusText.RoomDirectoryPickerMissing();
             return;
         }
 
@@ -270,7 +270,7 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         }
         catch (Exception ex)
         {
-            StatusText = $"打开目录选择器失败：{ex.Message}";
+            StatusText = RecordingCenterStatusText.DirectoryPickerFailed(ex.Message);
             return;
         }
 
@@ -288,11 +288,11 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
                 .SetAutoRecordAsync(item.RoomId, item.AutoRecordEnabled, normalized)
                 .ConfigureAwait(true);
             item.ApplyCustomDirectory(normalized);
-            StatusText = $"「{item.DisplayTitle}」的独立保存目录已设置为：{normalized}";
+            StatusText = RecordingCenterStatusText.RoomDirectoryUpdated(item.DisplayTitle, normalized);
         }
         catch (Exception ex)
         {
-            StatusText = $"设置独立目录失败：{ex.Message}";
+            StatusText = RecordingCenterStatusText.RoomDirectoryUpdateFailed(ex.Message);
         }
     }
 
@@ -305,11 +305,11 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
                 .SetAutoRecordAsync(item.RoomId, item.AutoRecordEnabled, null)
                 .ConfigureAwait(true);
             item.ApplyCustomDirectory(null);
-            StatusText = $"「{item.DisplayTitle}」已改为跟随全局目录：{GlobalDirectory}";
+            StatusText = RecordingCenterStatusText.RoomDirectoryCleared(item.DisplayTitle, GlobalDirectory);
         }
         catch (Exception ex)
         {
-            StatusText = $"清除独立目录失败：{ex.Message}";
+            StatusText = RecordingCenterStatusText.RoomDirectoryClearFailed(ex.Message);
         }
     }
 
@@ -323,7 +323,7 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
             Directory.CreateDirectory(directory);
             if (ExplorerLauncher.TryOpenDirectory(directory, out var error))
             {
-                StatusText = $"已打开目录：{directory}";
+                StatusText = RecordingCenterStatusText.DirectoryOpened(directory);
             }
             else
             {
@@ -332,7 +332,7 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         }
         catch (Exception ex)
         {
-            StatusText = $"打开目录失败：{ex.Message}。请手动在资源管理器中打开：{directory}";
+            StatusText = RecordingCenterStatusText.OpenDirectoryFailed(ex.Message, directory);
         }
 
         return Task.CompletedTask;
@@ -457,7 +457,7 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
 
         // 该房间刚进入录制态：立即提到列表最前。
         SortTargets();
-        StatusText = $"开始录制：{session.RoomDisplayName} → {session.VideoFilePath}";
+        StatusText = RecordingCenterStatusText.RecordingStarted(session.RoomDisplayName, session.VideoFilePath);
         OnPropertyChanged(nameof(TargetSummary));
         _ = RefreshHistoryAsync();
     }
