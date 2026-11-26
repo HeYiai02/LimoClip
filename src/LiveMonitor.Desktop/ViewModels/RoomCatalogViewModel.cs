@@ -184,7 +184,7 @@ public sealed class RoomCatalogViewModel : ObservableObject, IDisposable
     {
         if (string.IsNullOrWhiteSpace(url))
         {
-            throw new ArgumentException("请粘贴直播间链接或房间号。", nameof(url));
+            throw new ArgumentException(RoomCatalogStatusText.MissingUrl, nameof(url));
         }
 
         IPlatformProvider provider;
@@ -200,13 +200,13 @@ public sealed class RoomCatalogViewModel : ObservableObject, IDisposable
             // 因为清流没有房间号概念，走平台房间查询会得到不存在的 roomId。
             if (!CustomStreamProvider.IsSupportedDirectUrl(trimmedUrl))
             {
-                throw new ArgumentException("自定义清流需要 http(s) / rtmp(s) / rtsp(s) / srt 或 mms 绝对地址。", nameof(url));
+                throw new ArgumentException(RoomCatalogStatusText.InvalidCustomStreamUrl, nameof(url));
             }
 
             provider = _platforms.GetProvider(PlatformType.CustomStream);
             if (provider is not CustomStreamProvider customProvider)
             {
-                throw new InvalidOperationException("自定义清流 Provider 未注册，无法添加。");
+                throw new InvalidOperationException(RoomCatalogStatusText.CustomProviderMissing);
             }
 
             parsedRoomId = customProvider.ExtractRoomId(trimmedUrl);
@@ -230,7 +230,7 @@ public sealed class RoomCatalogViewModel : ObservableObject, IDisposable
 
         if (await _rooms.ExistsAsync(provider.Platform, canonicalRoomId, ct).ConfigureAwait(true))
         {
-            throw new InvalidOperationException("这个直播间已经在主库中，不能重复添加。");
+            throw new InvalidOperationException(RoomCatalogStatusText.DuplicateRoom);
         }
 
         var room = new LiveRoom
@@ -250,7 +250,7 @@ public sealed class RoomCatalogViewModel : ObservableObject, IDisposable
         _knownLiveStatus[room.Id] = status.IsLive;
         await _rooms.AddAsync(room, ct).ConfigureAwait(true);
         await ReloadRoomsAsync(ct).ConfigureAwait(true);
-        _host.SetStatus($"已添加 {room.Alias}");
+        _host.SetStatus(RoomCatalogStatusText.Added(room.Alias));
 
         var item = Rooms.FirstOrDefault(candidate => candidate.Id == room.Id);
         return item ?? new RoomListItemViewModel(room);
@@ -272,16 +272,16 @@ public sealed class RoomCatalogViewModel : ObservableObject, IDisposable
     {
         if (string.IsNullOrWhiteSpace(alias))
         {
-            throw new ArgumentException("显示名称不能为空。", nameof(alias));
+            throw new ArgumentException(RoomCatalogStatusText.AliasRequired, nameof(alias));
         }
 
         if (displayNumber <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(displayNumber), "序号必须大于 0。");
+            throw new ArgumentOutOfRangeException(nameof(displayNumber), RoomCatalogStatusText.DisplayNumberOutOfRange);
         }
 
         var room = await _rooms.GetByIdAsync(roomId, ct).ConfigureAwait(true)
-                   ?? throw new InvalidOperationException("直播间不存在。");
+                   ?? throw new InvalidOperationException(RoomCatalogStatusText.RoomNotFound);
         room.Alias = alias.Trim();
         room.GroupTag = string.IsNullOrWhiteSpace(groupTag) ? null : groupTag.Trim();
         room.DisplayNumber = displayNumber;
@@ -292,7 +292,7 @@ public sealed class RoomCatalogViewModel : ObservableObject, IDisposable
             var trimmedUrl = rawUrl.Trim();
             if (!CustomStreamProvider.IsSupportedDirectUrl(trimmedUrl))
             {
-                throw new ArgumentException("清流地址必须是 http(s) / rtmp(s) / rtsp(s) / srt 或 mms 绝对地址。", nameof(rawUrl));
+                throw new ArgumentException(RoomCatalogStatusText.InvalidStreamUrl, nameof(rawUrl));
             }
 
             streamUrlChanged = !string.Equals(room.RawUrl, trimmedUrl, StringComparison.Ordinal);
@@ -328,7 +328,7 @@ public sealed class RoomCatalogViewModel : ObservableObject, IDisposable
         await _host.ReflowWorkspaceAsync(ct).ConfigureAwait(true);
         _host.SyncDanmakuSubscriptions();
         _host.MarkDirty();
-        _host.SetStatus($"已从主库删除 {room.Alias}");
+        _host.SetStatus(RoomCatalogStatusText.Removed(room.Alias));
     }
 
     internal async Task ReloadRoomsAsync(CancellationToken ct)
