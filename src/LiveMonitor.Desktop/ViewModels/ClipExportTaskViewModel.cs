@@ -30,19 +30,14 @@ public sealed partial class ClipExportTaskViewModel : ObservableObject
 
     public ClipExportRequest Request => _request;
 
-    public string FileName => $"{_request.OutputBaseName}.mp4";
+    public string FileName => ClipExportTaskDisplayLogic.FileName(_request.OutputBaseName);
 
-    public string ModeText => _request.Mode switch
-    {
-        ClipExportMode.CleanOnly => "无弹幕",
-        ClipExportMode.BurnedDanmaku => "弹幕烧录",
-        _ => "双版"
-    };
+    public string ModeText => ClipExportTaskDisplayLogic.ModeText(_request.Mode);
 
-    public string RangeText => $"{FormatTime(_request.StartTime)} - {FormatTime(_request.EndTime)}";
+    public string RangeText => ClipExportTaskDisplayLogic.RangeText(_request.StartTime, _request.EndTime);
 
     [ObservableProperty]
-    private string _stateText = "等待导出";
+    private string _stateText = ClipExportTaskDisplayLogic.WaitingState;
 
     [ObservableProperty]
     private double _progress;
@@ -93,13 +88,13 @@ public sealed partial class ClipExportTaskViewModel : ObservableObject
         OutputText = string.Empty;
         Progress = 0;
         SpeedText = string.Empty;
-        StateText = "准备导出…";
+        StateText = ClipExportTaskDisplayLogic.PreparingState;
 
         var progress = new Progress<ClipExportProgress>(update =>
         {
-            Progress = Math.Clamp(update.Percentage, 0, 100);
+            Progress = ClipExportTaskDisplayLogic.ClampProgress(update.Percentage);
             StateText = update.StageLabel;
-            SpeedText = update.SpeedMultiplier is { } speed ? $"{speed:0.0}x" : string.Empty;
+            SpeedText = ClipExportTaskDisplayLogic.SpeedText(update.SpeedMultiplier);
         });
 
         try
@@ -107,22 +102,22 @@ public sealed partial class ClipExportTaskViewModel : ObservableObject
             var files = await _exporter
                 .ExportAsync(_request, _danmakuItems, _sourceVideoCodec, progress, ct)
                 .ConfigureAwait(true);
-            OutputText = string.Join("、", files.Select(Path.GetFileName));
-            Progress = 100;
-            StateText = "导出完成";
+            OutputText = ClipExportTaskDisplayLogic.BuildOutputText(files);
+            Progress = ClipExportTaskDisplayLogic.MaxProgress;
+            StateText = ClipExportTaskDisplayLogic.CompletedState;
             IsCompleted = true;
         }
         catch (OperationCanceledException)
         {
             IsCanceled = true;
-            StateText = "已取消";
+            StateText = ClipExportTaskDisplayLogic.CanceledState;
             Progress = 0;
         }
         catch (Exception ex)
         {
             IsFailed = true;
             ErrorMessage = ex.Message;
-            StateText = "导出失败";
+            StateText = ClipExportTaskDisplayLogic.FailedState;
         }
         finally
         {
