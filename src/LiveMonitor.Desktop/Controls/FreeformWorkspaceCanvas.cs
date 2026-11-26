@@ -26,12 +26,7 @@ namespace LiveMonitor.Desktop.Controls;
 /// </summary>
 public sealed class FreeformWorkspaceCanvas : Panel
 {
-    private const double ResizeEdgeHitPx = 6;
-    private const double ResizeCornerHitPx = 10;
-    private const double DragThresholdPx = 3;
     private const string RoomDragFormat = "limoclip/room-id";
-    private const double DropDefaultWidth = 0.42;
-    private const double DropDefaultHeight = 0.42;
     private const double PinnedZBase = 1000;
     private const int NormalZMax = 999;
     private const int PinnedZMax = 1999;
@@ -125,7 +120,7 @@ public sealed class FreeformWorkspaceCanvas : Panel
 
         var ordered = incoming.OrderBy(tile => tile.PaneId, StringComparer.Ordinal).ToList();
         var count = Math.Max(1, ordered.Count);
-        var autoRects = FreeformLayoutPresets.AutoFit(count, AspectOf(Bounds.Size))
+        var autoRects = FreeformLayoutPresets.AutoFit(count, FreeformInteractionLogic.AspectOf(Bounds.Width, Bounds.Height))
             .Select(placement => placement.ToRect())
             .ToList();
 
@@ -246,7 +241,7 @@ public sealed class FreeformWorkspaceCanvas : Panel
 
         if (_isFirstArrange && _placements.Count > 0 && _childByPaneId.Count > 0)
         {
-            var autoRects = FreeformLayoutPresets.AutoFit(_childByPaneId.Count, AspectOf(finalSize))
+            var autoRects = FreeformLayoutPresets.AutoFit(_childByPaneId.Count, FreeformInteractionLogic.AspectOf(finalSize.Width, finalSize.Height))
                 .Select(item => item.ToRect())
                 .ToList();
             var index = 0;
@@ -331,7 +326,7 @@ public sealed class FreeformWorkspaceCanvas : Panel
         {
             var dx = position.X - _pressPoint.X;
             var dy = position.Y - _pressPoint.Y;
-            if (!_hasMoved && dx * dx + dy * dy < DragThresholdPx * DragThresholdPx)
+            if (!_hasMoved && !FreeformInteractionLogic.ExceedsDragThreshold(dx, dy))
             {
                 return;
             }
@@ -387,8 +382,10 @@ public sealed class FreeformWorkspaceCanvas : Panel
         _activePlacement.SetRect(result.Rect);
         _overlay.SetGuides(result.Guides);
         _overlay.SetActiveRect(result.Rect);
-        _overlay.SetHud(BuildDragHud(result, width, height), new Point(position.X + 16, position.Y + 20));
-        Cursor = new Cursor(MapResizeCursor(_resizeEdge, _dragKind));
+        _overlay.SetHud(
+            FreeformInteractionLogic.BuildDragHud(result.Rect, width, height, result.Guides.Count > 0),
+            new Point(position.X + 16, position.Y + 20));
+        Cursor = new Cursor(FreeformInteractionLogic.MapResizeCursor(_resizeEdge, _dragKind == DragKind.Move));
         InvalidateArrange();
         e.Handled = true;
     }
@@ -446,7 +443,7 @@ public sealed class FreeformWorkspaceCanvas : Panel
             child.ZIndex = DraggingZIndex;
         }
 
-        Cursor = new Cursor(MapResizeCursor(_resizeEdge, _dragKind));
+        Cursor = new Cursor(FreeformInteractionLogic.MapResizeCursor(_resizeEdge, _dragKind == DragKind.Move));
         _overlay.SetActiveRect(_originRect);
         _overlay.SetHud("拖动中", new Point(_pressPoint.X + 16, _pressPoint.Y + 20));
     }
@@ -494,80 +491,13 @@ public sealed class FreeformWorkspaceCanvas : Panel
         _pendingEdge = ResizeEdge.None;
     }
 
-    private static string BuildDragHud(SnapResult result, double canvasWidth, double canvasHeight)
-    {
-        var rect = result.Rect;
-        var text = $"{Math.Round(rect.Width * canvasWidth):0} × {Math.Round(rect.Height * canvasHeight):0} px"
-            + $" · {rect.Width * 100:0}% × {rect.Height * 100:0}%";
-        return result.Guides.Count > 0 ? text + " · 已吸附" : text;
-    }
-
-    private static StandardCursorType MapResizeCursor(ResizeEdge edge, DragKind kind) => kind == DragKind.Move
-        ? StandardCursorType.SizeAll
-        : edge switch
-        {
-            ResizeEdge.Left or ResizeEdge.Right => StandardCursorType.SizeWestEast,
-            ResizeEdge.Top or ResizeEdge.Bottom => StandardCursorType.SizeNorthSouth,
-            ResizeEdge.TopLeft or ResizeEdge.BottomRight => StandardCursorType.TopLeftCorner,
-            ResizeEdge.TopRight or ResizeEdge.BottomLeft => StandardCursorType.TopRightCorner,
-            _ => StandardCursorType.SizeAll
-        };
-
-    private ResizeEdge HitTestResizeEdge(FreeformTilePlacement placement, Point position)
-    {
-        var (x, y, width, height) = placement.ToRect().ToPixels(Bounds.Width, Bounds.Height);
-        var right = x + width;
-        var bottom = y + height;
-
-        var nearLeft = Math.Abs(position.X - x) <= ResizeEdgeHitPx;
-        var nearRight = Math.Abs(position.X - right) <= ResizeEdgeHitPx;
-        var nearTop = Math.Abs(position.Y - y) <= ResizeEdgeHitPx;
-        var nearBottom = Math.Abs(position.Y - bottom) <= ResizeEdgeHitPx;
-
-        var insideX = position.X >= x - ResizeEdgeHitPx && position.X <= right + ResizeEdgeHitPx;
-        var insideY = position.Y >= y - ResizeEdgeHitPx && position.Y <= bottom + ResizeEdgeHitPx;
-        if (!insideX || !insideY)
-        {
-            return ResizeEdge.None;
-        }
-
-        if (nearLeft && nearTop)
-        {
-            return ResizeEdge.TopLeft;
-        }
-
-        if (nearRight && nearTop)
-        {
-            return ResizeEdge.TopRight;
-        }
-
-        if (nearLeft && nearBottom)
-        {
-            return ResizeEdge.BottomLeft;
-        }
-
-        if (nearRight && nearBottom)
-        {
-            return ResizeEdge.BottomRight;
-        }
-
-        if (nearLeft)
-        {
-            return ResizeEdge.Left;
-        }
-
-        if (nearRight)
-        {
-            return ResizeEdge.Right;
-        }
-
-        if (nearTop)
-        {
-            return ResizeEdge.Top;
-        }
-
-        return nearBottom ? ResizeEdge.Bottom : ResizeEdge.None;
-    }
+    private ResizeEdge HitTestResizeEdge(FreeformTilePlacement placement, Point position) =>
+        FreeformInteractionLogic.HitTestResizeEdge(
+            placement.ToRect(),
+            Bounds.Width,
+            Bounds.Height,
+            position.X,
+            position.Y);
 
     private string? FindTopmostPaneAt(Point position)
     {
@@ -689,21 +619,16 @@ public sealed class FreeformWorkspaceCanvas : Panel
 
     private void FitTo16By9(string paneId)
     {
-        var placement = _placements[paneId];
         var height = Bounds.Height;
         if (height <= 0)
         {
             return;
         }
 
-        var rect = placement.ToRect();
-        var widthPx = rect.Width * Bounds.Width;
-        var desiredHeightNorm = widthPx * 9.0 / 16.0 / height;
-        placement.Height = Math.Clamp(desiredHeightNorm, 0.05, 1.0);
-        if (placement.Top + placement.Height > 1.0)
-        {
-            placement.Top = Math.Max(0, 1.0 - placement.Height);
-        }
+        var placement = _placements[paneId];
+        var fitted = FreeformInteractionLogic.FitTo16By9(placement.ToRect(), Bounds.Width, height);
+        placement.Top = fitted.Top;
+        placement.Height = fitted.Height;
 
         InvalidateArrange();
         LayoutChanged?.Invoke(this, EventArgs.Empty);
@@ -724,8 +649,13 @@ public sealed class FreeformWorkspaceCanvas : Panel
             return;
         }
 
-        var edge = HitTestResizeEdge(placement, position);
-        Cursor = new Cursor(MapResizeCursor(edge, edge == ResizeEdge.None ? DragKind.Move : DragKind.Resize));
+        var edge = FreeformInteractionLogic.HitTestResizeEdge(
+            placement.ToRect(),
+            Bounds.Width,
+            Bounds.Height,
+            position.X,
+            position.Y);
+        Cursor = new Cursor(FreeformInteractionLogic.MapResizeCursor(edge, edge == ResizeEdge.None));
     }
 
     private bool IsInteractiveChildSource(object? source)
@@ -788,26 +718,8 @@ public sealed class FreeformWorkspaceCanvas : Panel
         RoomDropped?.Invoke(this, new RoomDropEventArgs(roomId, ComputeDropRect(e.GetPosition(this))));
     }
 
-    private NormalizedRect ComputeDropRect(Point position)
-    {
-        const double width = DropDefaultWidth;
-        const double height = DropDefaultHeight;
-        if (Bounds.Width <= 0 || Bounds.Height <= 0)
-        {
-            return new NormalizedRect(0.3, 0.3, width, height);
-        }
-
-        var left = position.X / Bounds.Width - width / 2;
-        var top = position.Y / Bounds.Height - height / 2;
-        return new NormalizedRect(
-            Math.Clamp(left, 0, 1 - width),
-            Math.Clamp(top, 0, 1 - height),
-            width,
-            height);
-    }
-
-    private static double AspectOf(Size size) =>
-        size.Width > 0 && size.Height > 0 ? size.Width / size.Height : 16.0 / 9.0;
+    private NormalizedRect ComputeDropRect(Point position) =>
+        FreeformInteractionLogic.ComputeDropRect(position.X, position.Y, Bounds.Width, Bounds.Height);
 }
 
 /// <summary>房间从左侧列表拖放到自由画布时的事件参数。</summary>
