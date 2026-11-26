@@ -54,12 +54,25 @@ public sealed class RecordingCenterDisplayLogicTests
     [Fact]
     public void NormalizeDirectory_ExpandsEnvironmentVariables()
     {
+        // 用测试自建的变量而不是 %TEMP%：进程的 TMP/TEMP 可能指向不同目录，
+        // 而 Path.GetTempPath() 优先取 TMP，直接比较 %TEMP% 会随环境漂移。
         const string fallback = @"C:\fallback";
-        var expected = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "limoclip-normalize-test"));
+        const string variableName = "LIMOCLIP_NORMALIZE_TEST_ROOT";
+        var root = Path.Combine(Path.GetTempPath(), "limoclip-normalize-test-root");
+        var expected = Path.GetFullPath(Path.Combine(root, "limoclip-normalize-test"));
+        Environment.SetEnvironmentVariable(variableName, root);
+        try
+        {
+            var actual = RecordingCenterDisplayLogic.NormalizeDirectory(
+                $"%{variableName}%\\limoclip-normalize-test",
+                fallback);
 
-        var actual = RecordingCenterDisplayLogic.NormalizeDirectory(@"%TEMP%\limoclip-normalize-test", fallback);
-
-        Assert.Equal(expected, actual);
+            Assert.Equal(expected, actual);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variableName, null);
+        }
     }
 
     [Fact]
