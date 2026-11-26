@@ -55,4 +55,30 @@ internal static class ClipStudioStatusText
 
     public static string EncoderDetectionFailed(string message) =>
         $"硬件编码器探测失败，已回退软件编码：{message}";
+
+    // ---- 本地录像加载 / 非边录边剪状态 ----
+
+    public static string SessionListLoadFailed(string message) => $"加载录像列表失败：{message}";
+
+    public static string VideoFileMissing(string? videoFilePath) => $"录像文件不存在，可能已被移动或删除：{videoFilePath}";
+
+    public static string LocalFilePickerMissing() => "当前界面未接入本地文件选择器。";
+
+    public static string PickFileFailed(string message) => $"选择文件失败：{message}";
+
+    public static string VideoPathMissing(string videoPath) => $"视频文件不存在：{videoPath}";
+
+    public static string ReadingVideoInfo() => "正在读取视频信息…";
+
+    public static string DanmakuFileLoadFailed(string message) => $"弹幕文件读取失败（仍可导出无弹幕版）：{message}";
+
+    public static string VideoLoaded(string fileName, string durationText) => $"已加载 {fileName}（{durationText}）";
+
+    public static string VideoLoadFailed(string message) => $"加载视频失败：{message}";
+
+    public static string HighlightLoadFailed(string message) => $"高能推荐加载失败：{message}";
+
+    public static string WaveformLoadFailed(string message) => $"波形提取失败（不影响导出）：{message}";
+
+    public static string PlaybackFailed(string message) => $"播放失败：{message}";
 }

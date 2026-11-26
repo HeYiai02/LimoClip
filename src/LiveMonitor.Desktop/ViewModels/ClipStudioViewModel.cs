@@ -471,7 +471,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
         catch (Exception ex)
         {
-            StatusText = $"加载录像列表失败：{ex.Message}";
+            StatusText = ClipStudioStatusText.SessionListLoadFailed(ex.Message);
         }
     }
 
@@ -506,7 +506,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
         if (string.IsNullOrWhiteSpace(session.VideoFilePath) || !File.Exists(session.VideoFilePath))
         {
-            StatusText = $"录像文件不存在，可能已被移动或删除：{session.VideoFilePath}";
+            StatusText = ClipStudioStatusText.VideoFileMissing(session.VideoFilePath);
             return;
         }
 
@@ -523,7 +523,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     {
         if (PickVideoFileAsync is null)
         {
-            StatusText = "当前界面未接入本地文件选择器。";
+            StatusText = ClipStudioStatusText.LocalFilePickerMissing();
             return;
         }
 
@@ -534,7 +534,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
         catch (Exception ex)
         {
-            StatusText = $"选择文件失败：{ex.Message}";
+            StatusText = ClipStudioStatusText.PickFileFailed(ex.Message);
             return;
         }
 
@@ -550,7 +550,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     {
         if (!File.Exists(videoPath))
         {
-            StatusText = $"视频文件不存在：{videoPath}";
+            StatusText = ClipStudioStatusText.VideoPathMissing(videoPath);
             return;
         }
 
@@ -565,7 +565,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         var waveformCt = _waveformCts!.Token;
 
         IsBusy = true;
-        StatusText = "正在读取视频信息…";
+        StatusText = ClipStudioStatusText.ReadingVideoInfo();
         try
         {
             var metadata = await _videoProbe.ProbeAsync(videoPath, ct).ConfigureAwait(true);
@@ -606,7 +606,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
                 }
                 catch (Exception ex)
                 {
-                    StatusText = $"弹幕文件读取失败（仍可导出无弹幕版）：{ex.Message}";
+                    StatusText = ClipStudioStatusText.DanmakuFileLoadFailed(ex.Message);
                 }
             }
 
@@ -631,7 +631,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             DanmakuEnabledChanged?.Invoke(_danmakuPlaybackEnabled);
             DanmakuSyncRequested?.Invoke(Array.Empty<DanmakuMessage>(), true);
             LoadVideoRequested?.Invoke(videoPath);
-            StatusText = $"已加载 {Path.GetFileName(videoPath)}（{ClipExportTaskViewModel.FormatTime(metadata.Duration)}）";
+            StatusText = ClipStudioStatusText.VideoLoaded(Path.GetFileName(videoPath), ClipExportTaskViewModel.FormatTime(metadata.Duration));
             Export.NotifyAvailabilityChanged();
 
             _ = LoadWaveformAsync(videoPath, danmakuPath, metadata.Duration, waveformCt);
@@ -642,7 +642,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
         catch (Exception ex)
         {
-            StatusText = $"加载视频失败：{ex.Message}";
+            StatusText = ClipStudioStatusText.VideoLoadFailed(ex.Message);
         }
         finally
         {
@@ -1191,7 +1191,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
         catch (Exception ex)
         {
-            StatusText = $"高能推荐加载失败：{ex.Message}";
+            StatusText = ClipStudioStatusText.HighlightLoadFailed(ex.Message);
         }
     }
 
@@ -1219,7 +1219,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
         catch (Exception ex)
         {
-            StatusText = $"波形提取失败（不影响导出）：{ex.Message}";
+            StatusText = ClipStudioStatusText.WaveformLoadFailed(ex.Message);
         }
         finally
         {
@@ -1318,7 +1318,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     public void OnPlayerFailed(string message)
     {
         IsPlaying = false;
-        StatusText = $"播放失败：{message}";
+        StatusText = ClipStudioStatusText.PlaybackFailed(message);
     }
 
     public void SuspendPlayback()

@@ -100,4 +100,56 @@ public sealed class ClipStudioStatusTextTests
     {
         Assert.Equal(expected, ClipStudioStatusText.EncoderLabel(encoderName));
     }
+
+    [Fact]
+    public void SessionListLoadFailed_includes_message()
+        => Assert.Equal("加载录像列表失败：db locked", ClipStudioStatusText.SessionListLoadFailed("db locked"));
+
+    [Fact]
+    public void VideoFileMissing_includes_path()
+        => Assert.Equal("录像文件不存在，可能已被移动或删除：D:\\a.mkv", ClipStudioStatusText.VideoFileMissing("D:\\a.mkv"));
+
+    [Fact]
+    public void VideoFileMissing_allows_null_path()
+        => Assert.Equal("录像文件不存在，可能已被移动或删除：", ClipStudioStatusText.VideoFileMissing(null));
+
+    [Fact]
+    public void LocalFilePickerMissing_keeps_original_copy()
+        => Assert.Equal("当前界面未接入本地文件选择器。", ClipStudioStatusText.LocalFilePickerMissing());
+
+    [Fact]
+    public void PickFileFailed_includes_message()
+        => Assert.Equal("选择文件失败：boom", ClipStudioStatusText.PickFileFailed("boom"));
+
+    [Fact]
+    public void VideoPathMissing_includes_path()
+        => Assert.Equal("视频文件不存在：D:\\a.mkv", ClipStudioStatusText.VideoPathMissing("D:\\a.mkv"));
+
+    [Fact]
+    public void ReadingVideoInfo_keeps_original_copy()
+        => Assert.Equal("正在读取视频信息…", ClipStudioStatusText.ReadingVideoInfo());
+
+    [Fact]
+    public void DanmakuFileLoadFailed_includes_message_and_export_note()
+        => Assert.Equal("弹幕文件读取失败（仍可导出无弹幕版）：编码错误", ClipStudioStatusText.DanmakuFileLoadFailed("编码错误"));
+
+    [Fact]
+    public void VideoLoaded_includes_file_name_and_duration()
+        => Assert.Equal("已加载 a.mkv（01:05）", ClipStudioStatusText.VideoLoaded("a.mkv", "01:05"));
+
+    [Fact]
+    public void VideoLoadFailed_includes_message()
+        => Assert.Equal("加载视频失败：boom", ClipStudioStatusText.VideoLoadFailed("boom"));
+
+    [Fact]
+    public void HighlightLoadFailed_includes_message()
+        => Assert.Equal("高能推荐加载失败：boom", ClipStudioStatusText.HighlightLoadFailed("boom"));
+
+    [Fact]
+    public void WaveformLoadFailed_includes_message_and_non_blocking_note()
+        => Assert.Equal("波形提取失败（不影响导出）：boom", ClipStudioStatusText.WaveformLoadFailed("boom"));
+
+    [Fact]
+    public void PlaybackFailed_includes_message()
+        => Assert.Equal("播放失败：文件损坏", ClipStudioStatusText.PlaybackFailed("文件损坏"));
 }
