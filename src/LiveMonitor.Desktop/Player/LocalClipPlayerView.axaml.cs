@@ -45,7 +45,6 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
     private static readonly TimeSpan RenderReadyTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan LoadTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan PositionPollInterval = TimeSpan.FromMilliseconds(100);
-    private static readonly TimeSpan EndOfFileTolerance = TimeSpan.FromMilliseconds(80);
 
     private readonly object _gate = new();
     private readonly DispatcherTimer _positionTimer;
@@ -119,7 +118,7 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
             return;
         }
 
-        _liveSafeDuration = safeDuration < TimeSpan.Zero ? TimeSpan.Zero : safeDuration;
+        _liveSafeDuration = ClipPlaybackPositionLogic.ClampSafeDuration(safeDuration);
     }
 
     protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
@@ -606,31 +605,8 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
                 return;
             }
 
-            var position = TimeSpan.FromSeconds(Math.Max(0, seconds.Value));
-
-            // 边录边剪：分片仍在前端增长，mpv 的 EOF 只代表“当前已写入尾部”，不能当作播放完成；
-            // 同时把播放位置钳在安全可剪范围内，避免播放头/界面位置进入尚未安全写入的尾部。
-            if (_isLive)
-            {
-                if (_liveSafeDuration > TimeSpan.Zero)
-                {
-                    var liveMax = _liveSafeDuration - TimeSpan.FromMilliseconds(100);
-                    position = liveMax <= TimeSpan.Zero
-                        ? TimeSpan.Zero
-                        : position > liveMax ? liveMax : position;
-                }
-
-                if (Math.Abs((position - _position).TotalMilliseconds) < 1)
-                {
-                    return;
-                }
-
-                _position = position;
-                PositionChanged?.Invoke(this, EventArgs.Empty);
-                return;
-            }
-
-            if (_duration <= TimeSpan.Zero)
+            var sampled = TimeSpan.FromSeconds(Math.Max(0, seconds.Value));
+            if (!_isLive && _duration <= TimeSpan.Zero)
             {
                 _duration = ReadDuration();
                 if (_duration > TimeSpan.Zero)
@@ -639,22 +615,25 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
                 }
             }
 
-            // keep-open 到末尾时 mpv 不会自动换状态，这里主动收口一次。
-            if (!_paused && _duration > TimeSpan.Zero && position >= _duration - EndOfFileTolerance)
+            // 边录边剪：分片仍在前端增长，mpv 的 EOF 只代表“当前已写入尾部”，不能当作播放完成；
+            // 同时把播放位置钳在安全可剪范围内，避免播放头/界面位置进入尚未安全写入的尾部。
+            var result = ClipPlaybackPositionLogic.Evaluate(
+                sampled,
+                _position,
+                _isLive,
+                _liveSafeDuration,
+                _duration,
+                _paused);
+            if (result.PositionChanged)
             {
-                _position = _duration;
+                _position = result.Position;
                 PositionChanged?.Invoke(this, EventArgs.Empty);
-                RaiseCompleted();
-                return;
             }
 
-            if (Math.Abs((position - _position).TotalMilliseconds) < 1)
+            if (result.Completed)
             {
-                return;
+                RaiseCompleted();
             }
-
-            _position = position;
-            PositionChanged?.Invoke(this, EventArgs.Empty);
         }
         catch
         {
@@ -680,32 +659,8 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
         return TimeSpan.Zero;
     }
 
-    private TimeSpan ClampPosition(TimeSpan position)
-    {
-        if (position < TimeSpan.Zero)
-        {
-            return TimeSpan.Zero;
-        }
-
-        // 边录边剪：只允许跳到安全可剪截止前 0.1 秒，避免读到尚未写入文件的尾部。
-        if (_isLive && _liveSafeDuration > TimeSpan.Zero)
-        {
-            var liveMax = _liveSafeDuration - TimeSpan.FromMilliseconds(100);
-            if (liveMax <= TimeSpan.Zero)
-            {
-                return TimeSpan.Zero;
-            }
-
-            return position > liveMax ? liveMax : position;
-        }
-
-        if (_duration > TimeSpan.Zero && position > _duration)
-        {
-            return _duration;
-        }
-
-        return position;
-    }
+    private TimeSpan ClampPosition(TimeSpan position) =>
+        ClipPlaybackPositionLogic.ClampPosition(position, _isLive, _liveSafeDuration, _duration);
 
     private void OnStartFile(object? sender, EventArgs e)
     {
