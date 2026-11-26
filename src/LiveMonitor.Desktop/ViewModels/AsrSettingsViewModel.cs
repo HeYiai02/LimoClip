@@ -23,10 +23,7 @@ public sealed class AsrSettingsViewModel : ObservableObject
     private static readonly string[] LanguageIds = { "auto", "zh", "en", "ja", "ko" };
 
     /// <summary>语言下拉显示名，与 <see cref="LanguageIds"/> 同下标。</summary>
-    public IReadOnlyList<string> LanguageNames { get; } = new[]
-    {
-        "自动检测", "中文", "英文", "日文", "韩文"
-    };
+    public IReadOnlyList<string> LanguageNames { get; } = AsrSettingsStatusText.LanguageNames;
 
     private readonly AsrSettingsStore _store;
 
@@ -37,11 +34,11 @@ public sealed class AsrSettingsViewModel : ObservableObject
     private string _apiKey = string.Empty;
     private bool _hasApiKey;
     private string _presetDescription = string.Empty;
-    private string _statusText = "尚未读取语音识别设置。";
+    private string _statusText = AsrSettingsStatusText.Initial;
     private AsrSettingsStatusKind _statusKind = AsrSettingsStatusKind.Neutral;
     private bool _isBusy;
     private bool _isLoading;
-    private string _testButtonText = "测试连接";
+    private string _testButtonText = AsrSettingsStatusText.TestButtonIdle;
 
     public AsrSettingsViewModel(AsrSettingsStore store)
     {
@@ -67,11 +64,11 @@ public sealed class AsrSettingsViewModel : ObservableObject
             PresetDescription = value.Description;
             if (IsCustomPreset(value))
             {
-                SetStatus("自定义服务需要填写接口地址和模型（OpenAI 兼容）。", AsrSettingsStatusKind.Neutral);
+                SetStatus(AsrSettingsStatusText.CustomPresetHint, AsrSettingsStatusKind.Neutral);
             }
             else
             {
-                SetStatus($"已切换为「{value.DisplayName}」，点击「保存」后生效。", AsrSettingsStatusKind.Neutral);
+                SetStatus(AsrSettingsStatusText.PresetSwitched(value.DisplayName), AsrSettingsStatusKind.Neutral);
             }
         }
     }
@@ -115,7 +112,7 @@ public sealed class AsrSettingsViewModel : ObservableObject
         }
     }
 
-    public string ApiKeyWatermark => HasApiKey ? "已保存，留空保持不变" : "粘贴 API Key";
+    public string ApiKeyWatermark => HasApiKey ? AsrSettingsStatusText.WatermarkSaved : AsrSettingsStatusText.WatermarkEmpty;
 
     public string PresetDescription
     {
@@ -181,12 +178,12 @@ public sealed class AsrSettingsViewModel : ObservableObject
             ApiKey = string.Empty;
             HasApiKey = snapshot.HasApiKey;
             SetStatus(
-                snapshot.HasApiKey ? "已读取语音识别设置。" : "尚未配置 API Key，请粘贴后点击「保存」。",
+                snapshot.HasApiKey ? AsrSettingsStatusText.LoadedConfigured : AsrSettingsStatusText.LoadedMissingApiKey,
                 AsrSettingsStatusKind.Neutral);
         }
         catch (Exception ex)
         {
-            SetStatus($"读取语音识别设置失败：{ex.Message}", AsrSettingsStatusKind.Error);
+            SetStatus(AsrSettingsStatusText.LoadFailed(ex.Message), AsrSettingsStatusKind.Error);
         }
         finally
         {
@@ -209,18 +206,18 @@ public sealed class AsrSettingsViewModel : ObservableObject
             return;
         }
 
-        SetBusy(true, "正在保存语音识别设置…");
+        SetBusy(true, AsrSettingsStatusText.Saving);
         try
         {
             await _store.SaveAsync(draft, ct).ConfigureAwait(true);
             // 保存成功后清空明文 Key 并重新读取，刷新 Watermark 与表单内容。
             ApiKey = string.Empty;
             await LoadAsync(ct).ConfigureAwait(true);
-            SetStatus("语音识别设置已保存。", AsrSettingsStatusKind.Success);
+            SetStatus(AsrSettingsStatusText.Saved, AsrSettingsStatusKind.Success);
         }
         catch (Exception ex)
         {
-            SetStatus($"保存语音识别设置失败：{ex.Message}", AsrSettingsStatusKind.Error);
+            SetStatus(AsrSettingsStatusText.SaveFailed(ex.Message), AsrSettingsStatusKind.Error);
         }
         finally
         {
@@ -243,8 +240,8 @@ public sealed class AsrSettingsViewModel : ObservableObject
             return;
         }
 
-        SetBusy(true, "正在测试连接…");
-        TestButtonText = "正在测试…";
+        SetBusy(true, AsrSettingsStatusText.Testing);
+        TestButtonText = AsrSettingsStatusText.TestButtonRunning;
         try
         {
             var result = await _store.TestConnectionAsync(draft, ct).ConfigureAwait(true);
@@ -254,11 +251,11 @@ public sealed class AsrSettingsViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            SetStatus($"测试连接失败：{ex.Message}", AsrSettingsStatusKind.Error);
+            SetStatus(AsrSettingsStatusText.TestFailed(ex.Message), AsrSettingsStatusKind.Error);
         }
         finally
         {
-            TestButtonText = "测试连接";
+            TestButtonText = AsrSettingsStatusText.TestButtonIdle;
             SetBusy(false, null);
         }
     }
@@ -288,7 +285,7 @@ public sealed class AsrSettingsViewModel : ObservableObject
             return false;
         }
 
-        SetStatus("自定义服务需要填写接口地址和模型。", AsrSettingsStatusKind.Error);
+        SetStatus(AsrSettingsStatusText.InvalidCustomPreset, AsrSettingsStatusKind.Error);
         return true;
     }
 
