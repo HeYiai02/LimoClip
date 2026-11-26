@@ -142,14 +142,14 @@ public sealed class ClipStudioViewModelTests
         var viewModel = CreateViewModel("ffmpeg", asr: asr);
         try
         {
-            await viewModel.TranscribeSelectionCommand.ExecuteAsync(null);
+            await viewModel.Asr.TranscribeSelectionCommand.ExecuteAsync(null);
 
             Assert.Equal(0, asr.CallCount);
             Assert.False(viewModel.HasVideo);
-            Assert.False(viewModel.IsAsrRunning);
-            Assert.Contains("请先打开本地视频", viewModel.AsrStatusText);
-            Assert.NotNull(viewModel.AsrErrorText);
-            Assert.Contains("请先打开本地视频", viewModel.AsrErrorText);
+            Assert.False(viewModel.Asr.IsRunning);
+            Assert.Contains("请先打开本地视频", viewModel.Asr.StatusText);
+            Assert.NotNull(viewModel.Asr.ErrorText);
+            Assert.Contains("请先打开本地视频", viewModel.Asr.ErrorText);
         }
         finally
         {
@@ -196,22 +196,22 @@ public sealed class ClipStudioViewModelTests
                 var selectionEnd = TimeSpan.FromMilliseconds(1400);
                 viewModel.UpdateSelection(selectionStart, selectionEnd);
 
-                await viewModel.TranscribeSelectionCommand.ExecuteAsync(null);
+                await viewModel.Asr.TranscribeSelectionCommand.ExecuteAsync(null);
 
                 Assert.Equal(1, asr.CallCount);
                 Assert.Equal(videoPath, asr.Calls[0].VideoPath);
                 Assert.Equal(selectionStart, asr.Calls[0].Start);
                 Assert.Equal(selectionEnd, asr.Calls[0].End);
-                Assert.Equal(2, viewModel.AsrLines.Count);
-                Assert.Equal("你好 世界", viewModel.AsrFullText);
-                Assert.Equal("fake (whisper-large-v3-turbo)", viewModel.AsrProviderLabel);
-                Assert.False(viewModel.IsAsrRunning);
-                Assert.Null(viewModel.AsrErrorText);
-                Assert.Contains("识别完成", viewModel.AsrStatusText);
+                Assert.Equal(2, viewModel.Asr.TranscriptLines.Count);
+                Assert.Equal("你好 世界", viewModel.Asr.FullText);
+                Assert.Equal("fake (whisper-large-v3-turbo)", viewModel.Asr.ProviderLabel);
+                Assert.False(viewModel.Asr.IsRunning);
+                Assert.Null(viewModel.Asr.ErrorText);
+                Assert.Contains("识别完成", viewModel.Asr.StatusText);
 
                 TimeSpan? sought = null;
                 viewModel.SeekRequested += position => sought = position;
-                viewModel.SeekToAsrLine(viewModel.AsrLines[1]);
+                viewModel.Asr.SeekToLine(viewModel.Asr.TranscriptLines[1]);
 
                 Assert.Equal(selectionStart + TimeSpan.FromSeconds(1), sought);
                 Assert.Equal(selectionStart + TimeSpan.FromSeconds(1), viewModel.Position);
@@ -254,14 +254,14 @@ public sealed class ClipStudioViewModelTests
                 await viewModel.OpenLocalFileCommand.ExecuteAsync(null);
                 viewModel.UpdateSelection(TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(1200));
 
-                await viewModel.TranscribeSelectionCommand.ExecuteAsync(null);
+                await viewModel.Asr.TranscribeSelectionCommand.ExecuteAsync(null);
 
                 Assert.Equal(1, asr.CallCount);
-                Assert.False(viewModel.IsAsrRunning);
-                Assert.Empty(viewModel.AsrLines);
-                Assert.Contains("识别失败", viewModel.AsrStatusText);
-                Assert.NotNull(viewModel.AsrErrorText);
-                Assert.Contains("尚未配置语音识别 API", viewModel.AsrErrorText);
+                Assert.False(viewModel.Asr.IsRunning);
+                Assert.Empty(viewModel.Asr.TranscriptLines);
+                Assert.Contains("识别失败", viewModel.Asr.StatusText);
+                Assert.NotNull(viewModel.Asr.ErrorText);
+                Assert.Contains("尚未配置语音识别 API", viewModel.Asr.ErrorText);
             }
             finally
             {
@@ -310,7 +310,7 @@ public sealed class ClipStudioViewModelTests
                     TimeSpan.FromMilliseconds(800));
                 viewModel.Highlights.Add(item);
 
-                await viewModel.TranscribeHighlightCommand.ExecuteAsync(item);
+                await viewModel.Asr.TranscribeHighlightCommand.ExecuteAsync(item);
 
                 Assert.Equal(1, asr.CallCount);
                 Assert.Equal(TimeSpan.Zero, asr.Calls[0].Start);
@@ -319,12 +319,119 @@ public sealed class ClipStudioViewModelTests
                 Assert.True(item.HasAsrResult);
                 Assert.False(item.IsTranscribing);
                 Assert.Equal("高能片段回放", item.AsrSummary);
-                Assert.Single(viewModel.AsrLines);
-                Assert.Contains("识别完成", viewModel.AsrStatusText);
+                Assert.Single(viewModel.Asr.TranscriptLines);
+                Assert.Contains("识别完成", viewModel.Asr.StatusText);
 
                 // 已有结果时再次点击卡片按钮只展示结果，不重复调用 Provider（Provider 缓存之外再省一次抽音）。
-                await viewModel.TranscribeHighlightCommand.ExecuteAsync(item);
+                await viewModel.Asr.TranscribeHighlightCommand.ExecuteAsync(item);
                 Assert.Equal(1, asr.CallCount);
+            }
+            finally
+            {
+                viewModel.Dispose();
+            }
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateSelection_NotifiesAsrAvailability()
+    {
+        if (!FfmpegLocator.TryLocate(out var ffmpegPath))
+        {
+            return;
+        }
+
+        var tempDirectory = CreateTempDirectory();
+        try
+        {
+            var videoPath = Path.Combine(tempDirectory, "asr-availability.mp4");
+            GenerateVideo(ffmpegPath, videoPath);
+
+            var viewModel = CreateViewModel(ffmpegPath);
+            try
+            {
+                viewModel.PickVideoFileAsync = () => Task.FromResult<string?>(videoPath);
+                await viewModel.OpenLocalFileCommand.ExecuteAsync(null);
+                Assert.True(viewModel.Asr.CanTranscribeSelection);
+
+                var changes = new List<string>();
+                viewModel.Asr.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName is not null)
+                    {
+                        changes.Add(e.PropertyName);
+                    }
+                };
+
+                viewModel.UpdateSelection(
+                    TimeSpan.FromMilliseconds(400),
+                    TimeSpan.FromMilliseconds(1400));
+
+                Assert.Contains(nameof(ClipAsrViewModel.CanTranscribeSelection), changes);
+                Assert.True(viewModel.Asr.CanTranscribeSelection);
+            }
+            finally
+            {
+                viewModel.Dispose();
+            }
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDirectory);
+        }
+    }
+
+    [Fact]
+    public async Task OpenLocalFile_ResetsAsrPanel()
+    {
+        if (!FfmpegLocator.TryLocate(out var ffmpegPath))
+        {
+            return;
+        }
+
+        var tempDirectory = CreateTempDirectory();
+        try
+        {
+            var videoPath = Path.Combine(tempDirectory, "asr-reset.mp4");
+            GenerateVideo(ffmpegPath, videoPath);
+
+            var asr = new FakeAsrProvider
+            {
+                Handler = (_, start, end) => Task.FromResult(new AsrTranscriptResult(
+                    start,
+                    end,
+                    "重置前文本",
+                    new[] { new AsrTranscriptSegment(TimeSpan.Zero, end - start, "重置前文本") },
+                    "fake",
+                    DateTimeOffset.UtcNow))
+            };
+
+            var viewModel = CreateViewModel(ffmpegPath, asr: asr);
+            try
+            {
+                viewModel.PickVideoFileAsync = () => Task.FromResult<string?>(videoPath);
+                await viewModel.OpenLocalFileCommand.ExecuteAsync(null);
+                viewModel.UpdateSelection(
+                    TimeSpan.FromMilliseconds(400),
+                    TimeSpan.FromMilliseconds(1400));
+                await viewModel.Asr.TranscribeSelectionCommand.ExecuteAsync(null);
+
+                Assert.True(viewModel.Asr.HasResult);
+                Assert.Equal("重置前文本", viewModel.Asr.FullText);
+                Assert.Single(viewModel.Asr.TranscriptLines);
+
+                // 重新打开本地视频：ASR 面板与卡片状态由主视图模型统一重置。
+                await viewModel.OpenLocalFileCommand.ExecuteAsync(null);
+
+                Assert.False(viewModel.Asr.HasResult);
+                Assert.Equal("尚未识别", viewModel.Asr.StatusText);
+                Assert.Empty(viewModel.Asr.TranscriptLines);
+                Assert.Equal(string.Empty, viewModel.Asr.FullText);
+                Assert.Equal(string.Empty, viewModel.Asr.ProviderLabel);
             }
             finally
             {

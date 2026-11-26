@@ -4,6 +4,7 @@
              xmlns:player="using:LiveMonitor.Desktop.Player"
              xmlns:controls="using:LiveMonitor.Desktop.Controls"
              x:Class="LiveMonitor.Desktop.Views.ClipStudioView"
+             x:DataType="vm:ClipStudioViewModel"
              Background="{DynamicResource BrushBgCanvas}">
 
     <!-- 剪辑台私有样式：全部复用 DesignTokens 画刷 / 圆角 / 等宽字体，禁止内联旧色板。 -->
@@ -553,11 +554,15 @@
                                Foreground="{DynamicResource BrushTextSecondary}"
                                TextWrapping="Wrap" Margin="0,8,0,0" />
 
-                    <!-- V0.5-A 语音识别：识别当前时间轴选区，展示分段结果并可点击单句跳转。 -->
+                    <!-- V0.5-A 语音识别：识别当前时间轴选区，展示分段结果并可点击单句跳转。
+                         面板状态/命令由 ClipAsrViewModel 子视图模型承载，这里块级 opt-in 编译绑定。 -->
                     <Border Background="{DynamicResource BrushBgBase}"
                             BorderBrush="{DynamicResource BrushBorderSubtle}" BorderThickness="1"
                             CornerRadius="{DynamicResource RadiusCard}" Padding="10" Margin="0,12,0,0"
-                            IsVisible="{Binding IsAsrPanelVisible}">
+                            DataContext="{Binding Asr}"
+                            x:CompileBindings="True"
+                            x:DataType="vm:ClipAsrViewModel"
+                            IsVisible="{Binding IsPanelVisible}">
                         <StackPanel Spacing="6">
                             <Grid ColumnDefinitions="Auto,*,Auto">
                                 <PathIcon Data="{DynamicResource IconMic}" Width="12" Height="12"
@@ -565,7 +570,7 @@
                                           VerticalAlignment="Center" />
                                 <TextBlock Grid.Column="1" Classes="studio-title" FontSize="12"
                                            Text="语音识别" Margin="6,0,0,0" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="2" Text="{Binding AsrRangeText}" FontSize="9"
+                                <TextBlock Grid.Column="2" Text="{Binding RangeText}" FontSize="9"
                                            Classes="mono"
                                            Foreground="{DynamicResource BrushTextMuted}"
                                            VerticalAlignment="Center" />
@@ -576,28 +581,28 @@
                             <Button Classes="subtle-btn" Height="26" FontSize="10.5"
                                     Content="取消识别"
                                     Command="{Binding CancelAsrCommand}"
-                                    IsVisible="{Binding IsAsrRunning}" />
+                                    IsVisible="{Binding IsRunning}" />
                             <ProgressBar IsIndeterminate="True" Height="3"
                                          Background="{DynamicResource BrushBgElevated}"
                                          Foreground="{DynamicResource BrushAccent}"
-                                         IsVisible="{Binding IsAsrRunning}" />
-                            <TextBlock Text="{Binding AsrStatusText}" FontSize="10.5"
+                                         IsVisible="{Binding IsRunning}" />
+                            <TextBlock Text="{Binding StatusText}" FontSize="10.5"
                                        Foreground="{DynamicResource BrushTextSecondary}"
                                        TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding AsrErrorText}" FontSize="10"
+                            <TextBlock Text="{Binding ErrorText}" FontSize="10"
                                        Foreground="{DynamicResource BrushDanger}"
-                                       TextWrapping="Wrap" IsVisible="{Binding HasAsrError}" />
-                            <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding HasAsrResult}">
-                                <TextBlock Text="{Binding AsrProviderLabel}" FontSize="9"
+                                       TextWrapping="Wrap" IsVisible="{Binding HasError}" />
+                            <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding HasResult}">
+                                <TextBlock Text="{Binding ProviderLabel}" FontSize="9"
                                            Foreground="{DynamicResource BrushTextMuted}"
                                            TextTrimming="CharacterEllipsis"
                                            VerticalAlignment="Center" />
                                 <Button Grid.Column="1" Classes="studio-mini" Content="复制文本"
                                         Click="OnCopyAsrTextClick" />
                             </Grid>
-                            <ItemsControl ItemsSource="{Binding AsrLines}">
+                            <ItemsControl ItemsSource="{Binding TranscriptLines}">
                                 <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
+                                    <DataTemplate x:DataType="vm:AsrTranscriptLineViewModel">
                                         <Button Classes="studio-line"
                                                 Click="OnAsrLineClick"
                                                 ToolTip.Tip="点击跳转到该句对应的画面">
