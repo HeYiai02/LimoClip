@@ -13,12 +13,12 @@ namespace LiveMonitor.Desktop.ViewModels;
 /// </summary>
 public sealed partial class RecordingHistoryItemViewModel : ObservableObject
 {
-    private readonly RecordingCenterViewModel _parent;
+    private readonly RecordingHistoryViewModel _history;
 
-    public RecordingHistoryItemViewModel(RecordingSession session, RecordingCenterViewModel parent)
+    public RecordingHistoryItemViewModel(RecordingSession session, RecordingHistoryViewModel history)
     {
         Session = session;
-        _parent = parent;
+        _history = history;
     }
 
     public RecordingSession Session { get; }
@@ -110,18 +110,18 @@ public sealed partial class RecordingHistoryItemViewModel : ObservableObject
             : "录像文件不存在，无法进入剪辑台";
 
     [RelayCommand]
-    private Task OpenFolderAsync() => _parent.OpenHistoryFolderAsync(this);
+    private Task OpenFolderAsync() => _history.OpenFolderAsync(this);
 
     [RelayCommand]
-    private Task DeleteAsync() => _parent.RequestDeleteAsync(this);
+    private Task DeleteAsync() => _history.RequestDeleteAsync(this);
 
     [RelayCommand]
-    private Task ClipAsync() => _parent.RequestOpenClipAsync(this);
+    private Task ClipAsync() => _history.RequestOpenClipAsync(this);
 
     /// <summary>边录边剪：把该场次正在写入的分片直接送进剪辑台实时剪辑。</summary>
     [RelayCommand]
     private Task LiveClipAsync()
         => Session.LiveRoomId is { } liveRoomId
-            ? _parent.RequestOpenLiveClipAsync(liveRoomId)
+            ? _history.RequestOpenLiveClipAsync(liveRoomId)
             : Task.CompletedTask;
 }
