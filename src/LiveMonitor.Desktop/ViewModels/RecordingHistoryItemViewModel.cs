@@ -49,29 +49,25 @@ public sealed partial class RecordingHistoryItemViewModel : ObservableObject
 
     public string HighlightCountText => Session.HighlightCount.ToString();
 
-    public string Summary =>
-        $"时长 {DurationText} · 大小 {FileSizeText} · 弹幕 {DanmakuCountText} 条 · 高能 {HighlightCountText}";
+    public string Summary
+        => RecordingHistoryDisplayLogic.Summary(DurationText, FileSizeText, DanmakuCountText, HighlightCountText);
 
-    public bool HasError => !string.IsNullOrWhiteSpace(Session.ErrorMessage);
+    public bool HasError => RecordingHistoryDisplayLogic.HasError(Session.ErrorMessage);
 
     public string ErrorMessage => Session.ErrorMessage ?? string.Empty;
 
-    public string VideoFileName => Path.GetFileName(Session.VideoFilePath);
+    public string VideoFileName => RecordingHistoryDisplayLogic.FileName(Session.VideoFilePath);
 
-    public string DanmakuFileName => Path.GetFileName(Session.DanmakuFilePath);
+    public string DanmakuFileName => RecordingHistoryDisplayLogic.FileName(Session.DanmakuFilePath);
 
     public string VideoFilePath => Session.VideoFilePath;
 
     /// <summary>正在录制的会话不允许删除（RecordingManager 也会拒绝）。</summary>
-    public bool IsActive => Session.Status is RecordingStatus.Starting
-        or RecordingStatus.Recording
-        or RecordingStatus.Stopping;
+    public bool IsActive => RecordingHistoryDisplayLogic.IsActive(Session.Status);
 
-    public bool CanDelete => !IsActive;
+    public bool CanDelete => RecordingHistoryDisplayLogic.CanDelete(Session.Status);
 
-    public string DeleteTip => IsActive
-        ? "该录制仍在进行中，请先停止录制再删除记录"
-        : "删除记录并同时删除对应的 .mkv 与 .jsonl 文件";
+    public string DeleteTip => RecordingHistoryDisplayLogic.DeleteTip(Session.Status);
 
     /// <summary>实时进度会更新活跃会话的时长与大小，删除按钮仍保持禁用。</summary>
     public void ApplyProgress(RecordingProgress progress)
@@ -89,9 +85,8 @@ public sealed partial class RecordingHistoryItemViewModel : ObservableObject
     }
 
     /// <summary>V0.4：录制已结束且 .mkv 仍在磁盘上时才能进入剪辑台。</summary>
-    public bool CanClip => !IsActive
-                           && !string.IsNullOrWhiteSpace(Session.VideoFilePath)
-                           && File.Exists(Session.VideoFilePath);
+    public bool CanClip
+        => RecordingHistoryDisplayLogic.CanClip(Session.Status, Session.VideoFilePath, File.Exists(Session.VideoFilePath));
 
     /// <summary>
     /// 录制进行中时历史行不显示「去剪辑」（文件尚未合并完成），改为显示「✂ 边录边剪」入口。
@@ -99,15 +94,11 @@ public sealed partial class RecordingHistoryItemViewModel : ObservableObject
     public bool IsLive => IsActive;
 
     /// <summary>历史行「去剪辑」按钮的可见性：录制中的行由边录边剪入口替代。</summary>
-    public bool CanShowClip => !IsActive;
+    public bool CanShowClip => RecordingHistoryDisplayLogic.CanShowClip(Session.Status);
 
-    public string LiveClipTip => "边录边剪：对正在写入的录像实时剪辑，无需等录制结束";
+    public string LiveClipTip => RecordingHistoryDisplayLogic.LiveClipTip;
 
-    public string ClipTip => IsActive
-        ? "该录制仍在进行中，请先停止录制再进入剪辑台"
-        : CanClip
-            ? "进入剪辑台，预览/裁剪并导出 MP4"
-            : "录像文件不存在，无法进入剪辑台";
+    public string ClipTip => RecordingHistoryDisplayLogic.ClipTip(Session.Status, CanClip);
 
     [RelayCommand]
     private Task OpenFolderAsync() => _history.OpenFolderAsync(this);

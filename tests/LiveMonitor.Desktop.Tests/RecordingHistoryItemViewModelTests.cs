@@ -6,8 +6,8 @@ using Xunit;
 namespace LiveMonitor.Desktop.Tests;
 
 /// <summary>
-/// 录制中心历史行入口契约：录制中的会话改为提供「✂ 边录边剪」，
-/// 已结束的会话继续提供「去剪辑」。
+/// 录制中心历史行入口契约：录制中的会话改为提供「边录边剪」入口，
+/// 已结束的会话继续提供「去剪辑」入口。
 /// </summary>
 public sealed class RecordingHistoryItemViewModelTests
 {
