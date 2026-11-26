@@ -197,13 +197,26 @@ public sealed class YouTubeDanmakuClientTests
             _pageStatusCode = pageStatusCode;
         }
 
-        public List<RecordedRequest> Requests { get; } = new();
+        private readonly List<RecordedRequest> _requests = new();
+        private readonly object _gate = new();
+
+        // 后台轮询线程会持续追加请求记录，返回快照避免断言期间枚举到被修改的集合。
+        public IReadOnlyList<RecordedRequest> Requests
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _requests.ToArray();
+                }
+            }
+        }
 
         public void Record(string method, string url)
         {
-            lock (Requests)
+            lock (_gate)
             {
-                Requests.Add(new RecordedRequest(method, url));
+                _requests.Add(new RecordedRequest(method, url));
             }
         }
 
