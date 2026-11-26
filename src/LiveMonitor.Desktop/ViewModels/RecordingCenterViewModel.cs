@@ -110,7 +110,7 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
     public bool IsHistoryEmpty => _history.IsEmpty;
 
     public string TargetSummary =>
-        $"共 {Targets.Count} 个直播间 · 正在录制 {Targets.Count(item => item.IsRecording)} 路";
+        RecordingCenterDisplayLogic.TargetSummary(Targets.Count, Targets.Count(item => item.IsRecording));
 
     public string HistorySummary => _history.Summary;
 
@@ -145,7 +145,7 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
             var configured = await _settings
                 .GetAsync(AppSettingKeys.RecordingDefaultDirectory, ct)
                 .ConfigureAwait(true);
-            GlobalDirectory = NormalizeDirectory(configured);
+            GlobalDirectory = RecordingCenterDisplayLogic.NormalizeDirectory(configured, RecordingManager.DefaultDirectory);
 
             var rooms = await _rooms.GetAllAsync(ct).ConfigureAwait(true);
             var targets = await _targets.GetAllAsync(ct).ConfigureAwait(true);
@@ -167,7 +167,7 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
 
             NotifyCollectionsChanged();
             await RefreshHistoryAsync(ct).ConfigureAwait(true);
-            StatusText = $"已刷新：{Targets.Count} 个直播间 · {History.Count} 条历史录像";
+            StatusText = RecordingCenterDisplayLogic.RefreshStatusText(Targets.Count, History.Count);
         }
         catch (OperationCanceledException)
         {
@@ -217,7 +217,7 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
 
         try
         {
-            var normalized = NormalizeDirectory(picked);
+            var normalized = RecordingCenterDisplayLogic.NormalizeDirectory(picked, RecordingManager.DefaultDirectory);
             Directory.CreateDirectory(normalized);
             // 选择时立刻预检可写性，避免录制开始才发现写不进去（普通用户机器常见问题）。
             RecordingDirectoryGuard.EnsureWritable(normalized);
@@ -281,7 +281,7 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
 
         try
         {
-            var normalized = NormalizeDirectory(picked);
+            var normalized = RecordingCenterDisplayLogic.NormalizeDirectory(picked, RecordingManager.DefaultDirectory);
             // 独立目录同样先做可写性预检，避免自动录制时才发现目录不可写。
             RecordingDirectoryGuard.EnsureWritable(normalized);
             await _recordings
@@ -556,20 +556,4 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         }
     }
 
-    private static string NormalizeDirectory(string? raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return RecordingManager.DefaultDirectory;
-        }
-
-        try
-        {
-            return Path.GetFullPath(Environment.ExpandEnvironmentVariables(raw.Trim()));
-        }
-        catch
-        {
-            return raw.Trim();
-        }
-    }
 }
