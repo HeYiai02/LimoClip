@@ -48,9 +48,9 @@ public sealed class DouyuApiClientTests
         Assert.Equal("https://www.douyu.com/9999", quality.RequiredHeaders["Referer"]);
         Assert.Contains("Mozilla", quality.RequiredHeaders["User-Agent"]);
 
-        var betard = Assert.Single(handler.Requests.Where(r => r.RequestUri!.AbsolutePath.Contains("betard")));
+        var betard = Assert.Single(handler.Requests, r => r.RequestUri!.AbsolutePath.Contains("betard"));
         Assert.Contains("9999", betard.RequestUri!.AbsolutePath);
-        var play = Assert.Single(handler.Requests.Where(r => r.RequestUri!.AbsolutePath.Contains("getH5Play")));
+        var play = Assert.Single(handler.Requests, r => r.RequestUri!.AbsolutePath.Contains("getH5Play"));
         Assert.Equal(HttpMethod.Post, play.Method);
     }
 
@@ -150,10 +150,10 @@ public sealed class DouyuApiClientTests
         var quality = Assert.Single(snapshot.Qualities);
         Assert.Equal(cookie, quality.RequiredHeaders["Cookie"]);
 
-        var betard = Assert.Single(handler.Requests.Where(r => r.RequestUri!.AbsolutePath.Contains("betard")));
+        var betard = Assert.Single(handler.Requests, r => r.RequestUri!.AbsolutePath.Contains("betard"));
         Assert.Equal(cookie, Assert.Single(betard.Headers.GetValues("Cookie")));
 
-        var play = Assert.Single(handler.Requests.Where(r => r.RequestUri!.AbsolutePath.Contains("getH5Play")));
+        var play = Assert.Single(handler.Requests, r => r.RequestUri!.AbsolutePath.Contains("getH5Play"));
         Assert.Equal(cookie, Assert.Single(play.Headers.GetValues("Cookie")));
     }
 

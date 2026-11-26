@@ -956,9 +956,12 @@ public partial class MainWindow : Window
         _roomDragActive = true;
         try
         {
+            // TODO(V0.7.5): 迁移到 DataTransfer / DoDragDropAsync（需真机拖放冒烟后单独 PR）。
+#pragma warning disable CS0618
             var data = new DataObject();
             data.Set("limoclip/room-id", room.Id.ToString());
             await DragDrop.DoDragDrop(e, data, DragDropEffects.Copy);
+#pragma warning restore CS0618
         }
         finally
         {

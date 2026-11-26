@@ -248,7 +248,7 @@ public sealed class DouyuApiClient : IDisposable
     private static async Task<string> ReadBodyAsync(HttpResponseMessage response, CancellationToken ct)
     {
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        var encoding = response.Content.Headers.ContentEncoding.ToString();
+        var encoding = response.Content.Headers.ContentEncoding.ToString() ?? string.Empty;
         Stream? decompressed = null;
         try
         {
