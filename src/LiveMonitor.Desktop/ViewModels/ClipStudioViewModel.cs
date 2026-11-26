@@ -586,7 +586,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             return;
         }
 
-        await OpenVideoCoreAsync(path, FindCompanionDanmaku(path), session: null).ConfigureAwait(true);
+        await OpenVideoCoreAsync(path, ClipStudioPresentationLogic.FindCompanionDanmaku(path), session: null).ConfigureAwait(true);
     }
 
     private async Task OpenVideoCoreAsync(string videoPath, string? danmakuPath, RecordingSession? session)
@@ -624,7 +624,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             ResetHighlightAsrState();
             _sourceVideoCodec = string.IsNullOrWhiteSpace(metadata.VideoCodec) ? "h264" : metadata.VideoCodec;
             VideoTitle = Path.GetFileName(videoPath);
-            VideoSubtitle = BuildVideoSubtitle(videoPath, session, metadata);
+            VideoSubtitle = ClipStudioPresentationLogic.BuildVideoSubtitle(session, metadata);
 
             Duration = metadata.Duration;
             UpdateSelection(TimeSpan.Zero, metadata.Duration);
@@ -772,7 +772,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             LiveRecordedDuration = liveInfo.RecordedDuration;
             SafeClipDuration = LiveClipSafety.ComputeSafeDuration(liveInfo.RecordedDuration);
             Duration = LiveRecordedDuration;
-            VideoSubtitle = BuildLiveVideoSubtitle(session, liveInfo, metadata);
+            VideoSubtitle = ClipStudioPresentationLogic.BuildLiveVideoSubtitle(session, liveInfo, metadata);
             Position = TimeSpan.Zero;
             UpdateSelection(TimeSpan.Zero, SafeClipDuration > TimeSpan.Zero ? SafeClipDuration : LiveRecordedDuration);
             Highlights.Clear();
@@ -804,7 +804,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             RebuildLiveWaveformData();
             Export.SetGeneratedOutputFileName(partPath, _inPoint, _outPoint);
             IsWaveformLoading = true;
-            LiveStatusText = BuildLiveStatusText();
+            LiveStatusText = ClipStudioPresentationLogic.BuildLiveStatusText(LiveRecordedDuration, SafeClipDuration);
             RaiseTimelineChanged();
             DanmakuEnabledChanged?.Invoke(_danmakuPlaybackEnabled);
             DanmakuSyncRequested?.Invoke(Array.Empty<DanmakuMessage>(), true);
@@ -829,17 +829,6 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
                 IsBusy = false;
             }
         }
-    }
-
-    private static string BuildLiveVideoSubtitle(RecordingSession session, LiveRecordingInfo liveInfo, VideoMetadata? metadata)
-    {
-        if (metadata is not null && metadata.Width > 0 && metadata.Height > 0)
-        {
-            var codec = string.IsNullOrWhiteSpace(metadata.VideoCodec) ? "h264" : metadata.VideoCodec.ToUpperInvariant();
-            return $"{session.RoomDisplayName} · 录制中 · 分片 {liveInfo.PartNumber} · {metadata.Width}x{metadata.Height} · {metadata.Fps:0.##}fps · {codec}";
-        }
-
-        return $"{session.RoomDisplayName} · 录制中 · 分片 {liveInfo.PartNumber}（{FormatFileSize(liveInfo.FileSizeBytes)}）";
     }
 
     /// <summary>退出 live 模式（切到离线视频 / 录制结束时重置定时器与安全截止）。</summary>
@@ -1143,8 +1132,8 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             LiveReloadRequested?.Invoke();
         }
 
-        LiveStatusText = BuildLiveStatusText();
-        StatusText = $"已同步最新录制进度（已录 {FormatLiveClock(LiveRecordedDuration)}，安全可剪至 {FormatLiveClock(SafeClipDuration)}）";
+        LiveStatusText = ClipStudioPresentationLogic.BuildLiveStatusText(LiveRecordedDuration, SafeClipDuration);
+        StatusText = $"已同步最新录制进度（已录 {RecordingUiFormat.FormatDuration(LiveRecordedDuration)}，安全可剪至 {RecordingUiFormat.FormatDuration(SafeClipDuration)}）";
     }
 
     /// <summary>录制结束：停止实时同步，并把当前分片无缝切换为最终文件 + 离线剪辑模式。</summary>
@@ -1260,37 +1249,6 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
     private void OnLiveSyncTimerTick(object? sender, EventArgs e) => _ = AutoSyncLiveAsync();
 
-    private string BuildLiveStatusText() => SafeClipDuration > TimeSpan.Zero
-        ? $"🔴 正在录制 · 已录 {FormatLiveClock(LiveRecordedDuration)}（安全可剪至 {FormatLiveClock(SafeClipDuration)}）"
-        : $"🔴 正在录制 · 已录 {FormatLiveClock(LiveRecordedDuration)}（安全缓冲生成中）";
-
-    private static string FormatLiveClock(TimeSpan time)
-    {
-        var ts = time < TimeSpan.Zero ? TimeSpan.Zero : time;
-        return ts.TotalHours >= 1
-            ? $"{(int)ts.TotalHours:00}:{ts.Minutes:00}:{ts.Seconds:00}"
-            : $"{ts.Minutes:00}:{ts.Seconds:00}";
-    }
-
-    private static string FormatFileSize(long bytes)
-    {
-        if (bytes <= 0)
-        {
-            return "0 B";
-        }
-
-        string[] units = { "B", "KB", "MB", "GB", "TB" };
-        var size = (double)bytes;
-        var unit = 0;
-        while (size >= 1024 && unit < units.Length - 1)
-        {
-            size /= 1024;
-            unit++;
-        }
-
-        return $"{size:0.#} {units[unit]}";
-    }
-
     private async Task LoadHighlightsAsync(RecordingSession session, TimeSpan duration, CancellationToken ct)
     {
         try
@@ -1299,23 +1257,12 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
                 .GetByRecordingSessionAsync(session.Id, MaxHighlightCount, ct)
                 .ConfigureAwait(true);
             var startOffset = new DateTimeOffset(session.StartedAt.ToUniversalTime().Ticks, TimeSpan.Zero);
-            var markers = new List<ClipHighlightMarker>(events.Count);
-            foreach (var highlightEvent in events)
+            var projections = ClipStudioPresentationLogic.ProjectHighlights(events, startOffset, duration);
+            var markers = new List<ClipHighlightMarker>(projections.Count);
+            foreach (var projection in projections)
             {
-                var position = highlightEvent.RecordingOffsetMs is { } offsetMs && offsetMs > 0
-                    ? TimeSpan.FromMilliseconds(offsetMs)
-                    : highlightEvent.TriggerTime - startOffset;
-                if (position < TimeSpan.Zero)
-                {
-                    position = TimeSpan.Zero;
-                }
-                else if (position > duration)
-                {
-                    position = duration;
-                }
-
-                Highlights.Add(new ClipHighlightItemViewModel(highlightEvent, position));
-                markers.Add(new ClipHighlightMarker(position, highlightEvent.TriggerReason));
+                Highlights.Add(new ClipHighlightItemViewModel(projection.Event, projection.Position));
+                markers.Add(new ClipHighlightMarker(projection.Position, projection.Event.TriggerReason));
             }
 
             HighlightMarkers = markers;
@@ -1414,12 +1361,12 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
         // 边录边剪：播放头只允许在安全可剪范围内操作，避免读到尚未写入文件的尾部。
         var upperBound = IsLiveSession && _safeClipDuration > TimeSpan.Zero ? _safeClipDuration : _duration;
-        position = Clamp(position, TimeSpan.Zero, upperBound);
+        position = ClipStudioPresentationLogic.Clamp(position, TimeSpan.Zero, upperBound);
         Position = position;
         if (_danmakuPlaybackEnabled && _cursor is not null)
         {
             var batch = _cursor.SeekTo((long)position.TotalMilliseconds, DanmakuPlaybackCursor.DefaultLookbackMs);
-            DanmakuSyncRequested?.Invoke(ConvertToDanmakuMessages(batch), true);
+            DanmakuSyncRequested?.Invoke(ClipStudioPresentationLogic.ToDanmakuMessages(batch, _currentSession?.Platform ?? PlatformType.Bilibili, _currentSession?.RoomId ?? "local-clip", DateTimeOffset.UtcNow), true);
         }
 
         SeekRequested?.Invoke(position);
@@ -1430,7 +1377,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     {
         if (_duration > TimeSpan.Zero)
         {
-            position = Clamp(position, TimeSpan.Zero, _duration);
+            position = ClipStudioPresentationLogic.Clamp(position, TimeSpan.Zero, _duration);
         }
 
         Position = position;
@@ -1442,7 +1389,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         var batch = _cursor.AdvanceTo((long)position.TotalMilliseconds);
         if (batch.Count > 0)
         {
-            DanmakuSyncRequested?.Invoke(ConvertToDanmakuMessages(batch), false);
+            DanmakuSyncRequested?.Invoke(ClipStudioPresentationLogic.ToDanmakuMessages(batch, _currentSession?.Platform ?? PlatformType.Bilibili, _currentSession?.RoomId ?? "local-clip", DateTimeOffset.UtcNow), false);
         }
     }
 
@@ -1479,7 +1426,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
 
         var batch = _cursor.SeekTo((long)_position.TotalMilliseconds, DanmakuPlaybackCursor.DefaultLookbackMs);
-        DanmakuSyncRequested?.Invoke(ConvertToDanmakuMessages(batch), true);
+        DanmakuSyncRequested?.Invoke(ClipStudioPresentationLogic.ToDanmakuMessages(batch, _currentSession?.Platform ?? PlatformType.Bilibili, _currentSession?.RoomId ?? "local-clip", DateTimeOffset.UtcNow), true);
     }
 
     // ---- 选区与高能跳转 ----
@@ -1494,8 +1441,8 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
         // 边录边剪：入出点都钳制在安全可剪截止时间以内（最后 5 秒不参与导出）。
         var upperBound = IsLiveSession && _safeClipDuration > TimeSpan.Zero ? _safeClipDuration : _duration;
-        inPoint = Clamp(inPoint, TimeSpan.Zero, upperBound);
-        outPoint = Clamp(outPoint, TimeSpan.Zero, upperBound);
+        inPoint = ClipStudioPresentationLogic.Clamp(inPoint, TimeSpan.Zero, upperBound);
+        outPoint = ClipStudioPresentationLogic.Clamp(outPoint, TimeSpan.Zero, upperBound);
         if (outPoint - inPoint < MinSelection)
         {
             outPoint = inPoint + MinSelection;
@@ -1534,7 +1481,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             return;
         }
 
-        var inPoint = Clamp(_position, TimeSpan.Zero, _duration);
+        var inPoint = ClipStudioPresentationLogic.Clamp(_position, TimeSpan.Zero, _duration);
         if (inPoint > _outPoint - MinSelection)
         {
             inPoint = _outPoint - MinSelection;
@@ -1551,7 +1498,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             return;
         }
 
-        var outPoint = Clamp(_position, TimeSpan.Zero, _duration);
+        var outPoint = ClipStudioPresentationLogic.Clamp(_position, TimeSpan.Zero, _duration);
         if (outPoint < _inPoint + MinSelection)
         {
             outPoint = _inPoint + MinSelection;
@@ -1593,64 +1540,6 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     }
 
     // ---- 私有辅助 ----
-
-    private static string BuildVideoSubtitle(string videoPath, RecordingSession? session, VideoMetadata metadata)
-    {
-        var codec = string.IsNullOrWhiteSpace(metadata.VideoCodec) ? "h264" : metadata.VideoCodec.ToUpperInvariant();
-        var geometry = $"{metadata.Width}x{metadata.Height} · {metadata.Fps:0.##}fps · {codec}";
-        if (session is null)
-        {
-            return geometry;
-        }
-
-        var title = string.IsNullOrWhiteSpace(session.StreamTitle) ? "本地录像" : session.StreamTitle;
-        return $"{session.RoomDisplayName} · {title} · {geometry}";
-    }
-
-    /// <summary>本地文件若存在同名 .jsonl 则自动作为弹幕伴随文件。</summary>
-    private static string? FindCompanionDanmaku(string videoPath)
-    {
-        var truncated = Path.ChangeExtension(videoPath, null);
-        if (truncated is null)
-        {
-            return null;
-        }
-
-        var candidate = truncated + ".jsonl";
-        return File.Exists(candidate) ? candidate : null;
-    }
-
-    private static TimeSpan Clamp(TimeSpan value, TimeSpan min, TimeSpan max)
-    {
-        if (value < min)
-        {
-            return min;
-        }
-
-        return value > max ? max : value;
-    }
-
-    private List<DanmakuMessage> ConvertToDanmakuMessages(IReadOnlyList<RecordedDanmakuItem> items)
-    {
-        var messages = new List<DanmakuMessage>(items.Count);
-        var platform = _currentSession?.Platform ?? PlatformType.Bilibili;
-        var roomId = _currentSession?.RoomId ?? "local-clip";
-        var now = DateTimeOffset.UtcNow;
-        foreach (var item in items)
-        {
-            messages.Add(new DanmakuMessage(
-                platform,
-                roomId,
-                $"rec-{item.OffsetMs}",
-                item.SenderName,
-                item.Text,
-                now,
-                item.IsGift,
-                item.IsSticker));
-        }
-
-        return messages;
-    }
 
     private void RaiseSelectionChanged()
     {
