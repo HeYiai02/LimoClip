@@ -22,6 +22,12 @@ internal static class PlayerChromeLogic
 
     public static string MuteTip(bool muted) => muted ? "开声" : "静音";
 
+    /// <summary>主控制条「全部静音」图标：复用单个播放器的静音/开声图标。</summary>
+    public static string MasterMuteIcon(bool muted) => MuteIcon(muted);
+
+    /// <summary>主控制条「全部静音」悬浮提示。</summary>
+    public static string MasterMuteTip(bool muted) => muted ? "取消全部静音" : "全部静音";
+
     /// <summary>紧凑模式按钮显示当前档位文案（点击后切到另一档）。</summary>
     public static string CompactButtonText(bool compact) => compact ? "15fps" : "60fps";
 

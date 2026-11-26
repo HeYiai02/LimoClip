@@ -59,4 +59,19 @@ public sealed class PlayerChromeLogicTests
         Assert.Equal(0, PlayerChromeLogic.MinVolume);
         Assert.Equal(100, PlayerChromeLogic.MaxVolume);
     }
+    [Theory]
+    [InlineData(true, "\uE74F")]
+    [InlineData(false, "\uE767")]
+    public void MasterMuteIcon_reuses_mute_glyphs(bool muted, string expected)
+    {
+        Assert.Equal(expected, PlayerChromeLogic.MasterMuteIcon(muted));
+    }
+
+    [Theory]
+    [InlineData(true, "取消全部静音")]
+    [InlineData(false, "全部静音")]
+    public void MasterMuteTip_describes_next_action(bool muted, string expected)
+    {
+        Assert.Equal(expected, PlayerChromeLogic.MasterMuteTip(muted));
+    }
 }
