@@ -30,7 +30,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | WebView 登录 | WebView2（临时用户目录，登录后采集 Cookie） |
 | 平台解析 | 各家 HTTP API + Jint（斗鱼签名、抖音 sign.js）；yt-dlp 作为 YouTube/Twitch 兜底 |
 | 插件签名 | Ed25519（BouncyCastle）+ SHA256 清单校验 |
-| 测试 | xUnit（6 个测试工程，当前共 2067 个用例） |
+| 测试 | xUnit（6 个测试工程，当前共 2095 个用例） |
 
 ### 平台支持矩阵
 
@@ -442,6 +442,7 @@ Program.Main
 
 - 契约：`IAsrProvider.TranscribeAsync(audioPath/bytes, options, ct)` → `AsrTranscriptResult(Text, Segments, Language, Provider…)`。
 - 实现 `OpenAiCompatibleAsrProvider`：调用 OpenAI 兼容 `POST /v1/audio/transcriptions`（multipart：`file` + `model` + `language` + `response_format=json`），解析 `segments[]`（起止时间 + 文本）与 `text` 两种返回；
+- 响应解析与切片估算：verbose_json 的 `segments[]` 直接采用相对时间戳（越界钳制、空文本跳过）；纯文本或单段响应按句末标点拆成多句并按字符数比例估算时间（无标点的长文本按 48 字切块）；旧缓存里只有一整段的结果在读取时按句补拆。这些纯逻辑位于 `Media/Asr/AsrResponseParser`（`AsrResponseParserTests` 覆盖），`OpenAiCompatibleAsrProvider` 只负责 HTTP/FFmpeg 与缓存读写（V0.7.5）。
 - 音频提取：FFmpeg 将源 MKV 按区间抽 16kHz 单声道 MP3 后上传；超长区间限制 15 分钟；
 - 缓存：按「源文件 + 区间 + 模型/接口」的 SHA256 缓存转写结果（本地文件），避免重复计费；
 - 逐句拆分（V0.7.1）：接口只返回整段 `text`（无 `segments[]`）时，`SplitIntoSentences` 按硬标点（`。！？!?；;…` 与换行，`……` 合并不断句）与软标点（`，,、：:`，累计 ≥48 字才断）拆句，无标点时每 48 字强制切块；各句起止时间按字符数比例分配到参考区间（`Relative*` 相对片段起点），最后一句收到区间末尾；旧缓存（只有 1 段）在读取时由 `UpgradeCachedResult` 原地补拆，无需重新请求；
@@ -594,17 +595,17 @@ dotnet build LiveMonitor.sln --no-restore
 - 工程目标框架：`Data`、`Media`、`Desktop` 为 `net8.0-windows`，其余类库为 `net8.0`；测试工程对应同目标框架（`Data`/`Media`/`Desktop` 测试为 `net8.0-windows`，`Platforms`/`Danmaku` 测试为 `net8.0`）。
 - 需要 `tools/` 下的 ffmpeg/mpv 才能运行应用（`scripts/fetch-tools.ps1` 自动下载并校验）。
 
-### 13.2 测试（当前 2067 个用例）
+### 13.2 测试（当前 2095 个用例）
 
 | 测试工程 | 覆盖范围 | 用例数 |
 | --- | --- | --- |
 | `tests/LiveMonitor.Data.Tests` | 数据库/仓储/凭据（DPAPI）、清流请求头迁移 | 38 |
 | `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退、自定义清流 Provider、斗鱼流接缝、抖音帧接缝与断线通知、弹幕重连退避 | 505 |
 | `tests/LiveMonitor.Danmaku.Tests` | 过滤器、高能检测、会话管理、重连/释放竞态 | 100 |
-| `tests/LiveMonitor.Media.Tests` | 录制状态机与并发收尾、轮询器与会话工作器、分段合并、剪辑导出、波形、增量波形/增量弹幕读取、FFmpeg 参数协议分支 | 232 |
+| `tests/LiveMonitor.Media.Tests` | 录制状态机与并发收尾、轮询器与会话工作器、分段合并、剪辑导出、波形、增量波形/增量弹幕读取、ASR 响应解析与按句拆分（`AsrResponseParser`）、FFmpeg 参数协议分支 | 260 |
 | `tests/LiveMonitor.Desktop.Tests` | ViewModel（主窗口拆分/房间目录/布局方案/状态栏/高亮/录制中心/剪辑台与 ASR/导出子视图模型/设置页 ASR/组件更新/通用与弹幕）、Dock/自由画布布局、时间轴几何（`ClipTimelineGeometry`）与缩放视口/拖拽钳制（`ClipTimelineViewLogic`）、播放器管理器与 `IWorkspacePlayer`、回放 seek 探测/防抖逻辑（`ReplaySeekLogic`）、剪辑预览位置推进与安全上界（`ClipPlaybackPositionLogic`）、剪辑预览播放状态机与守卫（`ClipPlaybackStateLogic`）、剪辑台展示层纯逻辑（`ClipStudioPresentationLogic`）、音量表解析与平滑（`AudioMeterLogic`）、mpv 流选项映射与请求头清理（`StreamOptionMapper`）、AppServices 释放、登录配置、播放状态文本、录制目标排序、自由布局命中与宿主切换、自由画布交互几何（`FreeformInteractionLogic`）、录制中心历史子视图模型（`RecordingHistoryViewModel`）、弹幕渲染层纯逻辑（`DanmakuOverlayLogic`）、窗格控制条 chrome 规则（`PlayerChromeLogic`）、健康采样规则（`PlayerHealthSampling`）、录制目标行展示规则（`RecordingTargetDisplayLogic`）、历史录像行展示规则（`RecordingHistoryDisplayLogic`）、播放器丢帧降档守护（`DropGuardPolicy`）、状态栏 GPU 指标解析与展示（`GpuMetricsLogic`）、边录边剪增量波形纯逻辑（`LiveWaveformLogic`）、剪辑台选区/步进/高能窗口纯规则（`ClipSelectionLogic`）、剪辑台列表行展示规则（`ClipListDisplayLogic`）、导出任务行展示规则（`ClipExportTaskDisplayLogic`） | 1131 |
 
-合计 **2067** 个用例，五套全部通过（0 失败 0 跳过）。
+合计 **2095** 个用例，五套全部通过（0 失败 0 跳过）。
 
 运行方式（使用已构建的测试 dll，避免重复构建）：
 
