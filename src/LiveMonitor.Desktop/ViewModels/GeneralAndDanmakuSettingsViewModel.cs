@@ -238,7 +238,7 @@ public sealed class GeneralAndDanmakuSettingsViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            SetStatus($"读取设置失败：{ex.Message}", GeneralAndDanmakuStatusKind.Error);
+            SetStatus(GeneralAndDanmakuSettingsStatusText.LoadFailed(ex.Message), GeneralAndDanmakuStatusKind.Error);
         }
         finally
         {
@@ -263,7 +263,7 @@ public sealed class GeneralAndDanmakuSettingsViewModel : ObservableObject
         {
             if (await _blocklist.ExistsAsync(keyword, ct).ConfigureAwait(true))
             {
-                SetStatus("这个词已经在屏蔽词库中。", GeneralAndDanmakuStatusKind.Neutral);
+                SetStatus(GeneralAndDanmakuSettingsStatusText.KeywordExists, GeneralAndDanmakuStatusKind.Neutral);
                 return;
             }
 
@@ -281,12 +281,12 @@ public sealed class GeneralAndDanmakuSettingsViewModel : ObservableObject
             NewKeywordIsRegex = false;
             await ReloadKeywordsAsync(ct).ConfigureAwait(true);
             SetStatus(
-                isRegex ? "已添加正则屏蔽词。" : "已添加屏蔽词。",
+                GeneralAndDanmakuSettingsStatusText.KeywordAddedFor(isRegex),
                 GeneralAndDanmakuStatusKind.Success);
         }
         catch (Exception ex)
         {
-            SetStatus($"添加失败：{ex.Message}", GeneralAndDanmakuStatusKind.Error);
+            SetStatus(GeneralAndDanmakuSettingsStatusText.AddKeywordFailed(ex.Message), GeneralAndDanmakuStatusKind.Error);
         }
         finally
         {
@@ -300,7 +300,7 @@ public sealed class GeneralAndDanmakuSettingsViewModel : ObservableObject
         var keyword = SelectedKeyword;
         if (keyword is null)
         {
-            SetStatus("请先选中一个屏蔽词。", GeneralAndDanmakuStatusKind.Neutral);
+            SetStatus(GeneralAndDanmakuSettingsStatusText.KeywordNotSelected, GeneralAndDanmakuStatusKind.Neutral);
             return;
         }
 
@@ -314,11 +314,11 @@ public sealed class GeneralAndDanmakuSettingsViewModel : ObservableObject
         {
             await _blocklist.DeleteAsync(keyword.Id, ct).ConfigureAwait(true);
             await ReloadKeywordsAsync(ct).ConfigureAwait(true);
-            SetStatus("已删除屏蔽词。", GeneralAndDanmakuStatusKind.Success);
+            SetStatus(GeneralAndDanmakuSettingsStatusText.KeywordRemoved, GeneralAndDanmakuStatusKind.Success);
         }
         catch (Exception ex)
         {
-            SetStatus($"删除失败：{ex.Message}", GeneralAndDanmakuStatusKind.Error);
+            SetStatus(GeneralAndDanmakuSettingsStatusText.RemoveKeywordFailed(ex.Message), GeneralAndDanmakuStatusKind.Error);
         }
         finally
         {
@@ -339,11 +339,11 @@ public sealed class GeneralAndDanmakuSettingsViewModel : ObservableObject
         {
             await HighlightSettingsStore.SaveAsync(_settings, ReadHighlightOptions(), ct).ConfigureAwait(true);
             await LoadHighlightSettingsAsync(ct).ConfigureAwait(true);
-            SetStatus("高能参数已保存（对运行中的会话即时生效）。", GeneralAndDanmakuStatusKind.Success);
+            SetStatus(GeneralAndDanmakuSettingsStatusText.HighlightSaved, GeneralAndDanmakuStatusKind.Success);
         }
         catch (Exception ex)
         {
-            SetStatus($"保存高能参数失败：{ex.Message}", GeneralAndDanmakuStatusKind.Error);
+            SetStatus(GeneralAndDanmakuSettingsStatusText.HighlightSaveFailed(ex.Message), GeneralAndDanmakuStatusKind.Error);
         }
         finally
         {
@@ -364,11 +364,11 @@ public sealed class GeneralAndDanmakuSettingsViewModel : ObservableObject
         {
             await HighlightSettingsStore.SaveAsync(_settings, HighlightRuleOptions.Default, ct).ConfigureAwait(true);
             await LoadHighlightSettingsAsync(ct).ConfigureAwait(true);
-            SetStatus("高能参数已恢复默认值。", GeneralAndDanmakuStatusKind.Success);
+            SetStatus(GeneralAndDanmakuSettingsStatusText.HighlightReset, GeneralAndDanmakuStatusKind.Success);
         }
         catch (Exception ex)
         {
-            SetStatus($"恢复默认值失败：{ex.Message}", GeneralAndDanmakuStatusKind.Error);
+            SetStatus(GeneralAndDanmakuSettingsStatusText.HighlightResetFailed(ex.Message), GeneralAndDanmakuStatusKind.Error);
         }
         finally
         {
@@ -399,13 +399,13 @@ public sealed class GeneralAndDanmakuSettingsViewModel : ObservableObject
             _applyTwitchProxyTemplate(template);
             SetStatus(
                 template is null
-                    ? "已保存：Twitch 仅使用内置原生播放列表（GQL + Usher）。"
-                    : "已保存：Twitch 将优先使用自定义去广告代理。",
+                    ? GeneralAndDanmakuSettingsStatusText.TwitchProxySavedBuiltin
+                    : GeneralAndDanmakuSettingsStatusText.TwitchProxySavedCustom,
                 GeneralAndDanmakuStatusKind.Success);
         }
         catch (Exception ex)
         {
-            SetStatus($"保存 Twitch 代理失败：{ex.Message}", GeneralAndDanmakuStatusKind.Error);
+            SetStatus(GeneralAndDanmakuSettingsStatusText.TwitchProxySaveFailed(ex.Message), GeneralAndDanmakuStatusKind.Error);
         }
         finally
         {
@@ -425,8 +425,8 @@ public sealed class GeneralAndDanmakuSettingsViewModel : ObservableObject
         await PersistToggleAsync(
             AppSettingKeys.BlockUnicycleEnabled,
             enabled,
-            enabled ? "独轮车自动屏蔽已开启。" : "独轮车自动屏蔽已关闭。",
-            "保存开关失败",
+            enabled ? GeneralAndDanmakuSettingsStatusText.UnicycleEnabled : GeneralAndDanmakuSettingsStatusText.UnicycleDisabled,
+            GeneralAndDanmakuSettingsStatusText.UnicycleSaveFailedPrefix,
             ct).ConfigureAwait(true);
     }
 
@@ -442,8 +442,8 @@ public sealed class GeneralAndDanmakuSettingsViewModel : ObservableObject
         await PersistToggleAsync(
             AppSettingKeys.DanmakuPreviewEnabled,
             enabled,
-            enabled ? "监控画面弹幕预览已开启。" : "监控画面弹幕预览已关闭。",
-            "保存弹幕预览开关失败",
+            enabled ? GeneralAndDanmakuSettingsStatusText.DanmakuPreviewEnabled : GeneralAndDanmakuSettingsStatusText.DanmakuPreviewDisabled,
+            GeneralAndDanmakuSettingsStatusText.DanmakuPreviewSaveFailedPrefix,
             ct).ConfigureAwait(true);
     }
 
@@ -459,8 +459,8 @@ public sealed class GeneralAndDanmakuSettingsViewModel : ObservableObject
         await PersistToggleAsync(
             AppSettingKeys.DanmakuStickerVisible,
             visible,
-            visible ? "纯表情包会渲染为 [表情名] 文本。" : "纯表情包仅参与统计与高能检测，不再渲染。",
-            "保存表情包渲染开关失败",
+            visible ? GeneralAndDanmakuSettingsStatusText.StickerEnabled : GeneralAndDanmakuSettingsStatusText.StickerDisabled,
+            GeneralAndDanmakuSettingsStatusText.StickerSaveFailedPrefix,
             ct).ConfigureAwait(true);
     }
 
@@ -477,9 +477,9 @@ public sealed class GeneralAndDanmakuSettingsViewModel : ObservableObject
             AppSettingKeys.DanmakuEmoteImagesVisible,
             visible,
             visible
-                ? "表情图片已开启（仅渲染静态帧，未加载成功的表情先显示 [表情名]）。"
-                : "表情图片已关闭，表情按 [表情] 文本显示。",
-            "保存表情图片开关失败",
+                ? GeneralAndDanmakuSettingsStatusText.EmoteImagesEnabled
+                : GeneralAndDanmakuSettingsStatusText.EmoteImagesDisabled,
+            GeneralAndDanmakuSettingsStatusText.EmoteImagesSaveFailedPrefix,
             ct).ConfigureAwait(true);
     }
 
@@ -544,7 +544,7 @@ public sealed class GeneralAndDanmakuSettingsViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            SetStatus($"{failurePrefix}：{ex.Message}", GeneralAndDanmakuStatusKind.Error);
+            SetStatus(GeneralAndDanmakuSettingsStatusText.ToggleSaveFailed(failurePrefix, ex.Message), GeneralAndDanmakuStatusKind.Error);
         }
     }
 
