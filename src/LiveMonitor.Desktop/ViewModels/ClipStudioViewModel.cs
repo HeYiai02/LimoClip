@@ -55,7 +55,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     private ClipSpeedOption _selectedSpeedOption;
     private string _videoTitle = "未加载视频";
     private string _videoSubtitle = "从左侧选择录像场次，或打开本地 mkv / mp4 文件";
-    private string _encoderText = "自动探测中…";
+    private string _encoderText = ClipStudioStatusText.EncoderAutoDetecting;
     private string _statusText = "从左侧选择录像，或打开本地视频开始剪辑。";
     private bool _isWaveformLoading;
     private bool _isPlaying;
@@ -692,7 +692,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     {
         if (liveInfo.PartNumber > 1)
         {
-            StatusText = $"本次录制已发生自动分段（第 {liveInfo.PartNumber} 段），边录边剪暂不可用，请等待录制结束后再剪辑。";
+            StatusText = ClipStudioStatusText.LiveSegmented(liveInfo.PartNumber);
             return;
         }
 
@@ -704,13 +704,13 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         var waveformCt = _waveformCts!.Token;
 
         IsBusy = true;
-        StatusText = "正在读取录制中的分片…";
+        StatusText = ClipStudioStatusText.LiveOpening;
         try
         {
             var partPath = liveInfo.PartFilePath;
             if (string.IsNullOrWhiteSpace(partPath) || !File.Exists(partPath))
             {
-                StatusText = $"录制分片尚未生成，请稍后再试：{partPath}";
+                StatusText = ClipStudioStatusText.LivePartMissing(partPath);
                 return;
             }
 
@@ -787,7 +787,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             DanmakuEnabledChanged?.Invoke(_danmakuPlaybackEnabled);
             DanmakuSyncRequested?.Invoke(Array.Empty<DanmakuMessage>(), true);
             LoadLiveVideoRequested?.Invoke(partPath);
-            StatusText = "正在录制中，可对已录制部分进行剪辑。";
+            StatusText = ClipStudioStatusText.LiveOpened;
             Export.NotifyAvailabilityChanged();
             StartLiveSyncTimer();
             _ = ExtractLiveWaveformAsync(waveformCt);
@@ -798,7 +798,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
         catch (Exception ex)
         {
-            StatusText = $"打开录制中分片失败：{ex.Message}";
+            StatusText = ClipStudioStatusText.LiveOpenFailed(ex.Message);
         }
         finally
         {
@@ -870,7 +870,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
         catch (Exception ex)
         {
-            StatusText = $"增量读取弹幕失败（不影响导出）：{ex.Message}";
+            StatusText = ClipStudioStatusText.LiveDanmakuLoadFailed(ex.Message);
         }
     }
 
@@ -924,7 +924,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
         catch (Exception ex)
         {
-            StatusText = $"边录边剪波形提取失败（不影响导出）：{ex.Message}";
+            StatusText = ClipStudioStatusText.LiveWaveformFailed(ex.Message);
         }
         finally
         {
@@ -967,7 +967,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
         catch (Exception ex)
         {
-            StatusText = $"同步录制进度失败：{ex.Message}";
+            StatusText = ClipStudioStatusText.LiveSyncFailed(ex.Message);
         }
         finally
         {
@@ -990,7 +990,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
         catch (Exception ex)
         {
-            StatusText = $"自动同步录制进度失败：{ex.Message}";
+            StatusText = ClipStudioStatusText.AutoSyncFailed(ex.Message);
         }
         finally
         {
@@ -1018,7 +1018,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         {
             ExitLiveMode();
             RaiseTimelineChanged();
-            StatusText = $"本次录制已发生自动分段（当前第 {latest.PartNumber} 段），边录边剪已停止，请等待录制结束后再剪辑。";
+            StatusText = ClipStudioStatusText.LiveSyncStoppedBySegment(latest.PartNumber);
             return;
         }
 
@@ -1051,7 +1051,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             LiveReloadRequested?.Invoke();
         }
 
-        StatusText = $"已同步最新录制进度（已录 {RecordingUiFormat.FormatDuration(LiveRecordedDuration)}，安全可剪至 {RecordingUiFormat.FormatDuration(SafeClipDuration)}）";
+        StatusText = ClipStudioStatusText.LiveSyncSucceeded(LiveRecordedDuration, SafeClipDuration);
     }
 
     /// <summary>录制结束：停止实时同步，并把当前分片无缝切换为最终文件 + 离线剪辑模式。</summary>
@@ -1073,7 +1073,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             var latest = await _sessions.GetByIdAsync(session.Id).ConfigureAwait(true);
             if (latest is null || string.IsNullOrWhiteSpace(latest.VideoFilePath) || !File.Exists(latest.VideoFilePath))
             {
-                StatusText = $"录制已结束，但录像文件不可用：{latest?.ErrorMessage}";
+                StatusText = ClipStudioStatusText.LiveCompletedWithoutFile(latest?.ErrorMessage);
                 return;
             }
 
@@ -1101,11 +1101,11 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
             SeekTo(lastPosition);
             RaiseTimelineChanged();
-            StatusText = "录制已结束，已切换为离线剪辑模式。";
+            StatusText = ClipStudioStatusText.LiveCompleted;
         }
         catch (Exception ex)
         {
-            StatusText = $"切换离线剪辑失败：{ex.Message}";
+            StatusText = ClipStudioStatusText.LiveSwitchToOfflineFailed(ex.Message);
         }
     }
 
@@ -1235,18 +1235,12 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         try
         {
             var (encoderName, _) = await _encoders.DetectBestAsync().ConfigureAwait(true);
-            EncoderText = encoderName switch
-            {
-                "h264_nvenc" => "NVENC · NVIDIA 硬件编码",
-                "h264_qsv" => "QSV · Intel 硬件编码",
-                "h264_amf" => "AMF · AMD 硬件编码",
-                _ => "libx264 · 软件编码"
-            };
+            EncoderText = ClipStudioStatusText.EncoderLabel(encoderName);
         }
         catch (Exception ex)
         {
-            EncoderText = "libx264 · 软件编码";
-            StatusText = $"硬件编码器探测失败，已回退软件编码：{ex.Message}";
+            EncoderText = ClipStudioStatusText.EncoderLabel(encoderName: null);
+            StatusText = ClipStudioStatusText.EncoderDetectionFailed(ex.Message);
         }
     }
 
