@@ -41,7 +41,7 @@ public sealed class BilibiliProvider : IPlatformProvider
         }
 
         var value = roomUrl.Trim();
-        if (IsNumericId(value))
+        if (BilibiliProviderParsing.IsNumericId(value))
         {
             return true;
         }
@@ -57,7 +57,7 @@ public sealed class BilibiliProvider : IPlatformProvider
         }
 
         var host = uri.Host.ToLowerInvariant();
-        if (IsShortLinkHost(host))
+        if (BilibiliProviderParsing.IsShortLinkHost(host))
         {
             return true;
         }
@@ -79,9 +79,9 @@ public sealed class BilibiliProvider : IPlatformProvider
         }
 
         var value = roomUrl.Trim();
-        if (IsNumericId(value))
+        if (BilibiliProviderParsing.IsNumericId(value))
         {
-            return NormalizeNumeric(value, nameof(roomUrl));
+            return BilibiliProviderParsing.NormalizeNumeric(value, nameof(roomUrl));
         }
 
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
@@ -102,7 +102,7 @@ public sealed class BilibiliProvider : IPlatformProvider
             return ExtractRoomId(resolved);
         }
 
-        var parsed = ParseRoomId(uri);
+        var parsed = BilibiliProviderParsing.ParseRoomId(uri);
         if (parsed is not null)
         {
             return parsed;
@@ -280,8 +280,8 @@ public sealed class BilibiliProvider : IPlatformProvider
             return null;
         }
 
-        var descriptions = ParseDescriptions(playurl);
-        Candidate? best = null;
+        var descriptions = BilibiliProviderParsing.ParseDescriptions(playurl);
+        BilibiliProviderParsing.Candidate? best = null;
 
         if (playurl.TryGetProperty("stream", out var streams) && streams.ValueKind == JsonValueKind.Array)
         {
@@ -355,7 +355,7 @@ public sealed class BilibiliProvider : IPlatformProvider
                         var rank = (protocolRank * 100) + (formatRank * 10) + codecRank;
                         if (best is null || rank > best.Rank)
                         {
-                            best = new Candidate(rank, qn, host, baseUrl, extra, directUrl);
+                            best = new BilibiliProviderParsing.Candidate(rank, qn, host, baseUrl, extra, directUrl);
                         }
                     }
                 }
@@ -367,14 +367,14 @@ public sealed class BilibiliProvider : IPlatformProvider
             return null;
         }
 
-        var streamUrl = BuildStreamUrl(best);
+        var streamUrl = BilibiliProviderParsing.BuildStreamUrl(best);
         if (streamUrl is null)
         {
             return null;
         }
 
         descriptions.TryGetValue(best.Qn, out var description);
-        var height = ParseHeight(description?.Brief, best.Qn);
+        var height = BilibiliProviderParsing.ParseHeight(description?.Brief, best.Qn);
         var highFrameRate = description?.Detail?.Contains("高帧率", StringComparison.Ordinal) == true
             || description?.Detail?.Contains("60", StringComparison.Ordinal) == true;
         var fps = highFrameRate ? 60 : 30;
@@ -402,192 +402,7 @@ public sealed class BilibiliProvider : IPlatformProvider
             headers);
     }
 
-    private static Dictionary<int, QualityDescription> ParseDescriptions(JsonElement playurl)
-    {
-        var result = new Dictionary<int, QualityDescription>();
-        if (!playurl.TryGetProperty("g_qn_desc", out var items) || items.ValueKind != JsonValueKind.Array)
-        {
-            return result;
-        }
-
-        foreach (var item in items.EnumerateArray())
-        {
-            var qn = JsonRead.Int(item, "qn");
-            if (qn <= 0)
-            {
-                continue;
-            }
-
-            var brief = JsonRead.String(item, "desc");
-            string? detail = null;
-            if (item.TryGetProperty("media_base_desc", out var media)
-                && media.ValueKind == JsonValueKind.Object)
-            {
-                if (media.TryGetProperty("brief_desc", out var briefDesc))
-                {
-                    brief = JsonRead.String(briefDesc, "desc") ?? brief;
-                }
-
-                if (media.TryGetProperty("detail_desc", out var detailDesc))
-                {
-                    detail = JsonRead.String(detailDesc, "desc");
-                }
-            }
-
-            result[qn] = new QualityDescription(brief, detail);
-        }
-
-        return result;
-    }
-
-    private static string? BuildStreamUrl(Candidate candidate)
-    {
-        if (!string.IsNullOrWhiteSpace(candidate.DirectUrl)
-            && Uri.TryCreate(candidate.DirectUrl, UriKind.Absolute, out _))
-        {
-            return candidate.DirectUrl;
-        }
-
-        if (string.IsNullOrWhiteSpace(candidate.Host) || string.IsNullOrWhiteSpace(candidate.BaseUrl))
-        {
-            return null;
-        }
-
-        var host = candidate.Host.TrimEnd('/');
-        var baseUrl = candidate.BaseUrl;
-        var url = baseUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
-            ? baseUrl
-            : host + (baseUrl.StartsWith('/') ? baseUrl : "/" + baseUrl);
-
-        if (!string.IsNullOrWhiteSpace(candidate.Extra))
-        {
-            var extra = candidate.Extra.TrimStart('&');
-            if (url.Contains('?', StringComparison.Ordinal))
-            {
-                if (!url.EndsWith('?') && !url.EndsWith('&'))
-                {
-                    url += "&";
-                }
-            }
-            else
-            {
-                url += "?";
-            }
-
-            url += extra;
-        }
-
-        return Uri.TryCreate(url, UriKind.Absolute, out _) ? url : null;
-    }
-
-    private static int ParseHeight(string? description, int qn)
-    {
-        if (!string.IsNullOrWhiteSpace(description))
-        {
-            var match = Regex.Match(description, @"(\d{3,4})\s*P", RegexOptions.IgnoreCase);
-            if (match.Success && int.TryParse(match.Groups[1].Value, out var height))
-            {
-                return height;
-            }
-        }
-
-        return qn switch
-        {
-            30000 => 2160,
-            20000 => 1440,
-            15000 => 1080,
-            10000 => 1080,
-            400 => 1080,
-            250 => 720,
-            150 => 480,
-            80 => 360,
-            _ => 0
-        };
-    }
-
-    private static string? ParseRoomId(Uri uri)
-    {
-        var host = uri.Host.ToLowerInvariant();
-        if (host is not ("live.bilibili.com" or "www.bilibili.com" or "bilibili.com"))
-        {
-            return null;
-        }
-
-        var queryId = ParseQuery(uri.Query, "room_id") ?? ParseQuery(uri.Query, "roomid");
-        if (queryId is not null && IsNumericId(queryId))
-        {
-            return NormalizeNumeric(queryId, nameof(uri));
-        }
-
-        foreach (var segment in uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var candidate = segment.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
-                ? segment[..^5]
-                : segment;
-            if (IsNumericId(candidate))
-            {
-                return NormalizeNumeric(candidate, nameof(uri));
-            }
-        }
-
-        return null;
-    }
-
-    private static string? ParseQuery(string query, string name)
-    {
-        foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var separator = pair.IndexOf('=');
-            if (separator <= 0)
-            {
-                continue;
-            }
-
-            var key = pair[..separator];
-            if (Uri.UnescapeDataString(key).Equals(name, StringComparison.OrdinalIgnoreCase))
-            {
-                return Uri.UnescapeDataString(pair[(separator + 1)..]);
-            }
-        }
-
-        return null;
-    }
-
-    private static bool IsNumericId(string value)
-    {
-        if (value.Length == 0)
-        {
-            return false;
-        }
-
-        foreach (var character in value)
-        {
-            if (!char.IsAsciiDigit(character))
-            {
-                return false;
-            }
-        }
-
-        return long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var id) && id > 0;
-    }
-
-    private static string NormalizeNumeric(string value, string parameterName)
-    {
-        if (!long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var id) || id <= 0)
-        {
-            throw new ArgumentException($"无效的 B 站房间号：{value}", parameterName);
-        }
-
-        return id.ToString(CultureInfo.InvariantCulture);
-    }
-
-    private static bool IsShortLink(Uri uri) => IsShortLinkHost(uri.Host.ToLowerInvariant());
-
-    private static bool IsShortLinkHost(string host)
-        => host == "b23.tv"
-            || host.EndsWith(".b23.tv", StringComparison.Ordinal)
-            || host == "bili2233.cn"
-            || host.EndsWith(".bili2233.cn", StringComparison.Ordinal);
+    private static bool IsShortLink(Uri uri) => BilibiliProviderParsing.IsShortLinkHost(uri.Host.ToLowerInvariant());
 
     private string? ResolveShortLink(Uri uri)
     {
@@ -606,13 +421,4 @@ public sealed class BilibiliProvider : IPlatformProvider
         }
     }
 
-    private sealed record Candidate(
-        int Rank,
-        int Qn,
-        string? Host,
-        string? BaseUrl,
-        string? Extra,
-        string? DirectUrl);
-
-    private sealed record QualityDescription(string? Brief, string? Detail);
 }
