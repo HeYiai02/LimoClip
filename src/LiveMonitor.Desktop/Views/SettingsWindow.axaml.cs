@@ -44,13 +44,7 @@ public partial class SettingsWindow : Window
 
     /// <summary>左侧设置分组：Key 对应导航按钮 Tag，标题/副标题显示在右侧页头。</summary>
     private static readonly (string Key, string Title, string Subtitle)[] SettingsPages =
-    {
-        ("account", "账号与平台", "登录态只保存在本机 DPAPI 加密的 PlatformCredentials 中。"),
-        ("danmaku", "弹幕与过滤", "屏蔽词、独轮车与监控画面弹幕渲染开关都集中在这里。"),
-        ("asr", "语音识别（ASR）", "为剪辑台生成逐字稿；API Key 使用 DPAPI 加密保存。"),
-        ("highlight", "高能事件检测", "按短窗弹幕密度与基线倍率自动记录打点。"),
-        ("updates", "组件与更新", "yt-dlp 与平台插件的版本检查、下载与验签。"),
-    };
+        SettingsWindowStatusText.Pages;
 
     /// <summary>各平台账号状态文本（按平台索引，登录/清除后统一刷新）。</summary>
     private readonly Dictionary<PlatformType, TextBlock> _accountStatusTexts = new();
@@ -106,7 +100,7 @@ public partial class SettingsWindow : Window
             };
             var status = new TextBlock
             {
-                Text = "未绑定",
+                Text = SettingsWindowStatusText.Unbound,
                 FontSize = 11,
                 Foreground = new SolidColorBrush(Color.Parse("#64748B")),
                 Margin = new Thickness(12, 0, 12, 0),
@@ -114,7 +108,7 @@ public partial class SettingsWindow : Window
             };
             var login = new Button
             {
-                Content = "登录 " + profile.DisplayName,
+                Content = SettingsWindowStatusText.LoginButton(profile.DisplayName),
                 FontSize = 11,
                 Padding = new Thickness(10, 4),
                 Tag = profile.Platform,
@@ -123,7 +117,7 @@ public partial class SettingsWindow : Window
             login.Click += OnPlatformLogin;
             var clear = new Button
             {
-                Content = "清除",
+                Content = SettingsWindowStatusText.ClearButton,
                 FontSize = 11,
                 Padding = new Thickness(10, 4),
                 Margin = new Thickness(6, 0, 0, 0),
@@ -159,7 +153,7 @@ public partial class SettingsWindow : Window
         }
         catch (Exception ex)
         {
-            SetStatusBar($"读取设置失败：{ex.Message}", ErrorStatusBrush);
+            SetStatusBar(SettingsWindowStatusText.ReadSettingsFailed(ex.Message), ErrorStatusBrush);
         }
     }
 
@@ -175,8 +169,8 @@ public partial class SettingsWindow : Window
             var cookie = await _services.Credentials.GetCookieAsync(profile.Platform);
             var expired = await _services.Credentials.IsExpiredAsync(profile.Platform);
             statusText.Text = cookie is null
-                ? (expired ? "未绑定（上次登录已过期）" : "未绑定")
-                : "已绑定（Cookie 已加密保存）";
+                ? (expired ? SettingsWindowStatusText.UnboundExpired : SettingsWindowStatusText.Unbound)
+                : SettingsWindowStatusText.Bound;
         }
     }
 
@@ -282,23 +276,23 @@ public partial class SettingsWindow : Window
     private async Task LoginAsync(PlatformType platform)
     {
         var displayName = WebViewLoginService.DisplayName(platform);
-        SetStatusBar($"正在打开 {displayName} 登录窗…", NeutralStatusBrush);
+        SetStatusBar(SettingsWindowStatusText.OpeningLoginWindow(displayName), NeutralStatusBrush);
         try
         {
             var cookie = await _loginService.LoginAsync(platform);
             if (string.IsNullOrWhiteSpace(cookie))
             {
-                SetStatusBar("登录窗已关闭，未捕获到登录 Cookie。", NeutralStatusBrush);
+                SetStatusBar(SettingsWindowStatusText.LoginWindowClosedWithoutCookie, NeutralStatusBrush);
                 return;
             }
 
             await _services.Credentials.SaveAsync(platform, null, cookie);
             await LoadAccountStatusAsync();
-            SetStatusBar($"{displayName} 登录态已保存（DPAPI）。", NeutralStatusBrush);
+            SetStatusBar(SettingsWindowStatusText.LoginSaved(displayName), NeutralStatusBrush);
         }
         catch (Exception ex)
         {
-            SetStatusBar($"登录失败：{ex.Message}", NeutralStatusBrush);
+            SetStatusBar(SettingsWindowStatusText.LoginFailed(ex.Message), NeutralStatusBrush);
         }
     }
 
@@ -316,11 +310,11 @@ public partial class SettingsWindow : Window
         {
             await _services.Credentials.RemoveAsync(platform);
             await LoadAccountStatusAsync();
-            SetStatusBar($"{WebViewLoginService.DisplayName(platform)} 登录态已清除。", NeutralStatusBrush);
+            SetStatusBar(SettingsWindowStatusText.Cleared(WebViewLoginService.DisplayName(platform)), NeutralStatusBrush);
         }
         catch (Exception ex)
         {
-            SetStatusBar($"清除失败：{ex.Message}", NeutralStatusBrush);
+            SetStatusBar(SettingsWindowStatusText.ClearFailed(ex.Message), NeutralStatusBrush);
         }
     }
 

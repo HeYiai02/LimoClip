@@ -105,4 +105,44 @@ internal static class MainWindowStatusText
     public static string RecordingStopped(string alias) => $"已停止 {alias} 的录制。";
 
     public static string RecordingStopFailedCancelingDelete(string message) => $"停止录制失败，已取消删除：{message}";
+
+    // ---- 主窗口宿主（MainWindow.axaml.cs）的对话框标题与状态栏文案（V0.7.5）。----
+
+    public const string PickRecordingDirectoryTitle = "选择录像保存目录";
+
+    public const string PickClipVideoFileTitle = "选择本地视频文件";
+
+    public const string PickClipExportDirectoryTitle = "选择切片导出目录";
+
+    public const string VideoFileTypeName = "视频文件 (mkv / mp4)";
+
+    public const string StartupFailedTitle = "启动失败";
+
+    public const string ProfileNamePromptLabel = "方案名称";
+
+    public const string NewProfileName = "新方案";
+
+    public const string DesktopFullscreenEntered = "已进入桌面全屏：F11 或 Esc 退出。";
+
+    public const string DesktopFullscreenExited = "已退出桌面全屏。";
+
+    public const string SettingsApplied = "设置已应用。";
+
+    public static string HeroLayoutSwitchFailed(string message) => $"切换主副屏布局失败：{message}";
+
+    public static string PlacementApplied(string displayTitle) => $"已把「{displayTitle}」放到指定位置";
+
+    public static string DropIntoWorkspaceFailed(string message) => $"拖入工作区失败：{message}";
+
+    public static string FreeformLayoutToggleFailed(string message) => $"切换自由布局失败：{message}";
+
+    public static string RoomUpdateFailed(string message) => $"修改失败：{message}";
+
+    public static string RoomDeleteFailed(string message) => $"删除失败：{message}";
+
+    public static string LayoutSaveFailed(string message) => $"保存失败：{message}";
+
+    public static string LayoutSaveAsFailed(string message) => $"另存失败：{message}";
+
+    public static string DanmakuReloadFailed(string message) => $"弹幕设置热更新失败：{message}";
 }
