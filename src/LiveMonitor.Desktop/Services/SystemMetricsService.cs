@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -80,17 +79,17 @@ public sealed class SystemMetricsService : ObservableObject, IDisposable
         }
     }
 
-    public string MemoryText => $"{MemoryBytes / 1024d / 1024d:F0} MB";
+    public string MemoryText => GpuMetricsLogic.MemoryText(MemoryBytes);
 
-    public string GpuUtilizationText => GpuUtilization is { } value ? $"GPU {value:F0}%" : "GPU --";
+    public string GpuUtilizationText => GpuMetricsLogic.UtilizationText(GpuUtilization);
 
-    public string GpuDecoderText => GpuDecoder is { } value ? $"解码 {value:F0}%" : "解码 --";
+    public string GpuDecoderText => GpuMetricsLogic.DecoderText(GpuDecoder);
 
-    public string GpuEncoderText => GpuEncoder is { } value ? $"编码 {value:F0}%" : "编码 --";
+    public string GpuEncoderText => GpuMetricsLogic.EncoderText(GpuEncoder);
 
-    public string GpuMemoryText => GpuMemoryMb is { } value ? $"显存 {value:F0} MB" : string.Empty;
+    public string GpuMemoryText => GpuMetricsLogic.GpuMemoryText(GpuMemoryMb);
 
-    public double GpuBarValue => GpuUtilization is { } value ? Math.Clamp(value, 0, 100) : 0;
+    public double GpuBarValue => GpuMetricsLogic.BarValue(GpuUtilization);
 
     public void Start()
     {
@@ -151,7 +150,7 @@ public sealed class SystemMetricsService : ObservableObject, IDisposable
         }
     }
 
-    private static GpuSample? QueryNvidiaSmi()
+    private static GpuMetricsLogic.GpuSample? QueryNvidiaSmi()
     {
         try
         {
@@ -191,40 +190,12 @@ public sealed class SystemMetricsService : ObservableObject, IDisposable
                 return null;
             }
 
-            var line = process.StandardOutput.ReadToEnd()
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .FirstOrDefault();
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                return null;
-            }
-
-            var parts = line.Split(',', StringSplitOptions.TrimEntries);
-            if (parts.Length < 4)
-            {
-                return null;
-            }
-
-            return new GpuSample(
-                ParseDouble(parts[0]),
-                ParseDouble(parts[1]),
-                ParseDouble(parts[2]),
-                ParseDouble(parts[3]));
+            return GpuMetricsLogic.ParseSample(process.StandardOutput.ReadToEnd());
         }
         catch
         {
             return null;
         }
-    }
-
-    public static double? ParseDouble(string text)
-    {
-        if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
-        {
-            return value;
-        }
-
-        return null;
     }
 
     public void Dispose()
@@ -233,5 +204,4 @@ public sealed class SystemMetricsService : ObservableObject, IDisposable
         _cts.Dispose();
     }
 
-    private readonly record struct GpuSample(double? Utilization, double? Decoder, double? Encoder, double? MemoryMb);
 }
