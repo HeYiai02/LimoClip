@@ -385,7 +385,7 @@ public sealed class WorkspacePlayerManager : IDisposable
             }
 
             var metrics = player.GetHealthMetrics();
-            var drops = metrics.DecoderDroppedFrames + metrics.DroppedFrames;
+            var drops = DropGuardPolicy.TotalDroppedFrames(metrics);
             if (!_dropBaselines.TryGetValue(paneId, out var baseline))
             {
                 _dropBaselines[paneId] = new DropBaseline(drops, now, 0);
@@ -399,11 +399,15 @@ public sealed class WorkspacePlayerManager : IDisposable
             }
 
             var delta = Math.Max(0, drops - baseline.Drops);
-            var fps = metrics.FramesPerSecond > 1 ? metrics.FramesPerSecond : 30;
-            var dropRate = delta / (fps * elapsed);
-            var badCycles = dropRate > 0.05 ? baseline.BadCycles + 1 : 0;
+            var dropRate = DropGuardPolicy.ResolveDropRate(
+                delta,
+                DropGuardPolicy.ResolveFramesPerSecond(metrics.FramesPerSecond),
+                elapsed);
+            var badCycles = DropGuardPolicy.NextBadCycles(
+                DropGuardPolicy.IsBadCycle(dropRate),
+                baseline.BadCycles);
 
-            if (badCycles >= 3)
+            if (DropGuardPolicy.ShouldDowngrade(badCycles))
             {
                 _dropBaselines.Remove(paneId);
                 _ = DowngradeAsync(player, status);
@@ -422,11 +426,7 @@ public sealed class WorkspacePlayerManager : IDisposable
             return;
         }
 
-        var lower = status.AvailableQualities
-            .Where(quality => quality.Height < current.Height)
-            .OrderByDescending(quality => quality.Height)
-            .ThenByDescending(quality => quality.Fps)
-            .FirstOrDefault();
+        var lower = DropGuardPolicy.ChooseLowerQuality(current, status.AvailableQualities);
 
         if (lower is not null)
         {
