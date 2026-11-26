@@ -145,7 +145,7 @@ public sealed class BilibiliDanmakuClient : IDanmakuClient
 
             var server = await GetDanmuServerInfoAsync(ct).ConfigureAwait(false);
             var buvid = await ResolveBuvidAsync(ct).ConfigureAwait(false);
-            var uid = ParseOwnerUid(_cookie);
+            var uid = BilibiliConnectionParsing.ParseOwnerUid(_cookie);
 
             socket = _socketFactory();
             await socket.ConnectAsync(server.WebSocketUri, ct).ConfigureAwait(false);
@@ -518,7 +518,7 @@ public sealed class BilibiliDanmakuClient : IDanmakuClient
             throw new InvalidOperationException("B 站弹幕服务器信息缺少 host_list 字段。");
         }
 
-        var uri = SelectHostUri(hostList)
+        var uri = BilibiliConnectionParsing.SelectHostUri(hostList)
             ?? throw new InvalidOperationException("B 站弹幕服务器信息未返回可用的 host。");
         return new DanmuServerInfo(uri, token);
     }
@@ -545,8 +545,8 @@ public sealed class BilibiliDanmakuClient : IDanmakuClient
                 $"B 站 WBI 签名初始化失败：nav 接口未返回签名密钥（code={JsonRead.Int(root, "code")}）。");
         }
 
-        var imgKey = ExtractWbiKey(JsonRead.String(wbiImg, "img_url"));
-        var subKey = ExtractWbiKey(JsonRead.String(wbiImg, "sub_url"));
+        var imgKey = BilibiliConnectionParsing.ExtractWbiKey(JsonRead.String(wbiImg, "img_url"));
+        var subKey = BilibiliConnectionParsing.ExtractWbiKey(JsonRead.String(wbiImg, "sub_url"));
         if (imgKey is null || subKey is null)
         {
             throw new InvalidOperationException("B 站 WBI 签名初始化失败：nav 接口返回的 wbi_img 不完整。");
@@ -563,28 +563,9 @@ public sealed class BilibiliDanmakuClient : IDanmakuClient
     }
 
     /// <summary>从 wbi_img 的图片 URL 里取文件名 key（如 .../7cd0...c.png → 7cd0...c）。</summary>
-    private static string? ExtractWbiKey(string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            return null;
-        }
-
-        var trimmed = url.Trim();
-        var slash = trimmed.LastIndexOf('/');
-        var fileName = slash >= 0 ? trimmed[(slash + 1)..] : trimmed;
-        var dot = fileName.IndexOf('.');
-        if (dot > 0)
-        {
-            fileName = fileName[..dot];
-        }
-
-        return fileName.Length == 0 ? null : fileName;
-    }
-
     private async Task<string> ResolveBuvidAsync(CancellationToken ct)
     {
-        var cookieBuvid = GetCookieValue(_cookie, "buvid3");
+        var cookieBuvid = BilibiliConnectionParsing.GetCookieValue(_cookie, "buvid3");
         if (!string.IsNullOrEmpty(cookieBuvid))
         {
             return cookieBuvid;
@@ -656,117 +637,6 @@ public sealed class BilibiliDanmakuClient : IDanmakuClient
         }
     }
 
-    private static Uri? SelectHostUri(JsonElement hostList)
-    {
-        var candidates = new List<HostCandidate>();
-        foreach (var entry in hostList.EnumerateArray())
-        {
-            if (entry.ValueKind != JsonValueKind.Object)
-            {
-                continue;
-            }
-
-            var host = JsonRead.String(entry, "host");
-            if (string.IsNullOrWhiteSpace(host))
-            {
-                continue;
-            }
-
-            candidates.Add(new HostCandidate(
-                host.Trim(),
-                JsonRead.Int(entry, "wss_port"),
-                JsonRead.Int(entry, "ws_port"),
-                JsonRead.Int(entry, "port")));
-        }
-
-        foreach (var candidate in candidates)
-        {
-            if (candidate.WssPort > 0 && TryBuildWebSocketUri(candidate.Host, candidate.WssPort, out var uri))
-            {
-                return uri;
-            }
-        }
-
-        foreach (var candidate in candidates)
-        {
-            if (candidate.WsPort > 0 && TryBuildWebSocketUri(candidate.Host, candidate.WsPort, out var uri))
-            {
-                return uri;
-            }
-        }
-
-        foreach (var candidate in candidates)
-        {
-            if (candidate.Port > 0 && TryBuildWebSocketUri(candidate.Host, candidate.Port, out var uri))
-            {
-                return uri;
-            }
-        }
-
-        return null;
-    }
-
-    private static bool TryBuildWebSocketUri(string host, int port, out Uri? uri)
-    {
-        var normalized = host.Trim();
-        if (normalized.StartsWith("wss://", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = normalized[6..];
-        }
-        else if (normalized.StartsWith("ws://", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = normalized[5..];
-        }
-        else if (normalized.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = normalized[8..];
-        }
-        else if (normalized.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = normalized[7..];
-        }
-
-        normalized = normalized.TrimEnd('/');
-        var url = $"wss://{normalized}:{port.ToString(CultureInfo.InvariantCulture)}/sub";
-        return Uri.TryCreate(url, UriKind.Absolute, out uri);
-    }
-
-    private static string? GetCookieValue(string? cookie, string name)
-    {
-        if (string.IsNullOrEmpty(cookie))
-        {
-            return null;
-        }
-
-        foreach (var pair in cookie.Split(';', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var segment = pair.Trim();
-            var separator = segment.IndexOf('=');
-            if (separator <= 0)
-            {
-                continue;
-            }
-
-            if (!segment.AsSpan(0, separator).Trim().Equals(name, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var value = segment[(separator + 1)..].Trim();
-            return value.Length == 0 ? null : value;
-        }
-
-        return null;
-    }
-
-    private static long ParseOwnerUid(string? cookie)
-    {
-        var raw = GetCookieValue(cookie, "DedeUserID");
-        return long.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var uid) && uid > 0
-            ? uid
-            : 0;
-    }
-
     private void RaiseMessageReceived(DanmakuMessage message)
     {
         var handler = MessageReceived;
@@ -823,5 +693,4 @@ public sealed class BilibiliDanmakuClient : IDanmakuClient
 
     private readonly record struct DanmuServerInfo(Uri WebSocketUri, string Token);
 
-    private readonly record struct HostCandidate(string Host, int WssPort, int WsPort, int Port);
 }
