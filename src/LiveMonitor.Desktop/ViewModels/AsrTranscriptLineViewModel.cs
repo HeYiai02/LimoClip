@@ -4,7 +4,7 @@ namespace LiveMonitor.Desktop.ViewModels;
 
 /// <summary>
 /// 剪辑台右侧「语音识别」面板中的一行：相对转写片段起点的时间码 + 单句文本。
-/// 点击整行由 View 调 <see cref="ClipStudioViewModel.SeekToAsrLine"/> 跳转预览位置，
+/// 点击整行由 View 调 <see cref="ClipAsrViewModel.SeekToLine"/> 跳转预览位置，
 /// 因此本类只承载只读展示数据，不引用 Avalonia 控件。
 /// </summary>
 public sealed class AsrTranscriptLineViewModel

@@ -268,7 +268,7 @@ public partial class ClipStudioView : Avalonia.Controls.UserControl
         if ((sender as Avalonia.Controls.Control)?.DataContext is ClipHighlightItemViewModel item)
         {
             // DataContext 已切换到其它 ViewModel 时 _viewModel 可能为 null，静默忽略。
-            _viewModel?.TranscribeHighlightCommand.Execute(item);
+            _viewModel?.Asr.TranscribeHighlightCommand.Execute(item);
         }
     }
 
@@ -277,7 +277,7 @@ public partial class ClipStudioView : Avalonia.Controls.UserControl
     {
         if ((sender as Avalonia.Controls.Control)?.DataContext is ClipHighlightItemViewModel item)
         {
-            _viewModel?.ShowHighlightAsrCommand.Execute(item);
+            _viewModel?.Asr.ShowHighlightAsrCommand.Execute(item);
         }
     }
 
@@ -286,7 +286,7 @@ public partial class ClipStudioView : Avalonia.Controls.UserControl
     {
         if ((sender as Avalonia.Controls.Control)?.DataContext is AsrTranscriptLineViewModel line)
         {
-            _viewModel?.SeekToAsrLine(line);
+            _viewModel?.Asr.SeekToLine(line);
         }
     }
 
@@ -298,10 +298,10 @@ public partial class ClipStudioView : Avalonia.Controls.UserControl
             return;
         }
 
-        var text = _viewModel.AsrFullText;
+        var text = _viewModel.Asr.FullText;
         if (string.IsNullOrWhiteSpace(text))
         {
-            _viewModel.NotifyAsrCopyFailed("没有可复制的识别文本。");
+            _viewModel.Asr.NotifyCopyFailed("没有可复制的识别文本。");
             return;
         }
 
@@ -310,17 +310,17 @@ public partial class ClipStudioView : Avalonia.Controls.UserControl
             var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
             if (clipboard is null)
             {
-                _viewModel.NotifyAsrCopyFailed("当前窗口不支持剪贴板。");
+                _viewModel.Asr.NotifyCopyFailed("当前窗口不支持剪贴板。");
                 return;
             }
 
             await clipboard.SetTextAsync(text);
-            _viewModel.NotifyAsrTextCopied();
+            _viewModel.Asr.NotifyTextCopied();
         }
         catch (Exception ex)
         {
             // async void 事件处理器不能把异常抛回 UI 线程，统一转成面板提示。
-            _viewModel.NotifyAsrCopyFailed(ex.Message);
+            _viewModel.Asr.NotifyCopyFailed(ex.Message);
         }
     }
 
