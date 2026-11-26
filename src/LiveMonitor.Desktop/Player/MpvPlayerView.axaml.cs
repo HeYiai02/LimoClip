@@ -1217,25 +1217,21 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
 
         try
         {
-            var decoderDrops = context.GetPropertyLong("decoder-frame-drop-count") ?? 0;
-            var frameDrops = context.GetPropertyLong("frame-drop-count") ?? 0;
-            // 用 container-fps（源帧率）判断解码是否跟得上；estimated-vf-fps 会被 vf 滤镜影响。
-            var fps = context.GetPropertyDouble("container-fps")
-                      ?? context.GetPropertyDouble("estimated-vf-fps")
-                      ?? 0;
+            var decoderDrops = context.GetPropertyLong("decoder-frame-drop-count");
+            var frameDrops = context.GetPropertyLong("frame-drop-count");
+            var containerFps = context.GetPropertyDouble("container-fps");
+            var estimatedVfFps = context.GetPropertyDouble("estimated-vf-fps");
             var hwdec = context.GetPropertyString("hwdec-current");
-            var hardware = !string.IsNullOrWhiteSpace(hwdec)
-                           && !string.Equals(hwdec, "no", StringComparison.OrdinalIgnoreCase);
 
-            _metrics = new PlayerHealthMetrics(
+            _metrics = PlayerHealthSampling.Build(
                 decoderDrops,
                 frameDrops,
-                fps,
-                hardware,
+                containerFps,
+                estimatedVfFps,
                 hwdec,
                 DateTimeOffset.Now);
 
-            UpdateQualityFps(fps);
+            UpdateQualityFps(_metrics.FramesPerSecond);
         }
         catch
         {
