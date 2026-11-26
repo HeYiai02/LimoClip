@@ -738,7 +738,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
                 // 否则“静音仍有波动”的既有交互会被破坏。
                 if (_audioEnabled)
                 {
-                    context.SetOptionString("af", BuildAudioMeterFilter(_audioMeterPath));
+                    context.SetOptionString("af", AudioMeterLogic.BuildMeterFilter(_audioMeterPath));
                     _meterAttached = true;
                 }
             }
@@ -803,14 +803,6 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
         }
     }
 
-    private static string BuildAudioMeterFilter(string path)
-    {
-        // ffmpeg 的 filter 参数以 ':' 分隔，Windows 盘符必须转义；
-        // 实测 ffmpeg 需要两个反斜杠 ("E\\:/...")，单反斜杠会被它当成分隔符吃掉。
-        var escaped = path.Replace('\\', '/').Replace(":", "\\\\:");
-        return $"lavfi=[astats=metadata=1:reset=5,ametadata=mode=print:key=lavfi.astats.Overall.RMS_level:file={escaped}:direct=1]";
-    }
-
     /// <summary>
     /// 音量表跟随音频解码，不跟随 mute：静音时仍要能看到电平波动。
     /// 只有显式关闭音频解码（焦点切换/全静音关闭音频）时才摘掉 astats。
@@ -848,7 +840,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
 
         try
         {
-            context.Command("af", "set", BuildAudioMeterFilter(_audioMeterPath));
+            context.Command("af", "set", AudioMeterLogic.BuildMeterFilter(_audioMeterPath));
             _meterAttached = true;
             _audioMeterTimer.Start();
         }
@@ -913,25 +905,15 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
             if (stream.Length > 0)
             {
                 // 只读文件尾，避免长时间运行时把整个日志读进内存。
-                if (stream.Length > 8192)
+                if (stream.Length > AudioMeterLogic.MaxTailBytes)
                 {
-                    stream.Seek(-8192, SeekOrigin.End);
+                    stream.Seek(-AudioMeterLogic.MaxTailBytes, SeekOrigin.End);
                 }
 
                 using var reader = new StreamReader(stream);
-                var text = reader.ReadToEnd();
-                const string key = "lavfi.astats.Overall.RMS_level=";
-                var index = text.LastIndexOf(key, StringComparison.Ordinal);
-                if (index >= 0)
+                if (AudioMeterLogic.FindLastRmsDecibels(reader.ReadToEnd()) is { } decibels)
                 {
-                    var start = index + key.Length;
-                    var end = text.IndexOfAny(['\r', '\n'], start);
-                    var valueText = end < 0 ? text[start..] : text[start..end];
-                    if (double.TryParse(valueText, NumberStyles.Float, CultureInfo.InvariantCulture, out var db)
-                        && double.IsFinite(db))
-                    {
-                        target = Math.Clamp((db + 60d) / 60d, 0d, 1d);
-                    }
+                    target = AudioMeterLogic.MapDecibelsToLevel(decibels);
                 }
             }
         }
@@ -941,9 +923,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
         }
 
         // 上升快、下降慢，接近真实电平表的观感。
-        _audioMeterLevel = target >= _audioMeterLevel
-            ? target
-            : _audioMeterLevel * 0.72 + target * 0.28;
+        _audioMeterLevel = AudioMeterLogic.NextLevel(_audioMeterLevel, target);
         AudioMeter.Level = _audioMeterLevel;
     }
 
