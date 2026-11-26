@@ -65,4 +65,44 @@ internal static class MainWindowStatusText
     public static string CustomRatioEnabled() => "已切换为自定义比例；新增房间只追加，不会重排";
 
     public static string ProfileDeserializeFailed(string profileName, string message) => $"方案「{profileName}」反序列化失败，已重建：{message}";
+
+    public static string FreeformModeLabel(bool isFreeform) => isFreeform ? "自由布局：开" : "自由布局：关";
+
+    public static string FreeformModeHint(bool isFreeform) => isFreeform
+        ? "拖动窗格标题或 Alt+拖动画面移动，边缘/角缩放；右键可置顶画中画或锁定。"
+        : "开启后可用自由画布摆放窗格，支持磁吸、缩放与画中画置顶。";
+
+    public static string RecordingEngineInitFailed(string message) => $"录制引擎初始化失败：{message}";
+
+    public static string RecordingCenterRefreshFailed(string message) => $"刷新录制中心失败：{message}";
+
+    public static string ClipStudioInitFailed(string message) => $"初始化剪辑台失败：{message}";
+
+    public static string ClipStudioEntered(string roomDisplayName) => $"已进入剪辑台：{roomDisplayName}";
+
+    public static string ClipStudioOpenFailed(string message) => $"打开剪辑台失败：{message}";
+
+    public const string WorkspaceNotInitialized = "工作区尚未初始化。";
+
+    public const string RoomNotFound = "房间不存在。";
+
+    public static string RoomAdded(string alias) => $"已添加 {alias}";
+
+    public static string AutoFitAppliedShort(int count) => $"已自适应 {count} 路";
+
+    public static string AutoAdaptedShort(int count) => $"已自动适配 {count} 路";
+
+    public const string CustomRatioRestoreProfileName = "自定义比例（恢复）";
+
+    public static string RoomRemovedKeepingRatio(string title) => $"已移出 {title}（保留自定义比例）";
+
+    public const string PlayerReconnecting = "正在重新连接…";
+
+    public const string HeroSideMinimumHint = "房间不足 3 路，主副屏布局暂按单行排布";
+
+    public static string HeroSideApplied(int count) => $"已切换为主副屏布局（{count} 路）";
+
+    public static string RecordingStopped(string alias) => $"已停止 {alias} 的录制。";
+
+    public static string RecordingStopFailedCancelingDelete(string message) => $"停止录制失败，已取消删除：{message}";
 }

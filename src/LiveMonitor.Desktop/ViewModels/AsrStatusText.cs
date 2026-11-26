@@ -17,6 +17,13 @@ internal static class AsrStatusText
     public const string Canceled = "已取消";
     public const string Failed = "识别失败";
     public const string NoVideo = "请先打开本地视频";
+    public const string FailedMessage = "语音识别失败，请稍后重试。";
+    public const string UnknownProvider = "未知服务商";
+    public const string CompletedEmpty = "识别完成：未识别到文本";
+
+    public static string FailedWithMessage(string message) => $"语音识别失败：{message}";
+
+    public static string Completed(int count) => $"识别完成：{count} 句";
 
     public static string CopyFailed(string message) => $"复制识别文本失败：{message}";
 }

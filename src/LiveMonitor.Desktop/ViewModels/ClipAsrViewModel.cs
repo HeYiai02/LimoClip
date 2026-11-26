@@ -63,7 +63,7 @@ public sealed partial class ClipAsrViewModel : ObservableObject, IDisposable
 
     /// <summary>面板状态文案：「尚未识别」/「正在识别当前选区…」/「识别完成：N 句」/「已取消」等。</summary>
     [ObservableProperty]
-    private string _statusText = "尚未识别";
+    private string _statusText = AsrStatusText.Idle;
 
     /// <summary>识别失败的中文消息；成功、取消或清空后为 null。</summary>
     [ObservableProperty]
@@ -331,11 +331,11 @@ public sealed partial class ClipAsrViewModel : ObservableObject, IDisposable
             if (version == _version && !_disposed)
             {
                 var message = string.IsNullOrWhiteSpace(ex.Message)
-                    ? "语音识别失败，请稍后重试。"
+                    ? AsrStatusText.FailedMessage
                     : ex.Message.Trim();
                 ErrorText = message;
                 StatusText = AsrStatusText.Failed;
-                _host.SetStatusText($"语音识别失败：{message}");
+                _host.SetStatusText(AsrStatusText.FailedWithMessage(message));
                 if (highlight is not null)
                 {
                     highlight.AsrError = message;
@@ -358,7 +358,7 @@ public sealed partial class ClipAsrViewModel : ObservableObject, IDisposable
     private void ShowResult(AsrTranscriptResult result, TimeSpan start, TimeSpan end)
     {
         _displayedResult = result;
-        ProviderLabel = string.IsNullOrWhiteSpace(result.ProviderLabel) ? "未知服务商" : result.ProviderLabel.Trim();
+        ProviderLabel = string.IsNullOrWhiteSpace(result.ProviderLabel) ? AsrStatusText.UnknownProvider : result.ProviderLabel.Trim();
         FullText = (result.FullText ?? string.Empty).Trim();
         RangeText = $"{ClipExportTaskViewModel.FormatTime(start)} - {ClipExportTaskViewModel.FormatTime(end)}";
         TranscriptLines.Clear();
@@ -392,7 +392,7 @@ public sealed partial class ClipAsrViewModel : ObservableObject, IDisposable
     }
 
     private string BuildCompletedText() =>
-        TranscriptLines.Count > 0 ? $"识别完成：{TranscriptLines.Count} 句" : "识别完成：未识别到文本";
+        TranscriptLines.Count > 0 ? AsrStatusText.Completed(TranscriptLines.Count) : AsrStatusText.CompletedEmpty;
 
     /// <summary>没有视频时的友好提示：同时写入状态与错误行，保证面板可见。</summary>
     private void ReportUnavailable()

@@ -412,11 +412,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
     /// <summary>自由布局模式下由画布承载窗格，Dock 宿主必须隐藏，避免同一播放器控件被两个宿主同时挂载。</summary>
     public bool ShowDockWorkspace => !IsWorkspaceEmpty && !IsFreeformMode;
-    public string FreeformModeButtonText => IsFreeformMode ? "自由布局：开" : "自由布局：关";
+    public string FreeformModeButtonText => MainWindowStatusText.FreeformModeLabel(IsFreeformMode);
 
-    public string FreeformModeHint => IsFreeformMode
-        ? "拖动窗格标题或 Alt+拖动画面移动，边缘/角缩放；右键可置顶画中画或锁定。"
-        : "开启后可用自由画布摆放窗格，支持磁吸、缩放与画中画置顶。";
+    public string FreeformModeHint => MainWindowStatusText.FreeformModeHint(IsFreeformMode);
 
     public FreeformLayoutDocument? FreeformDocument => _freeformDocument;
 
@@ -702,7 +700,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
         catch (Exception ex)
         {
-            SetStatus($"录制引擎初始化失败：{ex.Message}");
+            SetStatus(MainWindowStatusText.RecordingEngineInitFailed(ex.Message));
         }
 
         _services.Danmaku.HighlightTriggered += OnDanmakuHighlightTriggered;
@@ -740,7 +738,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
         catch (Exception ex)
         {
-            SetStatus($"刷新录制中心失败：{ex.Message}");
+            SetStatus(MainWindowStatusText.RecordingCenterRefreshFailed(ex.Message));
         }
     }
 
@@ -758,7 +756,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
         catch (Exception ex)
         {
-            SetStatus($"初始化剪辑台失败：{ex.Message}");
+            SetStatus(MainWindowStatusText.ClipStudioInitFailed(ex.Message));
         }
     }
 
@@ -773,11 +771,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             await studio.InitializeAsync().ConfigureAwait(true);
             await studio.RefreshSessionsAsync().ConfigureAwait(true);
             await studio.OpenSessionAsync(session).ConfigureAwait(true);
-            SetStatus($"已进入剪辑台：{session.RoomDisplayName}");
+            SetStatus(MainWindowStatusText.ClipStudioEntered(session.RoomDisplayName));
         }
         catch (Exception ex)
         {
-            SetStatus($"打开剪辑台失败：{ex.Message}");
+            SetStatus(MainWindowStatusText.ClipStudioOpenFailed(ex.Message));
         }
     }
 
@@ -954,7 +952,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     {
         if (Layout is null)
         {
-            throw new InvalidOperationException("工作区尚未初始化。");
+            throw new InvalidOperationException(MainWindowStatusText.WorkspaceNotInitialized);
         }
 
         var tiles = WorkspaceDockBuilder.EnumerateTiles(Layout).ToList();
@@ -968,7 +966,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         var room = await RoomCatalog.GetRoomOrLoadAsync(roomId, ct).ConfigureAwait(true);
         if (room is null)
         {
-            throw new InvalidOperationException("房间不存在。");
+            throw new InvalidOperationException(MainWindowStatusText.RoomNotFound);
         }
 
         // 自动适配模式：按“已有房间 + 新房间”的数量重算最优网格。
@@ -981,7 +979,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
                 .Select(roomItem => roomItem!)
                 .ToList();
             rooms.Add(room);
-            await FitRoomsAsync(rooms, $"已添加 {room.Alias}", ct, startPlayback).ConfigureAwait(true);
+            await FitRoomsAsync(rooms, MainWindowStatusText.RoomAdded(room.Alias), ct, startPlayback).ConfigureAwait(true);
             SyncDanmakuSubscriptions();
             return;
         }
@@ -1053,7 +1051,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             return;
         }
 
-        await FitRoomsAsync(rooms, rooms.Count == 0 ? "已重置为自动适配" : $"已自适应 {rooms.Count} 路", ct, startPlayback)
+        await FitRoomsAsync(rooms, rooms.Count == 0 ? MainWindowStatusText.AutoFitReset() : MainWindowStatusText.AutoFitAppliedShort(rooms.Count), ct, startPlayback)
             .ConfigureAwait(true);
     }
 
@@ -1120,7 +1118,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         // 结构不一致（或快照损坏）时才走完整重建，避免把比例套到错误的窗格上。
         var profile = new LayoutProfile
         {
-            Name = "自定义比例（恢复）",
+            Name = MainWindowStatusText.CustomRatioRestoreProfileName,
             DockLayoutJson = _customLayoutSnapshotJson,
             IsCustomLayout = true
         };
@@ -1586,8 +1584,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
 
         var status = keepCustom && rooms.Count > 0
-            ? $"已移出 {title}（保留自定义比例）"
-            : $"已移出 {title}";
+            ? MainWindowStatusText.RoomRemovedKeepingRatio(title)
+            : MainWindowStatusText.RoomRemoved(title);
 
         await ApplyRebuiltLayoutAsync(
             rebuilt,
@@ -1614,7 +1612,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             .Select(room => room!)
             .ToList();
 
-        await FitRoomsAsync(rooms, rooms.Count == 0 ? "已重置为自动适配" : $"已自动适配 {rooms.Count} 路", ct)
+        await FitRoomsAsync(rooms, rooms.Count == 0 ? MainWindowStatusText.AutoFitReset() : MainWindowStatusText.AutoAdaptedShort(rooms.Count), ct)
             .ConfigureAwait(true);
     }
 
@@ -1673,7 +1671,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
                 player.SetMute(state.Muted);
             }
 
-            player.ShowLoading("正在重新连接…");
+            player.ShowLoading(MainWindowStatusText.PlayerReconnecting);
             starts.Add(_players.StartAsync(tile, ct));
         }
 
@@ -1733,8 +1731,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         });
 
         var status = rooms.Count <= 2
-            ? "房间不足 3 路，主副屏布局暂按单行排布"
-            : $"已切换为主副屏布局（{rooms.Count} 路）";
+            ? MainWindowStatusText.HeroSideMinimumHint
+            : MainWindowStatusText.HeroSideApplied(rooms.Count);
         await ApplyRebuiltLayoutAsync(layout, audioStates, status, startPlayback, isHero: rooms.Count > 2, ct)
             .ConfigureAwait(true);
     }
@@ -2286,12 +2284,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         try
         {
             await _services.Recordings.StopAsync(room.Id, ct).ConfigureAwait(true);
-            SetStatus($"已停止 {room.Alias} 的录制。");
+            SetStatus(MainWindowStatusText.RecordingStopped(room.Alias));
             return true;
         }
         catch (Exception ex)
         {
-            SetStatus($"停止录制失败，已取消删除：{ex.Message}");
+            SetStatus(MainWindowStatusText.RecordingStopFailedCancelingDelete(ex.Message));
             return false;
         }
     }
