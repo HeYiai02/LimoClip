@@ -27,14 +27,13 @@ namespace LiveMonitor.Desktop.Controls;
 /// </summary>
 public sealed class DanmakuOverlay : Control
 {
-    private const double FontSize = 17;
-    private const double LaneHeight = 26;
-    private const double LaneTopPadding = 6;
-    private const double SpawnGap = 24;
-    private const int MaxPending = 600;
-    private const double MinDurationSeconds = 7;
-    private const double MaxDurationSeconds = 11;
-    private const double EmoteImageHeight = 22;
+    // 常量单一来源：渲染参数集中在 DanmakuOverlayLogic，控件只做别名以便阅读。
+    private const double FontSize = DanmakuOverlayLogic.FontSize;
+    private const double LaneHeight = DanmakuOverlayLogic.LaneHeight;
+    private const double LaneTopPadding = DanmakuOverlayLogic.LaneTopPadding;
+    private const double SpawnGap = DanmakuOverlayLogic.SpawnGap;
+    private const int MaxPending = DanmakuOverlayLogic.MaxPending;
+    private const double EmoteImageHeight = DanmakuOverlayLogic.EmoteImageHeight;
 
     private static readonly IBrush NormalBrush = new SolidColorBrush(Color.Parse("#F2F5FA"));
     private static readonly IBrush GiftBrush = new SolidColorBrush(Color.Parse("#FFD166"));
@@ -80,7 +79,7 @@ public sealed class DanmakuOverlay : Control
     public int MaxConcurrent
     {
         get => _maxConcurrent;
-        set => _maxConcurrent = Math.Clamp(value, 1, 200);
+        set => _maxConcurrent = DanmakuOverlayLogic.ClampMaxConcurrent(value);
     }
 
     /// <summary>
@@ -100,7 +99,7 @@ public sealed class DanmakuOverlay : Control
     public double PlaybackRate
     {
         get => _playbackRate;
-        set => _playbackRate = double.IsFinite(value) ? Math.Clamp(value, 0.25, 4.0) : 1.0;
+        set => _playbackRate = DanmakuOverlayLogic.ClampPlaybackRate(value);
     }
 
     /// <summary>
@@ -248,21 +247,20 @@ public sealed class DanmakuOverlay : Control
 
         delta *= PlaybackRate;
 
-        var height = Bounds.Height;
-        var laneCount = Math.Max(1, (int)((height - LaneTopPadding * 2) / LaneHeight));
-        if (laneCount != _laneCount)
+        var metrics = DanmakuOverlayLogic.ComputeLaneMetrics(Bounds.Height);
+        if (metrics.LaneCount != _laneCount)
         {
-            _laneCount = laneCount;
-            _laneHeight = Math.Max(LaneHeight, (height - LaneTopPadding * 2) / laneCount);
-            _items.RemoveAll(item => item.Lane >= laneCount);
+            _laneCount = metrics.LaneCount;
+            _laneHeight = metrics.LaneHeight;
+            _items.RemoveAll(item => item.Lane >= metrics.LaneCount);
         }
 
         // 推进 + 回收离屏项。
         for (var i = _items.Count - 1; i >= 0; i--)
         {
             var item = _items[i];
-            item.X -= item.Speed * delta;
-            if (item.X + item.Width < 0)
+            item.X = DanmakuOverlayLogic.AdvanceX(item.X, item.Speed, delta);
+            if (DanmakuOverlayLogic.IsOffscreen(item.X, item.Width))
             {
                 _items.RemoveAt(i);
             }
@@ -301,7 +299,7 @@ public sealed class DanmakuOverlay : Control
             }
 
             var message = _pending.Dequeue();
-            var text = Normalize(FormatText(message));
+            var text = DanmakuOverlayLogic.NormalizeText(DanmakuOverlayLogic.FormatText(message));
             if (text.Length == 0)
             {
                 continue;
@@ -327,14 +325,14 @@ public sealed class DanmakuOverlay : Control
                 continue;
             }
 
-            var duration = MinDurationSeconds + _random.NextDouble() * (MaxDurationSeconds - MinDurationSeconds);
+            var duration = DanmakuOverlayLogic.DurationFor(_random.NextDouble());
             _items.Add(new Item
             {
                 Segments = segments,
                 Width = totalWidth,
                 Height = itemHeight,
-                X = width + 4,
-                Speed = (width + totalWidth) / duration,
+                X = DanmakuOverlayLogic.SpawnX(width),
+                Speed = DanmakuOverlayLogic.SpeedFor(width, totalWidth, duration),
                 Lane = lane
             });
         }
@@ -519,43 +517,5 @@ public sealed class DanmakuOverlay : Control
             Width = formatted.Width,
             Height = formatted.Height
         };
-    }
-
-    /// <summary>
-    /// 渲染文本格式化：纯大表情包显示为 <c>[表情名]</c>（V0.2 不下载图片），
-    /// 行内小表情保留原始 <c>[doge]</c> 文本。V0.4 导出 .ass 时同样走这一段文本。
-    /// </summary>
-    private static string FormatText(DanmakuMessage message)
-    {
-        if (!message.IsSticker)
-        {
-            return message.Content;
-        }
-
-        var name = message.PrimaryEmoteName;
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            name = message.Content;
-        }
-
-        name = name.Trim().Trim('[', ']').Trim();
-        return name.Length == 0 ? message.Content : $"[{name}]";
-    }
-
-    private static string Normalize(string content)
-    {
-        var trimmed = content.Trim();
-        if (trimmed.Length == 0)
-        {
-            return string.Empty;
-        }
-
-        if (trimmed.IndexOfAny(new[] { '\r', '\n', '\t' }) >= 0)
-        {
-            trimmed = trimmed.Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
-        }
-
-        // 超长弹幕只渲染前 120 个字符，避免一条弹幕横跨整个窗格。
-        return trimmed.Length <= 120 ? trimmed : trimmed.Substring(0, 120) + "…";
     }
 }
