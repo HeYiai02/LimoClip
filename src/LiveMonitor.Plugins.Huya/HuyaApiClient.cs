@@ -1,8 +1,5 @@
-using System.IO.Compression;
-using System.Net;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using LiveMonitor.Platforms;
 
 namespace LiveMonitor.Plugins.Huya;
@@ -32,9 +29,10 @@ internal sealed record HuyaRoomSnapshot(
 /// <c>data.stream.flv.multiLine</c>（带 wsSecret 签名的 FLV 地址）。
 /// 主播个性域名（如 <c>huya.com/lpl</c>）不是房间号，需要额外抓一次房间页从 <c>hyPlayerConfig</c> 的
 /// <c>"profileRoom":&lt;数字&gt;</c> 解析；页面为 gzip 压缩，这里手动解压。
+/// 响应解析规则集中在 <see cref="HuyaApiClientParsing"/>（纯函数，直接单测），本类只保留 HTTP 编排。
 /// </para>
 /// </summary>
-internal sealed partial class HuyaApiClient : IDisposable
+internal sealed class HuyaApiClient : IDisposable
 {
     private const string MobileProfileEndpoint =
         "https://mp.huya.com/cache.php?m=Live&do=profileRoom&showSecret=1&roomid={0}";
@@ -56,9 +54,6 @@ internal sealed partial class HuyaApiClient : IDisposable
             _httpClient = httpClient;
         }
     }
-
-    [GeneratedRegex(@"""profileRoom""\s*:\s*(\d+)", RegexOptions.CultureInvariant)]
-    private static partial Regex ProfileRoomPattern();
 
     /// <summary>查询房间状态；<paramref name="roomIdOrHost"/> 可以是数字房间号或个性域名。</summary>
     public Task<HuyaRoomSnapshot> GetRoomAsync(string roomIdOrHost, CancellationToken ct)
@@ -96,12 +91,8 @@ internal sealed partial class HuyaApiClient : IDisposable
 
         using var document = JsonDocument.Parse(body);
         var root = document.RootElement;
-        var status = root.TryGetProperty("status", out var statusElement) && statusElement.ValueKind == JsonValueKind.Number
-            ? statusElement.GetInt32()
-            : 0;
-        var message = root.TryGetProperty("message", out var messageElement) && messageElement.ValueKind == JsonValueKind.String
-            ? messageElement.GetString() ?? string.Empty
-            : string.Empty;
+        var status = HuyaApiClientParsing.ReadStatus(root);
+        var message = HuyaApiClientParsing.ReadMessage(root);
 
         if (status != 200)
         {
@@ -125,33 +116,33 @@ internal sealed partial class HuyaApiClient : IDisposable
         var isLive = data.TryGetProperty("liveStatus", out var liveStatus) && liveStatus.ValueKind == JsonValueKind.String
             && string.Equals(liveStatus.GetString(), "ON", StringComparison.OrdinalIgnoreCase);
 
-        var presenterUid = ReadInt64(profileInfo, "uid");
+        var presenterUid = HuyaApiClientParsing.ReadInt64(profileInfo, "uid");
         if (presenterUid <= 0)
         {
-            presenterUid = ReadInt64(liveData, "uid");
+            presenterUid = HuyaApiClientParsing.ReadInt64(liveData, "uid");
         }
 
-        var nick = ReadString(profileInfo, "nick");
+        var nick = HuyaApiClientParsing.ReadString(profileInfo, "nick");
         if (string.IsNullOrWhiteSpace(nick))
         {
-            nick = ReadString(liveData, "nick");
+            nick = HuyaApiClientParsing.ReadString(liveData, "nick");
         }
 
-        var roomName = ReadString(liveData, "roomName");
+        var roomName = HuyaApiClientParsing.ReadString(liveData, "roomName");
         if (string.IsNullOrWhiteSpace(roomName))
         {
             roomName = nick;
         }
 
-        var canonicalRoomId = ReadInt64(liveData, "profileRoom");
+        var canonicalRoomId = HuyaApiClientParsing.ReadInt64(liveData, "profileRoom");
         if (canonicalRoomId <= 0)
         {
-            canonicalRoomId = ReadInt64(profileInfo, "profileRoom");
+            canonicalRoomId = HuyaApiClientParsing.ReadInt64(profileInfo, "profileRoom");
         }
 
-        var flvLines = ParseFlvLines(data);
-        var bitRates = ParseBitRates(liveData);
-        var maxBitRate = (int)ReadInt64(liveData, "bitRate");
+        var flvLines = HuyaApiClientParsing.ParseFlvLines(data);
+        var bitRates = HuyaApiClientParsing.ParseBitRates(liveData);
+        var maxBitRate = (int)HuyaApiClientParsing.ReadInt64(liveData, "bitRate");
 
         return new HuyaRoomSnapshot(
             canonicalRoomId > 0 ? canonicalRoomId.ToString() : roomNumber,
@@ -183,83 +174,6 @@ internal sealed partial class HuyaApiClient : IDisposable
         return result.Length == 0 ? null : result;
     }
 
-    private static IReadOnlyList<HuyaStreamLine> ParseFlvLines(JsonElement data)
-    {
-        if (!data.TryGetProperty("stream", out var stream)
-            || stream.ValueKind != JsonValueKind.Object
-            || !stream.TryGetProperty("flv", out var flv)
-            || flv.ValueKind != JsonValueKind.Object
-            || !flv.TryGetProperty("multiLine", out var multiLine)
-            || multiLine.ValueKind != JsonValueKind.Array)
-        {
-            return Array.Empty<HuyaStreamLine>();
-        }
-
-        var lines = new List<HuyaStreamLine>();
-        foreach (var item in multiLine.EnumerateArray())
-        {
-            if (item.ValueKind != JsonValueKind.Object)
-            {
-                continue;
-            }
-
-            var url = ReadString(item, "url");
-            if (string.IsNullOrWhiteSpace(url))
-            {
-                continue;
-            }
-
-            lines.Add(new HuyaStreamLine(
-                ReadString(item, "cdnType"),
-                (int)ReadInt64(item, "lineIndex"),
-                (int)ReadInt64(item, "webPriorityRate"),
-                url));
-        }
-
-        return lines;
-    }
-
-    private static IReadOnlyList<HuyaBitRateInfo> ParseBitRates(JsonElement liveData)
-    {
-        var raw = ReadString(liveData, "bitRateInfo");
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return Array.Empty<HuyaBitRateInfo>();
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(raw);
-            if (document.RootElement.ValueKind != JsonValueKind.Array)
-            {
-                return Array.Empty<HuyaBitRateInfo>();
-            }
-
-            var result = new List<HuyaBitRateInfo>();
-            foreach (var item in document.RootElement.EnumerateArray())
-            {
-                if (item.ValueKind != JsonValueKind.Object)
-                {
-                    continue;
-                }
-
-                var name = ReadString(item, "sDisplayName");
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    continue;
-                }
-
-                result.Add(new HuyaBitRateInfo(name, (int)ReadInt64(item, "iBitRate")));
-            }
-
-            return result;
-        }
-        catch (JsonException)
-        {
-            return Array.Empty<HuyaBitRateInfo>();
-        }
-    }
-
     /// <summary>把个性域名解析成数字房间号；结果按域名缓存。</summary>
     private async Task<string> ResolveRoomNumberAsync(string host, CancellationToken ct)
     {
@@ -279,66 +193,18 @@ internal sealed partial class HuyaApiClient : IDisposable
         using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         var bytes = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
-        var html = DecodeContent(bytes, response.Content.Headers.ContentEncoding);
+        var html = HuyaApiClientParsing.DecodeContent(bytes, response.Content.Headers.ContentEncoding);
 
-        var match = ProfileRoomPattern().Match(html);
-        if (!match.Success)
+        var roomNumber = HuyaApiClientParsing.ExtractProfileRoom(html);
+        if (roomNumber is null)
         {
             throw new InvalidOperationException(
                 "无法从虎牙房间页解析出数字房间号，请改用数字房间号链接（如 https://www.huya.com/660000）。");
         }
 
-        var roomNumber = match.Groups[1].Value;
         _hostRoomCache[host] = roomNumber;
         return roomNumber;
     }
-
-    private static string DecodeContent(byte[] bytes, ICollection<string> contentEncodings)
-    {
-        if (bytes.Length == 0)
-        {
-            return string.Empty;
-        }
-
-        var encoding = contentEncodings.FirstOrDefault()?.Trim().ToLowerInvariant();
-        if (encoding is "gzip" || bytes.Length > 2 && bytes[0] == 0x1F && bytes[1] == 0x8B)
-        {
-            using var gzip = new GZipStream(new MemoryStream(bytes), CompressionMode.Decompress);
-            using var reader = new StreamReader(gzip, Encoding.UTF8);
-            return reader.ReadToEnd();
-        }
-
-        if (encoding == "deflate")
-        {
-            using var deflate = new DeflateStream(new MemoryStream(bytes), CompressionMode.Decompress);
-            using var reader = new StreamReader(deflate, Encoding.UTF8);
-            return reader.ReadToEnd();
-        }
-
-        if (encoding == "br")
-        {
-            using var brotli = new BrotliStream(new MemoryStream(bytes), CompressionMode.Decompress);
-            using var reader = new StreamReader(brotli, Encoding.UTF8);
-            return reader.ReadToEnd();
-        }
-
-        return Encoding.UTF8.GetString(bytes);
-    }
-
-    internal static string ReadString(JsonElement element, string propertyName)
-        => element.ValueKind == JsonValueKind.Object
-            && element.TryGetProperty(propertyName, out var value)
-            && value.ValueKind == JsonValueKind.String
-            ? value.GetString() ?? string.Empty
-            : string.Empty;
-
-    internal static long ReadInt64(JsonElement element, string propertyName)
-        => element.ValueKind == JsonValueKind.Object
-            && element.TryGetProperty(propertyName, out var value)
-            && value.ValueKind == JsonValueKind.Number
-            && value.TryGetInt64(out var number)
-            ? number
-            : 0;
 
     public void Dispose()
     {
