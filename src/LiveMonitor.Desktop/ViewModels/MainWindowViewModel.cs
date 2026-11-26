@@ -2095,9 +2095,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             GridRows = oldDimensions.Rows;
             GridColumns = oldDimensions.Columns;
             LayoutProfiles.MarkClean();
-            StatusText = freeformDocument is not null
-                ? $"已载入方案「{profile.Name}」：自由布局，播放器原地保留。"
-                : $"已载入方案「{profile.Name}」：窗格结构一致，播放器原地保留。";
+            StatusText = LayoutLoadStatusLogic.InPlace(profile.Name, freeformDocument is not null);
             SyncDanmakuSubscriptions();
             return;
         }
@@ -2144,11 +2142,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             _players.RemovePlayer(oldTile);
         }
 
-        StatusText = rebuilt
-            ? $"已载入方案「{profile.Name}」：布局结构变化，已重建 {newTiles.Count} 路"
-            : diff.HasChanges
-                ? $"已载入方案「{profile.Name}」：复用 {transferred} 路，销毁 {diff.Removed.Count} 路，新增 {diff.Added.Count} 路"
-                : $"已载入方案「{profile.Name}」";
+        StatusText = LayoutLoadStatusLogic.Describe(
+            profile.Name,
+            rebuilt,
+            diff.HasChanges,
+            newTiles.Count,
+            transferred,
+            diff.Removed.Count,
+            diff.Added.Count);
 
         await Task.Yield();
         foreach (var tile in newTiles.Where(tile => tile.PlayerView is null))

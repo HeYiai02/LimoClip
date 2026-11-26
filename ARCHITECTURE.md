@@ -30,7 +30,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | WebView 登录 | WebView2（临时用户目录，登录后采集 Cookie） |
 | 平台解析 | 各家 HTTP API + Jint（斗鱼签名、抖音 sign.js）；yt-dlp 作为 YouTube/Twitch 兜底 |
 | 插件签名 | Ed25519（BouncyCastle）+ SHA256 清单校验 |
-| 测试 | xUnit（6 个测试工程，当前共 2385 个用例） |
+| 测试 | xUnit（6 个测试工程，当前共 2396 个用例） |
 
 ### 平台支持矩阵
 
@@ -478,7 +478,7 @@ Program.Main
   - 主副屏按钮：`ApplyHeroLayoutAsync` → `CreateHeroAndSideColumn` 重建 + 记忆 `IsHeroLayout`（模式文本、底栏房间数展示不同）；
   - 拖拽/分割条变化 → `SetCustomLayout(true)`（`LayoutModeText` 显示「自定义比例 / 主副屏 · 自定义」），保存/恢复快照 `Capture/RestoreCustomLayoutAsync`；
   - 窗格增删（双击房间、关闭窗格）与 `AppendPaneAsync`；关闭窗格：自由布局删除文档 placement，Dock 宿主（自动/主副屏/自定义）统一整树重建后起播，避免播放器控件被新旧 `ContentPresenter` 同时引用导致闪退（见 §10.4「移出窗格」）。
-- `MainWindowViewModel` 职责拆分（阶段五）：主 VM 从 2865 行降至约 2355 行，保留窗口级命令（工作区/录制中心/剪辑台切换）、`IsFreeformMode` 与自由画布协调、Dock 序列化/布局跟踪、自定义比例快照、焦点/全屏/主静音、弹幕订阅、健康监控与 `DisposePlayers`/`Dispose` 编排；内部协作类 `RoomCatalogCoordinator`（主库增删与选中）、`HealthSummaryCoordinator`（平台健康/资源摘要）、`WorkspaceLayoutCoordinator`（布局差量应用）承担无 UI 的状态编排；`RoomCatalogViewModel`（房间集合/筛选/分组/开播轮询）与 `WorkspaceLayoutProfileViewModel`（方案档案/保存另存/切换 dirty）承接原主 VM 的绑定面，窗口级副作用经 `IRoomCatalogHost`/`IWorkspaceLayoutProfileHost` 回调主 VM；`SystemStatusBarViewModel`/`HighlightFeedViewModel` 为只读子面板（状态栏、高亮事件流），`MainWindow.axaml` 对其使用局部 `x:CompileBindings="True"` + `x:DataType` 编译期绑定。
+- `MainWindowViewModel` 职责拆分（阶段五）：主 VM 从 2865 行降至约 2355 行，保留窗口级命令（工作区/录制中心/剪辑台切换）、`IsFreeformMode` 与自由画布协调、Dock 序列化/布局跟踪、自定义比例快照、焦点/全屏/主静音、弹幕订阅、健康监控与 `DisposePlayers`/`Dispose` 编排；内部协作类 `RoomCatalogCoordinator`（主库增删与选中）、`HealthSummaryCoordinator`（平台健康/资源摘要）、`WorkspaceLayoutCoordinator`（布局差量应用）承担无 UI 的状态编排；`RoomCatalogViewModel`（房间集合/筛选/分组/开播轮询）与 `WorkspaceLayoutProfileViewModel`（方案档案/保存另存/切换 dirty）承接原主 VM 的绑定面，窗口级副作用经 `IRoomCatalogHost`/`IWorkspaceLayoutProfileHost` 回调主 VM；`SystemStatusBarViewModel`/`HighlightFeedViewModel` 为只读子面板（状态栏、高亮事件流），`MainWindow.axaml` 对其使用局部 `x:CompileBindings="True"` + `x:DataType` 编译期绑定。 方案切换完成后的状态栏文案（原地保留 / 结构重建 / 差集变化 / 首次载入四类分支）已抽到 `ViewModels/LayoutLoadStatusLogic`（由 `LayoutLoadStatusLogicTests` 覆盖），`MainWindowViewModel` 只负责传入计数与结果（V0.7.5）。
 
 ### 10.3 播放器与监控
 
@@ -598,7 +598,7 @@ dotnet build LiveMonitor.sln --no-restore
 - 工程目标框架：`Data`、`Media`、`Desktop` 为 `net8.0-windows`，其余类库为 `net8.0`；测试工程对应同目标框架（`Data`/`Media`/`Desktop` 测试为 `net8.0-windows`，`Platforms`/`Danmaku` 测试为 `net8.0`）。
 - 需要 `tools/` 下的 ffmpeg/mpv 才能运行应用（`scripts/fetch-tools.ps1` 自动下载并校验）。
 
-### 13.2 测试（当前 2385 个用例）
+### 13.2 测试（当前 2396 个用例）
 
 | 测试工程 | 覆盖范围 | 用例数 |
 | --- | --- | --- |
@@ -606,9 +606,9 @@ dotnet build LiveMonitor.sln --no-restore
 | `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退、自定义清流 Provider、斗鱼流接缝、抖音帧接缝与断线通知、弹幕重连退避 | 505 |
 | `tests/LiveMonitor.Danmaku.Tests` | 过滤器、高能检测、会话管理、重连/释放竞态、断线退避策略（`DanmakuReconnectPolicy`） | 125 |
 | `tests/LiveMonitor.Media.Tests` | 录制状态机与并发收尾、轮询器与会话工作器、分段合并、剪辑导出、波形、增量波形/增量弹幕读取、ASR 响应解析与按句拆分（`AsrResponseParser`）、FFmpeg 参数协议分支（取消路径覆盖预取消与首帧进度回调取消） | 261 |
-| `tests/LiveMonitor.Desktop.Tests` | ViewModel（主窗口拆分/房间目录/布局方案/状态栏/高亮/录制中心/剪辑台与 ASR/导出子视图模型/设置页 ASR/组件更新/通用与弹幕）、Dock/自由画布布局、时间轴几何（`ClipTimelineGeometry`）与缩放视口/拖拽钳制（`ClipTimelineViewLogic`）、播放器管理器与 `IWorkspacePlayer`、回放 seek 探测/防抖逻辑（`ReplaySeekLogic`）、剪辑预览位置推进与安全上界（`ClipPlaybackPositionLogic`）、剪辑预览播放状态机与守卫（`ClipPlaybackStateLogic`）、剪辑台展示层纯逻辑（`ClipStudioPresentationLogic`）、音量表解析与平滑（`AudioMeterLogic`）、mpv 流选项映射与请求头清理（`StreamOptionMapper`）、AppServices 释放、登录配置、播放状态文本、录制目标排序、自由布局命中与宿主切换、自由画布交互几何（`FreeformInteractionLogic`）、录制中心历史子视图模型（`RecordingHistoryViewModel`）、弹幕渲染层纯逻辑（`DanmakuOverlayLogic`）、窗格控制条 chrome 规则（`PlayerChromeLogic`）、健康采样规则（`PlayerHealthSampling`）、录制目标行展示规则（`RecordingTargetDisplayLogic`）、历史录像行展示规则（`RecordingHistoryDisplayLogic`）、播放器丢帧降档守护（`DropGuardPolicy`）、状态栏 GPU 指标解析与展示（`GpuMetricsLogic`）、边录边剪增量波形纯逻辑（`LiveWaveformLogic`）、剪辑台选区/步进/高能窗口纯规则（`ClipSelectionLogic`）、剪辑台列表行展示规则（`ClipListDisplayLogic`）、导出任务行展示规则（`ClipExportTaskDisplayLogic`）、录制格式化文案（`RecordingUiFormat`）、自由画布磁吸引擎（`FreeformSnapEngine`）、弹幕表情缓存键与重试规则（`DanmakuEmoteCacheLogic`）、录制中心摘要与目录归一化规则（`RecordingCenterDisplayLogic`）、剪辑导出文件名与时间码规则（`ClipExportNamingLogic`）、弹幕渲染帧节拍与停滞判定（`DanmakuRenderTiming`）、播放器 CA 与音量表路径解析（`PlayerPathResolver`）、时间码格式化统一入口（`TimeCodeFormat`）、边录边剪会话状态（`LiveClipSession`） | 1456 |
+| `tests/LiveMonitor.Desktop.Tests` | ViewModel（主窗口拆分/房间目录/布局方案/状态栏/高亮/录制中心/剪辑台与 ASR/导出子视图模型/设置页 ASR/组件更新/通用与弹幕）、Dock/自由画布布局、时间轴几何（`ClipTimelineGeometry`）与缩放视口/拖拽钳制（`ClipTimelineViewLogic`）、播放器管理器与 `IWorkspacePlayer`、回放 seek 探测/防抖逻辑（`ReplaySeekLogic`）、剪辑预览位置推进与安全上界（`ClipPlaybackPositionLogic`）、剪辑预览播放状态机与守卫（`ClipPlaybackStateLogic`）、剪辑台展示层纯逻辑（`ClipStudioPresentationLogic`）、音量表解析与平滑（`AudioMeterLogic`）、mpv 流选项映射与请求头清理（`StreamOptionMapper`）、AppServices 释放、登录配置、播放状态文本、录制目标排序、自由布局命中与宿主切换、自由画布交互几何（`FreeformInteractionLogic`）、录制中心历史子视图模型（`RecordingHistoryViewModel`）、弹幕渲染层纯逻辑（`DanmakuOverlayLogic`）、窗格控制条 chrome 规则（`PlayerChromeLogic`）、健康采样规则（`PlayerHealthSampling`）、录制目标行展示规则（`RecordingTargetDisplayLogic`）、历史录像行展示规则（`RecordingHistoryDisplayLogic`）、播放器丢帧降档守护（`DropGuardPolicy`）、状态栏 GPU 指标解析与展示（`GpuMetricsLogic`）、边录边剪增量波形纯逻辑（`LiveWaveformLogic`）、剪辑台选区/步进/高能窗口纯规则（`ClipSelectionLogic`）、剪辑台列表行展示规则（`ClipListDisplayLogic`）、导出任务行展示规则（`ClipExportTaskDisplayLogic`）、录制格式化文案（`RecordingUiFormat`）、自由画布磁吸引擎（`FreeformSnapEngine`）、弹幕表情缓存键与重试规则（`DanmakuEmoteCacheLogic`）、录制中心摘要与目录归一化规则（`RecordingCenterDisplayLogic`）、剪辑导出文件名与时间码规则（`ClipExportNamingLogic`）、弹幕渲染帧节拍与停滞判定（`DanmakuRenderTiming`）、播放器 CA 与音量表路径解析（`PlayerPathResolver`）、时间码格式化统一入口（`TimeCodeFormat`）、边录边剪会话状态（`LiveClipSession`） | 1467 |
 
-合计 **2385** 个用例，五套全部通过（0 失败 0 跳过）。
+合计 **2396** 个用例，五套全部通过（0 失败 0 跳过）。
 
 运行方式（使用已构建的测试 dll，避免重复构建）：
 
