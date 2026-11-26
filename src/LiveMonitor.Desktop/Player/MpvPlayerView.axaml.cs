@@ -1300,28 +1300,13 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
 
     private void ApplyStateVisuals(PlayerState state, string? detail)
     {
-        StateOverlay.IsVisible = state != PlayerState.Playing;
-        LoadingBar.IsVisible = state is PlayerState.Loading or PlayerState.Reconnecting;
-        RetryButton.IsVisible = state is PlayerState.Failed or PlayerState.Reconnecting;
+        var overlay = PlayerStateText.Overlay(state);
+        StateOverlay.IsVisible = overlay.ShowOverlay;
+        LoadingBar.IsVisible = overlay.ShowLoadingBar;
+        RetryButton.IsVisible = overlay.ShowRetry;
 
-        StateTitle.Text = state switch
-        {
-            PlayerState.Loading => "加载中",
-            PlayerState.Offline => "未开播",
-            PlayerState.Reconnecting => "直播流中断",
-            PlayerState.Failed => "播放失败",
-            _ => string.Empty,
-        };
-
-        StateDetail.Text = detail ?? state switch
-        {
-            PlayerState.Loading => "正在解析直播流…",
-            PlayerState.Offline => "等待主播开播",
-            PlayerState.Reconnecting => "正在自动重连…",
-            PlayerState.Failed => "可点击重新连接",
-            _ => string.Empty,
-        };
-
+        StateTitle.Text = overlay.Title;
+        StateDetail.Text = detail ?? overlay.Detail;
     }
 
     /// <summary>
