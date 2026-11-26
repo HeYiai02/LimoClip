@@ -1,6 +1,4 @@
 using System.Net.Http;
-using System.Security.Cryptography;
-using System.Text;
 using Avalonia.Threading;
 using Bitmap = Avalonia.Media.Imaging.Bitmap;
 
@@ -13,10 +11,8 @@ namespace LiveMonitor.Desktop.Controls;
 /// </summary>
 internal static class DanmakuEmoteImageCache
 {
-    private const int MaxMemoryEntries = 200;
-    private const int DiskCacheMaxFiles = 2_000;
-    /// <summary>失败后允许重试的冷却时间：网络抖动/临时 403 不应让某个表情整场都只显示文本。</summary>
-    private const long FailedRetryMilliseconds = 60_000;
+    private const int MaxMemoryEntries = DanmakuEmoteCacheLogic.MaxMemoryEntries;
+    private const int DiskCacheMaxFiles = DanmakuEmoteCacheLogic.DiskCacheMaxFiles;
     private static readonly object Gate = new();
     private static readonly Dictionary<string, LinkedListNode<(string Url, Bitmap Bitmap)>> Entries = new(StringComparer.Ordinal);
     private static readonly LinkedList<(string Url, Bitmap Bitmap)> Lru = new();
@@ -25,25 +21,10 @@ internal static class DanmakuEmoteImageCache
     private static readonly HttpClient Http = CreateHttpClient();
     private static string? _diskDirectory;
 
-    /// <summary>
-    /// 平台下发的表情地址可能是协议相对 URL（<c>//i0.hdslb.com/...</c>，B 站常见）或带空白。
-    /// 统一补全为 https 绝对地址，否则 HttpClient 会直接抛异常、整场表情都退回文本。
-    /// </summary>
-    private static string NormalizeUrl(string url)
-    {
-        var trimmed = url.Trim();
-        if (trimmed.StartsWith("//", StringComparison.Ordinal))
-        {
-            return "https:" + trimmed;
-        }
-
-        return trimmed;
-    }
-
     /// <summary>命中内存缓存时返回 true；未命中时由调用方退回文本渲染。</summary>
     internal static bool TryGet(string url, out Bitmap? bitmap)
     {
-        url = NormalizeUrl(url);
+        url = DanmakuEmoteCacheLogic.NormalizeUrl(url);
         lock (Gate)
         {
             if (Entries.TryGetValue(url, out var node))
@@ -62,7 +43,7 @@ internal static class DanmakuEmoteImageCache
     /// <summary>发起后台加载；同一 URL 只并发加载一次，失败后冷却 <see cref="FailedRetryMilliseconds"/> 再重试。</summary>
     internal static void Request(string url)
     {
-        url = NormalizeUrl(url);
+        url = DanmakuEmoteCacheLogic.NormalizeUrl(url);
         if (!Dispatcher.UIThread.CheckAccess())
         {
             Dispatcher.UIThread.Post(() => Request(url));
@@ -78,7 +59,7 @@ internal static class DanmakuEmoteImageCache
 
             if (FailedAt.TryGetValue(url, out var failedAt))
             {
-                if (Environment.TickCount64 - failedAt < FailedRetryMilliseconds)
+                if (!DanmakuEmoteCacheLogic.ShouldRetryAfterFailure(failedAt, Environment.TickCount64))
                 {
                     return;
                 }
@@ -122,7 +103,7 @@ internal static class DanmakuEmoteImageCache
             bytes = null;
         }
 
-        if (bytes is null || bytes.Length == 0)
+        if (!DanmakuEmoteCacheLogic.HasUsablePayload(bytes))
         {
             try
             {
@@ -140,7 +121,7 @@ internal static class DanmakuEmoteImageCache
 
     private static void Complete(string url, byte[]? bytes)
     {
-        if (bytes is null || bytes.Length == 0)
+        if (!DanmakuEmoteCacheLogic.HasUsablePayload(bytes))
         {
             MarkFailed(url);
             return;
@@ -203,8 +184,7 @@ internal static class DanmakuEmoteImageCache
             return null;
         }
 
-        var hash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(url))).ToLowerInvariant();
-        return Path.Combine(directory, hash + ".img");
+        return Path.Combine(directory, DanmakuEmoteCacheLogic.DiskFileName(url));
     }
 
     private static string? DiskDirectory()
@@ -255,16 +235,17 @@ internal static class DanmakuEmoteImageCache
             var directory = Path.GetDirectoryName(path);
             if (directory is not null)
             {
-                var files = Directory.EnumerateFiles(directory, "*.img");
+                var files = Directory.EnumerateFiles(directory, "*" + DanmakuEmoteCacheLogic.DiskFileExtension);
                 var count = 0;
                 foreach (var _ in files)
                 {
                     count++;
-                    if (count > DiskCacheMaxFiles)
-                    {
-                        // 磁盘缓存只做软上限：超限后本次不再写入，避免无限膨胀。
-                        return;
-                    }
+                }
+
+                if (!DanmakuEmoteCacheLogic.CanWriteDisk(count))
+                {
+                    // 磁盘缓存只做软上限：超限后本次不再写入，避免无限膨胀。
+                    return;
                 }
             }
 
