@@ -123,7 +123,31 @@ public sealed class ClipExporterTests : IDisposable
     }
 
     [Fact]
-    public async Task Cancellation_kills_ffmpeg_and_removes_partial_output()
+    public async Task Pre_cancelled_token_aborts_before_writing_output()
+    {
+        if (FfmpegPath is null)
+        {
+            return;
+        }
+
+        var video = GenerateVideo("precancel.mp4", seconds: 2, withAudio: true);
+        var exporter = CreateExporter(null);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            exporter.ExportAsync(
+                BuildRequest(video, "precancel-clip", TimeSpan.Zero, TimeSpan.FromSeconds(1), ClipExportMode.CleanOnly),
+                danmakuItems: null,
+                sourceVideoCodec: "mpeg4",
+                progress: null,
+                ct: cts.Token));
+
+        Assert.Empty(Directory.GetFiles(_outputDir, "precancel-clip*.mp4"));
+    }
+
+    [Fact]
+    public async Task Cancellation_reported_during_export_aborts_and_removes_partial_output()
     {
         if (FfmpegPath is null)
         {
@@ -132,16 +156,25 @@ public sealed class ClipExporterTests : IDisposable
 
         var video = GenerateVideo("cancel.mp4", seconds: 8, withAudio: true, width: 640, height: 360, fps: 30);
         var exporter = CreateExporter(null);
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(120));
+        using var cts = new CancellationTokenSource();
+        var danmakuItems = new[]
+        {
+            new RecordedDanmakuItem(500, "a", "第一条弹幕", IsSticker: false, IsGift: false),
+            new RecordedDanmakuItem(1500, "b", "第二条弹幕", IsSticker: false, IsGift: false),
+        };
 
-        var task = exporter.ExportAsync(
-            BuildRequest(video, "cancel-clip", TimeSpan.Zero, TimeSpan.FromSeconds(6), ClipExportMode.BurnedDanmaku),
-            danmakuItems: null,
-            sourceVideoCodec: "mpeg4",
-            progress: null,
-            ct: cts.Token);
+        // 第一帧进度一定在 ffmpeg 编码开始前同步上报；在这里取消可确定性地覆盖「取消后不留下残缺文件」路径，
+        // 避免依赖 120ms 计时器与机器快慢（CI 上曾因导出先完成而误报）。
+        var progress = new InlineProgress<ClipExportProgress>(_ => cts.Cancel());
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            exporter.ExportAsync(
+                BuildRequest(video, "cancel-clip", TimeSpan.Zero, TimeSpan.FromSeconds(6), ClipExportMode.BurnedDanmaku),
+                danmakuItems,
+                sourceVideoCodec: "mpeg4",
+                progress: progress,
+                ct: cts.Token));
+
         Assert.Empty(Directory.GetFiles(_outputDir, "cancel-clip*.mp4"));
     }
 
@@ -266,5 +299,10 @@ public sealed class ClipExporterTests : IDisposable
         process.WaitForExit();
 
         Assert.True(process.ExitCode == 0, $"ffmpeg 生成素材失败 exit={process.ExitCode}：{stderr}{stdout}");
+    }
+
+    private sealed class InlineProgress<T>(Action<T> handler) : IProgress<T>
+    {
+        public void Report(T value) => handler(value);
     }
 }

@@ -59,6 +59,7 @@ public sealed class ClipExporter : IClipExporter
 
         ArgumentException.ThrowIfNullOrEmpty(request.OutputBaseName);
         Directory.CreateDirectory(request.OutputDirectory);
+        ct.ThrowIfCancellationRequested();
 
         var outputs = new List<string>();
         var clipDuration = request.EndTime - request.StartTime;
