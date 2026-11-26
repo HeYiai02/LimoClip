@@ -29,6 +29,7 @@ public sealed class WorkspacePlayerManager : IDisposable
     private readonly SemaphoreSlim _parseGate = new(4, 4);
     private readonly DispatcherTimer _dropTimer;
     private readonly object _gate = new();
+    private static readonly TimeSpan OfflinePollDelay = TimeSpan.FromSeconds(60);
     private bool _disposed;
 
     public WorkspacePlayerManager(AppServices services)
@@ -182,8 +183,8 @@ public sealed class WorkspacePlayerManager : IDisposable
             }
 
             tile.Status = status;
-            tile.StateText = status.IsLive ? "直播中" : "未开播";
-            tile.DetailText = status.IsLive ? status.Title : "主播未开播，60 秒后重试";
+            tile.StateText = status.IsLive ? RoomStatusText.Live : RoomStatusText.Offline;
+            tile.DetailText = status.IsLive ? status.Title : RoomStatusText.OfflineDetail(OfflinePollDelay);
 
             if (!status.IsLive || status.AvailableQualities.Count == 0)
             {
@@ -214,7 +215,7 @@ public sealed class WorkspacePlayerManager : IDisposable
         catch (Exception ex)
         {
             player.ShowFailed(ex.Message);
-            tile.StateText = "播放失败";
+            tile.StateText = RoomStatusText.PlaybackFailed;
             tile.DetailText = ex.Message;
             ScheduleRetry(tile);
         }
@@ -339,7 +340,7 @@ public sealed class WorkspacePlayerManager : IDisposable
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(60), cts.Token).ConfigureAwait(false);
+                await Task.Delay(OfflinePollDelay, cts.Token).ConfigureAwait(false);
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     if (!_disposed && tile.PlayerView is not null &&
@@ -566,7 +567,7 @@ public sealed class WorkspacePlayerManager : IDisposable
         }
         catch (Exception ex) when (!_disposed)
         {
-            tile.StateText = "播放失败";
+            tile.StateText = RoomStatusText.PlaybackFailed;
             tile.DetailText = ex.Message;
         }
     }
@@ -668,8 +669,8 @@ public sealed class WorkspacePlayerManager : IDisposable
 
         // 连续重连失败后不显示“未开播”（主播可能仍在播，只是本机网络到 CDN 不稳），
         // 保持「直播流中断」语义并每 60 秒自动复检一次主播状态。
-        tile.StateText = "重连中";
-        tile.DetailText = "直播流已中断，60 秒后自动重试";
+        tile.StateText = RoomStatusText.Reconnecting;
+        tile.DetailText = RoomStatusText.FailureRecheckDetail(ReconnectPolicy.FailureRecheckDelay);
         ScheduleOfflinePoll(tile, force: true);
     }
 
@@ -707,7 +708,7 @@ public sealed class WorkspacePlayerManager : IDisposable
             // 避免沿用上一次的「未开播」文案误导用户。
             if (player.State == PlayerState.Reconnecting)
             {
-                tile.DetailText = "直播流已中断，正在自动重连…";
+                tile.DetailText = RoomStatusText.AutoReconnectDetail;
             }
         }
 

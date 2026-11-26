@@ -13,8 +13,8 @@ namespace LiveMonitor.Desktop.ViewModels;
 /// </summary>
 public sealed class RoomTileViewModel : ObservableObject
 {
-    private string _stateText = "空窗格";
-    private string _detailText = "从左侧双击直播间，或拖入此窗格";
+    private string _stateText = RoomStatusText.EmptyPane;
+    private string _detailText = RoomStatusText.EmptyPaneDetail;
     private bool _isDanmakuVisible;
     private IWorkspacePlayer? _playerView;
 
@@ -35,8 +35,8 @@ public sealed class RoomTileViewModel : ObservableObject
         DisplayNumber = room.DisplayNumber;
         Platform = room.Platform;
         RoomId = room.RoomId;
-        StateText = "等待起播";
-        DetailText = "正在读取房间状态…";
+        StateText = RoomStatusText.WaitingForStart;
+        DetailText = RoomStatusText.ReadingStatus;
     }
 
     public event EventHandler? FocusRequested;
@@ -60,8 +60,8 @@ public sealed class RoomTileViewModel : ObservableObject
         DisplayNumber = room.DisplayNumber;
         Platform = room.Platform;
         RoomId = room.RoomId;
-        StateText = "等待起播";
-        DetailText = "正在读取房间状态…";
+        StateText = RoomStatusText.WaitingForStart;
+        DetailText = RoomStatusText.ReadingStatus;
         OnPropertyChanged(nameof(LiveRoomId));
         OnPropertyChanged(nameof(Alias));
         OnPropertyChanged(nameof(DisplayNumber));
