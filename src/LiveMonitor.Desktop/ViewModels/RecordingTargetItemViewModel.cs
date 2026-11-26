@@ -22,13 +22,13 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
     private bool _isLive;
     private bool _isBusy;
     private string? _customSaveDirectory;
-    private string _statusText = "未录制";
-    private string _statusBrush = "#5B6472";
-    private string _durationText = "--";
-    private string _bitrateText = "--";
-    private string _fileSizeText = "--";
-    private string _danmakuCountText = "0";
-    private string _highlightCountText = "0";
+    private string _statusText = RecordingTargetDisplayLogic.IdleStatusText;
+    private string _statusBrush = RecordingTargetDisplayLogic.IdleStatusBrush;
+    private string _durationText = RecordingTargetDisplayLogic.MissingText;
+    private string _bitrateText = RecordingTargetDisplayLogic.MissingText;
+    private string _fileSizeText = RecordingTargetDisplayLogic.MissingText;
+    private string _danmakuCountText = RecordingTargetDisplayLogic.ZeroText;
+    private string _highlightCountText = RecordingTargetDisplayLogic.ZeroText;
 
     public RecordingTargetItemViewModel(
         LiveRoom room,
@@ -116,7 +116,7 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
     public bool IsLive => _isLive;
 
     /// <summary>卡片上是否显示「直播中」徽章：正在录制时由红色竖条/状态胶囊表达，不再重复显示。</summary>
-    public bool ShowLiveBadge => _isLive && !_isRecording;
+    public bool ShowLiveBadge => RecordingTargetDisplayLogic.ShowLiveBadge(_isLive, _isRecording);
 
     /// <summary>由父 VM 用主库已知开播状态回填；返回状态是否发生变化。</summary>
     internal bool ApplyLiveStatus(bool? isLive)
@@ -151,13 +151,13 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
         }
     }
 
-    public bool CanOperate => !IsBusy;
+    public bool CanOperate => RecordingTargetDisplayLogic.CanOperate(IsBusy);
 
-    public string StartStopText => IsBusy ? "处理中…" : IsRecording ? "停止录制" : "立即开录";
+    public string StartStopText => RecordingTargetDisplayLogic.StartStopText(IsBusy, IsRecording);
 
-    public string StartStopBackground => IsRecording ? "#3B1D22" : "#1D3A5F";
+    public string StartStopBackground => RecordingTargetDisplayLogic.StartStopBackground(IsRecording);
 
-    public string StartStopForeground => IsRecording ? "#FCA5A5" : "#BFDBFE";
+    public string StartStopForeground => RecordingTargetDisplayLogic.StartStopForeground(IsRecording);
 
     public string StatusText
     {
@@ -214,9 +214,7 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
 
             if (!IsRecording)
             {
-                SetStatus(
-                    enabled ? "待开播（自动录制）" : "未录制",
-                    enabled ? "#FBBF24" : "#5B6472");
+                ApplyStatus(RecordingTargetDisplayLogic.IdleStatus(enabled));
             }
 
             _parent.ReportStatus($"「{DisplayTitle}」自动录制已{(enabled ? "开启" : "关闭")}。");
@@ -329,7 +327,7 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
         if (_recordings.IsRecording(Room.Id))
         {
             IsRecording = true;
-            SetStatus("录制中", "#F87171");
+            ApplyStatus(RecordingTargetDisplayLogic.RecordingStatus());
             if (progress is not null)
             {
                 ApplyProgressValues(progress);
@@ -339,9 +337,7 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
 
         IsRecording = false;
         ResetMetrics();
-        SetStatus(
-            AutoRecordEnabled ? "待开播（自动录制）" : "未录制",
-            AutoRecordEnabled ? "#FBBF24" : "#5B6472");
+        ApplyStatus(RecordingTargetDisplayLogic.IdleStatus(AutoRecordEnabled));
     }
 
     /// <summary>ProgressUpdated 事件（已由父 VM 切回 UI 线程）。</summary>
@@ -357,7 +353,7 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
         if (!IsRecording && _recordings.IsRecording(Room.Id))
         {
             IsRecording = true;
-            SetStatus("录制中", "#F87171");
+            ApplyStatus(RecordingTargetDisplayLogic.RecordingStatus());
         }
 
         ApplyProgressValues(progress);
@@ -372,12 +368,8 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
         }
 
         IsRecording = true;
-        SetStatus("录制中", "#F87171");
-        DurationText = RecordingUiFormat.FormatDuration(0);
-        BitrateText = "--";
-        FileSizeText = RecordingUiFormat.FormatBytes(session.FileSizeBytes);
-        DanmakuCountText = session.DanmakuCount.ToString();
-        HighlightCountText = session.HighlightCount.ToString();
+        ApplyStatus(RecordingTargetDisplayLogic.RecordingStatus());
+        ApplyMetrics(RecordingTargetDisplayLogic.FromSessionStarted(session));
     }
 
     /// <summary>SessionCompleted 事件：保留本次录制的最终指标。</summary>
@@ -389,14 +381,8 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
         }
 
         IsRecording = false;
-        DurationText = RecordingUiFormat.FormatDuration(session.DurationSeconds);
-        FileSizeText = RecordingUiFormat.FormatBytes(session.FileSizeBytes);
-        BitrateText = "--";
-        DanmakuCountText = session.DanmakuCount.ToString();
-        HighlightCountText = session.HighlightCount.ToString();
-        SetStatus(
-            RecordingUiFormat.StatusText(session.Status),
-            RecordingUiFormat.StatusBrush(session.Status));
+        ApplyMetrics(RecordingTargetDisplayLogic.FromSessionCompleted(session));
+        ApplyStatus(RecordingTargetDisplayLogic.CompletedStatus(session.Status));
     }
 
     /// <summary>修改独立保存目录后刷新行内展示（由父 VM 调用）。</summary>
@@ -419,22 +405,20 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
     public void Dispose() => _disposed = true;
 
     private void ApplyProgressValues(RecordingProgress progress)
+        => ApplyMetrics(RecordingTargetDisplayLogic.FromProgress(progress));
+
+    private void ResetMetrics() => ApplyMetrics(RecordingTargetDisplayLogic.Empty);
+
+    private void ApplyMetrics(MetricsTexts metrics)
     {
-        DurationText = RecordingUiFormat.FormatDuration(progress.Duration);
-        BitrateText = RecordingUiFormat.FormatBitrate(progress.BitrateKbps);
-        FileSizeText = RecordingUiFormat.FormatBytes(progress.FileSizeBytes);
-        DanmakuCountText = progress.DanmakuCount.ToString();
-        HighlightCountText = progress.HighlightCount.ToString();
+        DurationText = metrics.Duration;
+        BitrateText = metrics.Bitrate;
+        FileSizeText = metrics.FileSize;
+        DanmakuCountText = metrics.DanmakuCount;
+        HighlightCountText = metrics.HighlightCount;
     }
 
-    private void ResetMetrics()
-    {
-        DurationText = "--";
-        BitrateText = "--";
-        FileSizeText = "--";
-        DanmakuCountText = "0";
-        HighlightCountText = "0";
-    }
+    private void ApplyStatus((string Text, string Brush) status) => SetStatus(status.Text, status.Brush);
 
     private void SetStatus(string text, string brush)
     {
