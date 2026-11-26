@@ -20,7 +20,6 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 {
     private const int MaxSessionCount = 100;
     private const int MaxHighlightCount = 500;
-    private static readonly TimeSpan MinSelection = TimeSpan.FromSeconds(0.2);
     private static readonly TimeSpan LiveSyncInterval = TimeSpan.FromSeconds(10);
 
     private readonly IRecordingSessionRepository _sessions;
@@ -1120,7 +1119,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
                 return;
             }
 
-            if (lastOut > TimeSpan.Zero && lastOut > lastIn + MinSelection)
+            if (lastOut > TimeSpan.Zero && lastOut > lastIn + ClipSelectionLogic.MinSelection)
             {
                 UpdateSelection(lastIn, lastOut);
             }
@@ -1280,7 +1279,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
     public void PlayPause()
     {
-        if (_duration > TimeSpan.Zero && !_isPlaying && _position >= _duration - TimeSpan.FromMilliseconds(200))
+        if (ClipSelectionLogic.ShouldRestartFromStart(_duration, _position, _isPlaying))
         {
             SeekTo(TimeSpan.Zero);
         }
@@ -1292,8 +1291,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
     public void SeekRelative(bool forward, bool fine)
     {
-        var step = fine ? TimeSpan.FromSeconds(1) : TimeSpan.FromSeconds(5);
-        SeekTo(_position + (forward ? step : -step));
+        SeekTo(_position + ClipSelectionLogic.SeekOffset(forward, fine));
     }
 
     public void SeekTo(TimeSpan position)
@@ -1304,7 +1302,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
 
         // 边录边剪：播放头只允许在安全可剪范围内操作，避免读到尚未写入文件的尾部。
-        var upperBound = IsLiveSession && _safeClipDuration > TimeSpan.Zero ? _safeClipDuration : _duration;
+        var upperBound = ClipSelectionLogic.UpperBound(IsLiveSession, _safeClipDuration, _duration);
         position = ClipStudioPresentationLogic.Clamp(position, TimeSpan.Zero, upperBound);
         Position = position;
         if (_danmakuPlaybackEnabled && _cursor is not null)
@@ -1384,22 +1382,10 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
 
         // 边录边剪：入出点都钳制在安全可剪截止时间以内（最后 5 秒不参与导出）。
-        var upperBound = IsLiveSession && _safeClipDuration > TimeSpan.Zero ? _safeClipDuration : _duration;
-        inPoint = ClipStudioPresentationLogic.Clamp(inPoint, TimeSpan.Zero, upperBound);
-        outPoint = ClipStudioPresentationLogic.Clamp(outPoint, TimeSpan.Zero, upperBound);
-        if (outPoint - inPoint < MinSelection)
-        {
-            outPoint = inPoint + MinSelection;
-            if (outPoint > upperBound)
-            {
-                outPoint = upperBound;
-                inPoint = upperBound - MinSelection;
-                if (inPoint < TimeSpan.Zero)
-                {
-                    inPoint = TimeSpan.Zero;
-                }
-            }
-        }
+        var upperBound = ClipSelectionLogic.UpperBound(IsLiveSession, _safeClipDuration, _duration);
+        var bounds = ClipSelectionLogic.NormalizeSelection(inPoint, outPoint, upperBound);
+        inPoint = bounds.InPoint;
+        outPoint = bounds.OutPoint;
 
         if (_inPoint == inPoint && _outPoint == outPoint)
         {
@@ -1425,11 +1411,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             return;
         }
 
-        var inPoint = ClipStudioPresentationLogic.Clamp(_position, TimeSpan.Zero, _duration);
-        if (inPoint > _outPoint - MinSelection)
-        {
-            inPoint = _outPoint - MinSelection;
-        }
+        var inPoint = ClipSelectionLogic.InPointFromPosition(_position, _outPoint, _duration);
 
         UpdateSelection(inPoint, _outPoint);
         RaiseTimelineChanged();
@@ -1442,11 +1424,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             return;
         }
 
-        var outPoint = ClipStudioPresentationLogic.Clamp(_position, TimeSpan.Zero, _duration);
-        if (outPoint < _inPoint + MinSelection)
-        {
-            outPoint = _inPoint + MinSelection;
-        }
+        var outPoint = ClipSelectionLogic.OutPointFromPosition(_position, _inPoint, _duration);
 
         UpdateSelection(_inPoint, outPoint);
         RaiseTimelineChanged();
@@ -1466,19 +1444,8 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
 
         // 高能片段窗口（前 10s / 后 20s）由 ASR 子视图模型统一定义，跳转选区复用同一窗口。
-        var start = item.Position - ClipAsrViewModel.HighlightLead;
-        if (start < TimeSpan.Zero)
-        {
-            start = TimeSpan.Zero;
-        }
-
-        var end = item.Position + ClipAsrViewModel.HighlightTail;
-        if (end > _duration)
-        {
-            end = _duration;
-        }
-
-        UpdateSelection(start, end);
+        var window = ClipSelectionLogic.HighlightWindow(item.Position, _duration, ClipAsrViewModel.HighlightLead, ClipAsrViewModel.HighlightTail);
+        UpdateSelection(window.InPoint, window.OutPoint);
         RaiseTimelineChanged();
         SeekTo(item.Position);
     }
@@ -1522,7 +1489,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
     bool IClipAsrHost.HasVideo => HasVideo;
 
-    TimeSpan IClipAsrHost.SelectionMinimum => MinSelection;
+    TimeSpan IClipAsrHost.SelectionMinimum => ClipSelectionLogic.MinSelection;
 
     void IClipAsrHost.SeekTo(TimeSpan position) => SeekTo(position);
 
@@ -1540,7 +1507,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
     TimeSpan IClipExportHost.OutPoint => _outPoint;
 
-    TimeSpan IClipExportHost.SelectionMinimum => MinSelection;
+    TimeSpan IClipExportHost.SelectionMinimum => ClipSelectionLogic.MinSelection;
 
     bool IClipExportHost.IsLiveSession => _isLiveSession;
 
