@@ -102,7 +102,7 @@ public sealed partial class RecordingHistoryViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _host.ReportStatus($"读取录制历史失败：{ex.Message}");
+            _host.ReportStatus(RecordingCenterStatusText.HistoryRefreshFailed(ex.Message));
         }
     }
 
@@ -116,11 +116,11 @@ public sealed partial class RecordingHistoryViewModel : ObservableObject
             {
                 if ((_selectFile ?? ExplorerLauncher.TrySelectFile)(path, out var selectError))
                 {
-                    _host.ReportStatus($"已在资源管理器中定位：{item.VideoFileName}");
+                    _host.ReportStatus(RecordingCenterStatusText.HistoryFileLocated(item.VideoFileName));
                 }
                 else
                 {
-                    _host.ReportStatus($"定位录像文件失败：{selectError}。请手动在资源管理器中打开：{path}");
+                    _host.ReportStatus(RecordingCenterStatusText.HistoryFileLocateFailed(selectError, path));
                 }
 
                 return Task.CompletedTask;
@@ -131,7 +131,7 @@ public sealed partial class RecordingHistoryViewModel : ObservableObject
             {
                 if ((_openDirectory ?? ExplorerLauncher.TryOpenDirectory)(directory, out var openError))
                 {
-                    _host.ReportStatus($"录像文件不存在，已打开所在目录：{directory}");
+                    _host.ReportStatus(RecordingCenterStatusText.HistoryFileMissingOpened(directory));
                 }
                 else
                 {
@@ -141,11 +141,11 @@ public sealed partial class RecordingHistoryViewModel : ObservableObject
                 return Task.CompletedTask;
             }
 
-            _host.ReportStatus("找不到录像文件或所在目录（可能已被手动删除）。");
+            _host.ReportStatus(RecordingCenterStatusText.HistoryFileOrDirectoryMissing());
         }
         catch (Exception ex)
         {
-            _host.ReportStatus($"打开文件夹失败：{ex.Message}");
+            _host.ReportStatus(RecordingCenterStatusText.HistoryFolderOpenFailed(ex.Message));
         }
 
         return Task.CompletedTask;
@@ -161,14 +161,14 @@ public sealed partial class RecordingHistoryViewModel : ObservableObject
 
         if (item.IsActive)
         {
-            _host.ReportStatus("该录制仍在进行中，请先停止录制再删除记录。");
+            _host.ReportStatus(RecordingCenterStatusText.HistoryDeleteRejectedActive());
             return;
         }
 
         var confirmDeleteAsync = _host.ConfirmDeleteAsync;
         if (confirmDeleteAsync is null)
         {
-            _host.ReportStatus("当前界面未接入删除确认弹窗，已取消删除。");
+            _host.ReportStatus(RecordingCenterStatusText.HistoryDeleteConfirmMissing());
             return;
         }
 
@@ -179,7 +179,7 @@ public sealed partial class RecordingHistoryViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _host.ReportStatus($"删除确认失败：{ex.Message}");
+            _host.ReportStatus(RecordingCenterStatusText.HistoryDeleteConfirmFailed(ex.Message));
             return;
         }
 
@@ -191,12 +191,12 @@ public sealed partial class RecordingHistoryViewModel : ObservableObject
         try
         {
             await _host.Recordings.DeleteSessionAsync(item.SessionId).ConfigureAwait(true);
-            _host.ReportStatus($"已删除录制记录：{item.RoomTitle} · {item.StartedAtText}");
+            _host.ReportStatus(RecordingCenterStatusText.HistoryDeleted(item.RoomTitle, item.StartedAtText));
             await RefreshAsync().ConfigureAwait(true);
         }
         catch (Exception ex)
         {
-            _host.ReportStatus($"删除录制记录失败：{ex.Message}");
+            _host.ReportStatus(RecordingCenterStatusText.HistoryDeleteFailed(ex.Message));
         }
     }
 
@@ -210,20 +210,20 @@ public sealed partial class RecordingHistoryViewModel : ObservableObject
 
         if (item.IsActive)
         {
-            _host.ReportStatus("该录制仍在进行中，请先停止录制再进入剪辑台。");
+            _host.ReportStatus(RecordingCenterStatusText.ClipRejectedActive());
             return;
         }
 
         if (string.IsNullOrWhiteSpace(item.VideoFilePath) || !File.Exists(item.VideoFilePath))
         {
-            _host.ReportStatus($"录像文件不存在，无法剪辑：{item.VideoFilePath}");
+            _host.ReportStatus(RecordingCenterStatusText.ClipFileMissing(item.VideoFilePath));
             return;
         }
 
         var openClipStudioAsync = _host.OpenClipStudioAsync;
         if (openClipStudioAsync is null)
         {
-            _host.ReportStatus("当前界面未接入剪辑台。");
+            _host.ReportStatus(RecordingCenterStatusText.ClipStudioMissing());
             return;
         }
 
@@ -233,7 +233,7 @@ public sealed partial class RecordingHistoryViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _host.ReportStatus($"打开剪辑台失败：{ex.Message}");
+            _host.ReportStatus(RecordingCenterStatusText.OpenClipStudioFailed(ex.Message));
         }
     }
 
@@ -252,7 +252,7 @@ public sealed partial class RecordingHistoryViewModel : ObservableObject
             .FirstOrDefault(recording => recording.LiveRoomId == liveRoomId);
         if (live is null)
         {
-            _host.ReportStatus("该录制刚刚结束，正在刷新录制列表…");
+            _host.ReportStatus(RecordingCenterStatusText.LiveClipJustEnded());
             await _host.RefreshCenterAsync().ConfigureAwait(true);
             return;
         }
@@ -260,7 +260,7 @@ public sealed partial class RecordingHistoryViewModel : ObservableObject
         var openClipStudioAsync = _host.OpenClipStudioAsync;
         if (openClipStudioAsync is null)
         {
-            _host.ReportStatus("当前界面未接入剪辑台。");
+            _host.ReportStatus(RecordingCenterStatusText.ClipStudioMissing());
             return;
         }
 
@@ -269,7 +269,7 @@ public sealed partial class RecordingHistoryViewModel : ObservableObject
             var session = await _sessions.GetByIdAsync(live.SessionId).ConfigureAwait(true);
             if (session is null)
             {
-                _host.ReportStatus("该录制刚刚结束，正在刷新录制列表…");
+                _host.ReportStatus(RecordingCenterStatusText.LiveClipJustEnded());
                 await _host.RefreshCenterAsync().ConfigureAwait(true);
                 return;
             }
@@ -278,7 +278,7 @@ public sealed partial class RecordingHistoryViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _host.ReportStatus($"打开剪辑台失败：{ex.Message}");
+            _host.ReportStatus(RecordingCenterStatusText.OpenClipStudioFailed(ex.Message));
         }
     }
 
