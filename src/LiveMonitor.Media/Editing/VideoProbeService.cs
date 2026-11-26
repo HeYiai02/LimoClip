@@ -99,7 +99,7 @@ public sealed class VideoProbeService
         var stderr = await stderrTask.ConfigureAwait(false);
         _ = await stdoutTask.ConfigureAwait(false);
 
-        if (!TryParseProbeOutput(stderr, out var metadata))
+        if (!TryParseProbeOutput(stderr, out var metadata) || metadata is null)
         {
             throw new InvalidOperationException(
                 $"无法从 ffmpeg 输出解析视频信息：{Path.GetFileName(videoPath)}{Environment.NewLine}{Truncate(stderr)}");

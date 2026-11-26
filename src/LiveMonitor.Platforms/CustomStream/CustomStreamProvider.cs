@@ -171,7 +171,7 @@ public sealed class CustomStreamProvider : IPlatformProvider
             RequiredHeaders: headers);
 
         var status = new RoomStatus(
-            RoomId: roomId,
+            RoomId: trimmed,
             Platform: PlatformType.CustomStream,
             Title: displayTitle,
             AnchorName: displayTitle,

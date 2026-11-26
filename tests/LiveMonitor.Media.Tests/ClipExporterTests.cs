@@ -91,8 +91,8 @@ public sealed class ClipExporterTests : IDisposable
             progress: progress);
 
         Assert.Equal(2, outputs.Count);
-        Assert.True(outputs[0].EndsWith("_clean.mp4", StringComparison.Ordinal));
-        Assert.True(outputs[1].EndsWith("_danmaku.mp4", StringComparison.Ordinal));
+        Assert.EndsWith("_clean.mp4", outputs[0], StringComparison.Ordinal);
+        Assert.EndsWith("_danmaku.mp4", outputs[1], StringComparison.Ordinal);
         foreach (var output in outputs)
         {
             Assert.True(File.Exists(output));

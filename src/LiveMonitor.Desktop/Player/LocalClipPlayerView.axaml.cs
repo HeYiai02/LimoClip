@@ -87,7 +87,7 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
 
     public ClipPlayerState State => _state;
 
-    public bool IsLoaded => _filePath is not null && ClipPlaybackStateLogic.IsLoadedState(_state);
+    public new bool IsLoaded => _filePath is not null && ClipPlaybackStateLogic.IsLoadedState(_state);
 
     public bool IsPlaying => _state == ClipPlayerState.Playing;
 

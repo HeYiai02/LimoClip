@@ -682,6 +682,9 @@ public sealed class FreeformWorkspaceCanvas : Panel
         return false;
     }
 
+    // TODO(V0.7.5): Avalonia 11.3 已把 DragEventArgs.Data / DataObject / DoDragDrop 标记过时，
+    // 新 API（DataTransfer / DoDragDropAsync）需要真机拖放冒烟验证后再单独迁移，这里先压制过时警告。
+#pragma warning disable CS0618
     private void OnDropDragOver(object? sender, DragEventArgs e)
     {
         if (!e.Data.Contains(RoomDragFormat))
@@ -717,6 +720,7 @@ public sealed class FreeformWorkspaceCanvas : Panel
         e.Handled = true;
         RoomDropped?.Invoke(this, new RoomDropEventArgs(roomId, ComputeDropRect(e.GetPosition(this))));
     }
+#pragma warning restore CS0618
 
     private NormalizedRect ComputeDropRect(Point position) =>
         FreeformInteractionLogic.ComputeDropRect(position.X, position.Y, Bounds.Width, Bounds.Height);

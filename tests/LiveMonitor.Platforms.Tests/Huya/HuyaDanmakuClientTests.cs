@@ -125,7 +125,7 @@ public sealed class HuyaDanmakuClientTests
             await Task.Delay(20);
         }
 
-        Assert.True(false, "等待条件超时。");
+        Assert.Fail("等待条件超时。");
     }
 
     /// <summary>可注入帧的假 WebSocket：ConnectAsync 由外部完成，SendAsync 记录已发送字节。</summary>
