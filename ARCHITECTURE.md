@@ -30,7 +30,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | WebView 登录 | WebView2（临时用户目录，登录后采集 Cookie） |
 | 平台解析 | 各家 HTTP API + Jint（斗鱼签名、抖音 sign.js）；yt-dlp 作为 YouTube/Twitch 兜底 |
 | 插件签名 | Ed25519（BouncyCastle）+ SHA256 清单校验 |
-| 测试 | xUnit（6 个测试工程，当前共 1711 个用例） |
+| 测试 | xUnit（6 个测试工程，当前共 1764 个用例） |
 
 ### 平台支持矩阵
 
@@ -434,7 +434,7 @@ Program.Main
 - `LiveWaveformDeltaExtractor`：按「上次已分析到的秒数 → 安全上界」向 ffmpeg 追加一次增量解码（`-ss/-t` + 4kHz 单声道 s16le 输出到 stdout），只产出新增区间的峰值桶；无临时文件；取消时杀整个进程树；分片尾部数据不完整或 `-ss` 落在关键帧之后时按「本次无数据」降级，下次继续。
 - `DanmakuJsonlReader.ReadIncrementalAsync(path, fromByteOffset)`：`FileShare.ReadWrite` 打开正在写的 JSONL，按字节偏移增量读取；只在遇到完整换行时消费并推进偏移（半行留待下次），文件被截断/重建（offset > 长度）时从头重读；单次读取上限 16MB。
 - `ClipStudioViewModel` live 模式：选中录制中场次后进入「本地预览 + 实时刷新」——10s 定时 `TryGetLiveRecording` 同步进度；安全可剪上界始终钳在「已完成时长 − 安全余量」（分片尾部 cluster 可能尚未写完）；增量波形按 0.5s 桶追加、增量弹幕按偏移追加；`F5`/「同步最新进度」立即刷新并重载播放器；录制结束（`SessionCompleted`）自动切换为完整 MKV（保留当前选区与播放位置）。
-- `LocalClipPlayerView`：live 模式下对 mpv 设 `force-seekable=yes`，`ReloadAtPositionAsync` 以 `loadfile replace` + 精确 seek 重载已写文件；位置推进钳到安全上界（`safe − 100ms`），避免 seek 到尚未 flush 的尾部。位置推进/完成收口/安全上界的纯时间逻辑在 `Player/ClipPlaybackPositionLogic`（边录边剪 EOF 不当作完成、keep-open 末尾 80ms 主动收口、1ms 变化阈值），由 `Player/ClipPlaybackPositionLogicTests` 覆盖（V0.7.5）。
+- `LocalClipPlayerView`：live 模式下对 mpv 设 `force-seekable=yes`，`ReloadAtPositionAsync` 以 `loadfile replace` + 精确 seek 重载已写文件；位置推进钳到安全上界（`safe − 100ms`），避免 seek 到尚未 flush 的尾部。位置推进/完成收口/安全上界的纯时间逻辑在 `Player/ClipPlaybackPositionLogic`（边录边剪 EOF 不当作完成、keep-open 末尾 80ms 主动收口、1ms 变化阈值），由 `Player/ClipPlaybackPositionLogicTests` 覆盖（V0.7.5）。播放状态机与守卫规则（已加载态判定、结束态重播/暂停/收尾守卫、`MpvEndFileReason`→动作分类、完成位置、倍速钳制、缺失文件与播放失败文案、解码准备提示）已抽到 `Player/ClipPlaybackStateLogic`，由 `Player/ClipPlaybackStateLogicTests` 覆盖；`LocalClipPlayerView` 只保留 mpv 句柄与事件换算（V0.7.5）。
 - `ClipTimelineControl`：自绘双波形 + 选区/播放头/高能标记的时间轴控件。布局与命中几何（缩放上下限、可见时长、视口起点钳制、时间↔像素换算、手柄/播放头/高能命中）在 `Controls/ClipTimelineGeometry`（`ClipTimelineGeometryTests` 覆盖）；缩放锚点与视口换算、缩放到选区、平移拖拽、入/出点手柄钳制、选区/播放头/视口状态收敛、波形包络采样、刻度步长与时间文本在 `Controls/ClipTimelineViewLogic`（`ClipTimelineViewLogicTests` 覆盖）；控件本身只保留属性、绘制与指针事件（V0.7.5）。
 
 ### 9.3 云端 ASR（Asr/）
@@ -590,7 +590,7 @@ dotnet build LiveMonitor.sln --no-restore
 - 工程目标框架：`Data`、`Media`、`Desktop` 为 `net8.0-windows`，其余类库为 `net8.0`；测试工程对应同目标框架（`Data`/`Media`/`Desktop` 测试为 `net8.0-windows`，`Platforms`/`Danmaku` 测试为 `net8.0`）。
 - 需要 `tools/` 下的 ffmpeg/mpv 才能运行应用（`scripts/fetch-tools.ps1` 自动下载并校验）。
 
-### 13.2 测试（当前 1711 个用例）
+### 13.2 测试（当前 1764 个用例）
 
 | 测试工程 | 覆盖范围 | 用例数 |
 | --- | --- | --- |
@@ -598,9 +598,9 @@ dotnet build LiveMonitor.sln --no-restore
 | `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退、自定义清流 Provider、斗鱼流接缝、抖音帧接缝与断线通知、弹幕重连退避 | 505 |
 | `tests/LiveMonitor.Danmaku.Tests` | 过滤器、高能检测、会话管理、重连/释放竞态 | 100 |
 | `tests/LiveMonitor.Media.Tests` | 录制状态机与并发收尾、轮询器与会话工作器、分段合并、剪辑导出、波形、增量波形/增量弹幕读取、FFmpeg 参数协议分支 | 232 |
-| `tests/LiveMonitor.Desktop.Tests` | ViewModel（主窗口拆分/房间目录/布局方案/状态栏/高亮/录制中心/剪辑台与 ASR/导出子视图模型/设置页 ASR/组件更新/通用与弹幕）、Dock/自由画布布局、时间轴几何（`ClipTimelineGeometry`）与缩放视口/拖拽钳制（`ClipTimelineViewLogic`）、播放器管理器与 `IWorkspacePlayer`、回放 seek 探测/防抖逻辑（`ReplaySeekLogic`）、剪辑预览位置推进与安全上界（`ClipPlaybackPositionLogic`）、剪辑台展示层纯逻辑（`ClipStudioPresentationLogic`）、音量表解析与平滑（`AudioMeterLogic`）、mpv 流选项映射与请求头清理（`StreamOptionMapper`）、AppServices 释放、登录配置、播放状态文本、录制目标排序、自由布局命中与宿主切换、自由画布交互几何（`FreeformInteractionLogic`）、录制中心历史子视图模型（`RecordingHistoryViewModel`）、弹幕渲染层纯逻辑（`DanmakuOverlayLogic`） | 836 |
+| `tests/LiveMonitor.Desktop.Tests` | ViewModel（主窗口拆分/房间目录/布局方案/状态栏/高亮/录制中心/剪辑台与 ASR/导出子视图模型/设置页 ASR/组件更新/通用与弹幕）、Dock/自由画布布局、时间轴几何（`ClipTimelineGeometry`）与缩放视口/拖拽钳制（`ClipTimelineViewLogic`）、播放器管理器与 `IWorkspacePlayer`、回放 seek 探测/防抖逻辑（`ReplaySeekLogic`）、剪辑预览位置推进与安全上界（`ClipPlaybackPositionLogic`）、剪辑预览播放状态机与守卫（`ClipPlaybackStateLogic`）、剪辑台展示层纯逻辑（`ClipStudioPresentationLogic`）、音量表解析与平滑（`AudioMeterLogic`）、mpv 流选项映射与请求头清理（`StreamOptionMapper`）、AppServices 释放、登录配置、播放状态文本、录制目标排序、自由布局命中与宿主切换、自由画布交互几何（`FreeformInteractionLogic`）、录制中心历史子视图模型（`RecordingHistoryViewModel`）、弹幕渲染层纯逻辑（`DanmakuOverlayLogic`） | 889 |
 
-合计 **1711** 个用例，五套全部通过（0 失败 0 跳过）。
+合计 **1764** 个用例，五套全部通过（0 失败 0 跳过）。
 
 运行方式（使用已构建的测试 dll，避免重复构建）：
 
