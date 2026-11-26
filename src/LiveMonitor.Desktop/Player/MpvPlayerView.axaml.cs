@@ -777,14 +777,9 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
     {
         try
         {
-            var root = Path.Combine(
+            var root = PlayerPathResolver.ResolveAudioMeterRoot(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "LiveMonitor",
-                "audio-meter");
-            if (string.IsNullOrWhiteSpace(root) || root.StartsWith("LiveMonitor", StringComparison.Ordinal))
-            {
-                root = Path.Combine(AppContext.BaseDirectory, "audio-meter");
-            }
+                AppContext.BaseDirectory);
 
             try
             {
@@ -930,21 +925,11 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
 
     private static string? ResolveCaFile()
     {
-        var configured = Environment.GetEnvironmentVariable("LIVEMONITOR_CA_FILE");
-        if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
-        {
-            return configured;
-        }
-
         // 发布时把 CA bundle 放成 exe 同目录的 cacert.crt 即可，不需要改环境变量。
-        var bundledCrt = Path.Combine(AppContext.BaseDirectory, "cacert.crt");
-        if (File.Exists(bundledCrt))
-        {
-            return bundledCrt;
-        }
-
-        var bundledPem = Path.Combine(AppContext.BaseDirectory, "cacert.pem");
-        return File.Exists(bundledPem) ? bundledPem : null;
+        return PlayerPathResolver.ResolveCaFile(
+            Environment.GetEnvironmentVariable("LIVEMONITOR_CA_FILE"),
+            AppContext.BaseDirectory,
+            File.Exists);
     }
 
     private static void ApplyStreamOptions(MpvContext context, StreamQuality quality)
