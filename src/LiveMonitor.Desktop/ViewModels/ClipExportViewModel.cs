@@ -172,7 +172,7 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
     /// <summary>加载新视频后调用：按视频路径与选区强制生成默认文件名（原逻辑会覆盖用户手改值）。</summary>
     public void SetGeneratedOutputFileName(string videoPath, TimeSpan start, TimeSpan end)
     {
-        SetAutoOutputFileName(BuildDefaultOutputName(videoPath, start, end));
+        SetAutoOutputFileName(ClipExportNamingLogic.BuildDefaultOutputName(videoPath, start, end));
     }
 
     /// <summary>选区变化后调用：仅在用户未手改文件名时按选区刷新默认文件名。</summary>
@@ -183,7 +183,7 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
             return;
         }
 
-        SetAutoOutputFileName(BuildDefaultOutputName(videoPath, start, end));
+        SetAutoOutputFileName(ClipExportNamingLogic.BuildDefaultOutputName(videoPath, start, end));
     }
 
     /// <summary>宿主编码器文案变化后调用：刷新「编码器」只读绑定的显示。</summary>
@@ -231,7 +231,7 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
             videoPath,
             danmakuItems is { Count: > 0 } ? _host.DanmakuPath : null,
             _outputDirectory,
-            SanitizeFileName(_outputFileName),
+            ClipExportNamingLogic.SanitizeFileName(_outputFileName, DateTimeOffset.Now),
             _host.InPoint,
             _host.OutPoint,
             _exportMode);
@@ -336,32 +336,6 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
         }
 
         return RecordingManager.DefaultDirectory;
-    }
-
-    private static string BuildDefaultOutputName(string videoPath, TimeSpan start, TimeSpan end)
-    {
-        var baseName = Path.GetFileNameWithoutExtension(videoPath);
-        var startText = FormatClock(start);
-        var endText = FormatClock(end);
-        var name = $"{baseName}_{startText}-{endText}";
-        return name.Length <= 90 ? name : name[..90];
-    }
-
-    private static string FormatClock(TimeSpan time) => time.TotalHours >= 1
-        ? time.ToString(@"h\.mm\.ss")
-        : time.ToString(@"mm\.ss");
-
-    private static string SanitizeFileName(string fileName)
-    {
-        var invalidChars = Path.GetInvalidFileNameChars();
-        var builder = new System.Text.StringBuilder(fileName.Length);
-        foreach (var ch in fileName.Trim())
-        {
-            builder.Append(invalidChars.Contains(ch) ? '_' : ch);
-        }
-
-        var sanitized = builder.ToString().Trim();
-        return sanitized.Length == 0 ? $"clip_{DateTime.Now:yyyyMMdd_HHmmss}" : sanitized;
     }
 
     private void SetExportMode(ClipExportMode mode, bool isChecked)
