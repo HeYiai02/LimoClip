@@ -37,6 +37,36 @@ internal static class RoomStatusText
     /// <summary>直播流被对端关闭时的错误信息。</summary>
     public const string StreamInterrupted = "直播流已中断";
 
+    /// <summary>播放器已挂载但还没有绑定房间。</summary>
+    public const string WaitingForRoom = "等待加入房间";
+
+    /// <summary>暂停按钮提示（当前正在播放，点击暂停）。</summary>
+    public const string PauseTip = "暂停播放";
+
+    /// <summary>暂停按钮提示（当前已暂停，点击继续）。</summary>
+    public const string ResumeTip = "继续播放";
+
+    /// <summary>开始拉流、建立播放通道。</summary>
+    public const string OpeningChannel = "正在建立播放通道…";
+
+    /// <summary>起播等待超时。</summary>
+    public const string StartTimeout = "mpv 起播超时";
+
+    /// <summary>用户主动取消加载。</summary>
+    public const string Canceled = "已取消";
+
+    /// <summary>用户主动停止播放。</summary>
+    public const string Stopped = "已停止";
+
+    /// <summary>重连/重载时先显示的连接中提示。</summary>
+    public const string Connecting = "正在连接…";
+
+    /// <summary>mpv 开始读取文件后的缓冲提示。</summary>
+    public const string Buffering = "正在缓冲…";
+
+    /// <summary>mpv 拉流失败（附带 mpv 错误码）。</summary>
+    public static string StreamStartFailed(int errorCode) => $"mpv 拉流失败 (code {errorCode})";
+
     /// <summary>主播未开播时按轮询间隔提示下次重试时间。</summary>
     public static string OfflineDetail(TimeSpan pollDelay)
         => $"主播未开播，{DescribeSeconds(pollDelay)} 秒后重试";

@@ -783,21 +783,8 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
         LoadingBar.IsVisible = state == ClipPlayerState.Loading;
         StateOverlay.IsHitTestVisible = false;
 
-        StateTitle.Text = state switch
-        {
-            ClipPlayerState.Empty => "本地剪辑预览",
-            ClipPlayerState.Loading => "加载中",
-            ClipPlayerState.Failed => "播放失败",
-            _ => string.Empty,
-        };
-
-        StateDetail.Text = detail ?? state switch
-        {
-            ClipPlayerState.Empty => "从左侧列表选择录像，或打开本地文件",
-            ClipPlayerState.Loading => "正在读取视频…",
-            ClipPlayerState.Failed => "请检查文件是否完整",
-            _ => string.Empty,
-        };
+        StateTitle.Text = ClipPreviewStatusText.Title(state);
+        StateDetail.Text = detail ?? ClipPreviewStatusText.Detail(state);
     }
 
     private void ThrowIfDisposed()
