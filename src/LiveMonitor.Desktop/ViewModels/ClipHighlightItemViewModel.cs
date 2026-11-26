@@ -10,8 +10,6 @@ namespace LiveMonitor.Desktop.ViewModels;
 /// </summary>
 public sealed partial class ClipHighlightItemViewModel : ObservableObject
 {
-    private const int SummaryMaxLength = 60;
-
     public ClipHighlightItemViewModel(HighlightEvent highlightEvent, TimeSpan position)
     {
         HighlightEvent = highlightEvent ?? throw new ArgumentNullException(nameof(highlightEvent));
@@ -23,16 +21,16 @@ public sealed partial class ClipHighlightItemViewModel : ObservableObject
     /// <summary>相对录像起点的偏移（已按会话起始时间回算并夹到 [0, duration]）。</summary>
     public TimeSpan Position { get; }
 
-    public string TimeText => ClipExportTaskViewModel.FormatTime(Position);
+    public string TimeText => ClipListDisplayLogic.FormatTime(Position);
 
-    public string RateText => $"{HighlightEvent.CurrentRatePerSec:0.0}/s";
+    public string RateText => ClipListDisplayLogic.FormatRate(HighlightEvent.CurrentRatePerSec);
 
-    public string BaselineText => $"基线 {HighlightEvent.BaselineRatePerSec:0.0}/s";
+    public string BaselineText => ClipListDisplayLogic.FormatBaselineRate(HighlightEvent.BaselineRatePerSec);
 
     public string Reason => HighlightEvent.TriggerReason;
 
     public string ToolTipText =>
-        $"{TimeText} · {RateText}（{BaselineText}）{Environment.NewLine}{Reason}";
+        ClipListDisplayLogic.BuildHighlightToolTip(TimeText, RateText, BaselineText, Reason);
 
     [ObservableProperty]
     private bool _isSelected;
@@ -62,32 +60,13 @@ public sealed partial class ClipHighlightItemViewModel : ObservableObject
 
     public bool HasAsrError => !string.IsNullOrEmpty(AsrError);
 
-    public string TranscribeButtonText => IsTranscribing ? "转写中…" : "转写";
+    public string TranscribeButtonText => ClipListDisplayLogic.TranscribeButtonText(IsTranscribing);
 
     /// <summary>卡片摘要：完整文本 Trim 后截断到约 60 字符，空文本回退为占位提示。</summary>
-    public string AsrSummary
-    {
-        get
-        {
-            var text = AsrResult?.FullText?.Trim();
-            if (string.IsNullOrEmpty(text))
-            {
-                return "（未识别到文本）";
-            }
-
-            return text.Length <= SummaryMaxLength ? text : text[..SummaryMaxLength] + "…";
-        }
-    }
+    public string AsrSummary => ClipListDisplayLogic.BuildAsrSummary(AsrResult?.FullText);
 
     /// <summary>摘要按钮的悬浮提示：展示完整识别文本（不截断）。</summary>
-    public string AsrSummaryToolTip
-    {
-        get
-        {
-            var text = AsrResult?.FullText?.Trim();
-            return string.IsNullOrEmpty(text) ? "（未识别到文本）" : text;
-        }
-    }
+    public string AsrSummaryToolTip => ClipListDisplayLogic.BuildAsrSummaryToolTip(AsrResult?.FullText);
 
     partial void OnIsTranscribingChanged(bool value) => OnPropertyChanged(nameof(TranscribeButtonText));
 

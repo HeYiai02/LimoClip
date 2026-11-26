@@ -19,19 +19,21 @@ public sealed class ClipSessionOption
 
     public bool IsLive => LiveInfo is not null;
 
-    public string DisplayText => IsLive
-        ? $"🔴 录制中 · {RoomTitle} (已录 {RecordingUiFormat.FormatDuration(LiveInfo!.RecordedDuration.TotalSeconds)})"
-        : $"{StartedText} · {RoomTitle}";
+    public string DisplayText => ClipListDisplayLogic.BuildSessionDisplayText(
+        IsLive,
+        StartedText,
+        RoomTitle,
+        IsLive ? LiveInfo!.RecordedDuration.TotalSeconds : Session.DurationSeconds);
 
-    public string DetailText => IsLive
-        ? $"已录 {RecordingUiFormat.FormatDuration(LiveInfo!.RecordedDuration.TotalSeconds)} · 弹幕 {LiveInfo.DanmakuCount} 条 · 高能 {LiveInfo.HighlightCount} 个"
-        : $"{RecordingUiFormat.FormatDuration(Session.DurationSeconds)} · 弹幕 {Session.DanmakuCount} 条 · 高能 {Session.HighlightCount} 个";
+    public string DetailText => ClipListDisplayLogic.BuildSessionDetailText(
+        IsLive,
+        IsLive ? LiveInfo!.RecordedDuration.TotalSeconds : Session.DurationSeconds,
+        IsLive ? LiveInfo!.DanmakuCount : Session.DanmakuCount,
+        IsLive ? LiveInfo!.HighlightCount : Session.HighlightCount);
 
     public string StartedText => RecordingUiFormat.FormatStartedAt(Session.StartedAt);
 
-    public string RoomTitle => string.IsNullOrWhiteSpace(Session.RoomDisplayName)
-        ? $"房间 {Session.RoomId}"
-        : Session.RoomDisplayName;
+    public string RoomTitle => ClipListDisplayLogic.RoomTitle(Session.RoomDisplayName, Session.RoomId);
 
     public bool HasVideo => IsLive
         ? !string.IsNullOrWhiteSpace(LiveInfo!.PartFilePath) && File.Exists(LiveInfo.PartFilePath)
