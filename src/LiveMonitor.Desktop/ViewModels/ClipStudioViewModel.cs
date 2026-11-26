@@ -191,9 +191,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
     public bool HasDanmaku => _danmakuItems is { Count: > 0 };
 
-    public string DanmakuInfoText => _danmakuItems is null
-        ? (IsLiveSession ? "弹幕录制中…" : "无伴随弹幕文件")
-        : $"弹幕 {_danmakuItems.Count} 条" + (IsLiveSession ? " · 录制中" : string.Empty);
+    public string DanmakuInfoText => ClipStudioPresentationLogic.BuildDanmakuInfoText(_danmakuItems, IsLiveSession);
 
     /// <summary>已加载的弹幕条数（边录边剪同步后会持续增长）。</summary>
     public int DanmakuItemCount => _danmakuItems?.Count ?? 0;
@@ -246,17 +244,15 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
     public TimeSpan OutPoint => _outPoint;
 
-    public string DurationText => ClipExportTaskViewModel.FormatTime(_duration);
+    public string DurationText => TimeCodeFormat.Clock(_duration);
 
-    public string PositionText => $"{ClipExportTaskViewModel.FormatTime(_position)} / {DurationText}";
+    public string PositionText => ClipStudioPresentationLogic.BuildPositionText(_position, _duration);
 
-    public string InText => ClipExportTaskViewModel.FormatTime(_inPoint);
+    public string InText => TimeCodeFormat.Clock(_inPoint);
 
-    public string OutText => ClipExportTaskViewModel.FormatTime(_outPoint);
+    public string OutText => TimeCodeFormat.Clock(_outPoint);
 
-    public string SelectionText => _duration > TimeSpan.Zero
-        ? ClipExportTaskViewModel.FormatTime(_outPoint - _inPoint)
-        : "00:00";
+    public string SelectionText => ClipStudioPresentationLogic.BuildSelectionText(_duration, _inPoint, _outPoint);
 
     public WaveformData? Waveform
     {
@@ -290,7 +286,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
     }
 
-    public string PlayPauseGlyph => _isPlaying ? "⏸" : "▶";
+    public string PlayPauseGlyph => ClipStudioPresentationLogic.PlayPauseGlyph(_isPlaying);
 
     public double Speed
     {
@@ -724,7 +720,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             _currentDanmakuPath = danmakuPath;
             Asr.Reset();
             ResetHighlightAsrState();
-            VideoTitle = $"{session.RoomDisplayName} · 录制中";
+            VideoTitle = ClipStudioPresentationLogic.BuildLiveVideoTitle(session);
 
             // 录制中的分片时长通常是 N/A：探测失败是预期路径，用实时进度兜底。
             VideoMetadata? metadata = null;

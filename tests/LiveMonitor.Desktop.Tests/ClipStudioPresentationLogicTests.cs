@@ -419,4 +419,48 @@ public sealed class ClipStudioPresentationLogicTests
         {
             RecordingOffsetMs = offsetMs
         };
+
+    [Fact]
+    public void BuildPositionText_formats_position_and_duration()
+        => Assert.Equal("00:05 / 01:05", ClipStudioPresentationLogic.BuildPositionText(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(65)));
+
+    [Fact]
+    public void BuildSelectionText_returns_zero_when_no_video()
+        => Assert.Equal("00:00", ClipStudioPresentationLogic.BuildSelectionText(TimeSpan.Zero, TimeSpan.Zero, TimeSpan.FromSeconds(5)));
+
+    [Fact]
+    public void BuildSelectionText_formats_selection_duration()
+        => Assert.Equal("01:00", ClipStudioPresentationLogic.BuildSelectionText(TimeSpan.FromMinutes(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(65)));
+
+    [Fact]
+    public void BuildDanmakuInfoText_handles_missing_file()
+    {
+        Assert.Equal("无伴随弹幕文件", ClipStudioPresentationLogic.BuildDanmakuInfoText(null, isLive: false));
+        Assert.Equal("弹幕录制中…", ClipStudioPresentationLogic.BuildDanmakuInfoText(null, isLive: true));
+    }
+
+    [Fact]
+    public void BuildDanmakuInfoText_counts_items_and_marks_live()
+    {
+        var items = new List<RecordedDanmakuItem>
+        {
+            new(100, "a", "x", false, false),
+            new(200, "b", "y", false, false),
+        };
+        Assert.Equal("弹幕 2 条", ClipStudioPresentationLogic.BuildDanmakuInfoText(items, isLive: false));
+        Assert.Equal("弹幕 2 条 · 录制中", ClipStudioPresentationLogic.BuildDanmakuInfoText(items, isLive: true));
+    }
+
+    [Fact]
+    public void BuildLiveVideoTitle_combines_room_and_state()
+    {
+        var session = new RecordingSession { RoomDisplayName = "房间A" };
+        Assert.Equal("房间A · 录制中", ClipStudioPresentationLogic.BuildLiveVideoTitle(session));
+    }
+
+    [Theory]
+    [InlineData(true, "⏸")]
+    [InlineData(false, "▶")]
+    public void PlayPauseGlyph_maps_state(bool playing, string expected)
+        => Assert.Equal(expected, ClipStudioPresentationLogic.PlayPauseGlyph(playing));
 }
