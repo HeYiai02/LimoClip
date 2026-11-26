@@ -131,15 +131,5 @@ public sealed partial class ClipExportTaskViewModel : ObservableObject
     }
 
     /// <summary>秒级时间码；超过 1 小时用 h:mm:ss，否则 mm:ss。</summary>
-    public static string FormatTime(TimeSpan time)
-    {
-        if (time < TimeSpan.Zero)
-        {
-            time = TimeSpan.Zero;
-        }
-
-        return time.TotalHours >= 1
-            ? time.ToString(@"h\:mm\:ss")
-            : time.ToString(@"mm\:ss");
-    }
+    public static string FormatTime(TimeSpan time) => ClipListDisplayLogic.FormatTime(time);
 }
