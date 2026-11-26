@@ -22,8 +22,6 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     private const int MaxHighlightCount = 500;
     private static readonly TimeSpan MinSelection = TimeSpan.FromSeconds(0.2);
     private static readonly TimeSpan LiveSyncInterval = TimeSpan.FromSeconds(10);
-    private const int LivePeaksPerSecond = 2;
-    private const double LivePeakBucketSeconds = 0.5;
 
     private readonly IRecordingSessionRepository _sessions;
     private readonly IHighlightEventRepository _highlights;
@@ -909,24 +907,22 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
             // 提取终点对齐到 0.5s 桶网格：每段返回的峰值数严格等于时间轴桶数，
             // 直接首尾拼接才不会出现亚 0.5s 的相位漂移。
-            var toBucket = (int)Math.Floor(SafeClipDuration.TotalSeconds * LivePeaksPerSecond);
-            var to = TimeSpan.FromSeconds(toBucket / (double)LivePeaksPerSecond);
-            var from = _livePeaksExtractedUntil;
-            if (to <= from)
+            if (!LiveWaveformLogic.TryComputeExtractionWindow(SafeClipDuration, _livePeaksExtractedUntil, out var window))
             {
                 return;
             }
 
+            var from = _livePeaksExtractedUntil;
+            var to = window.To;
             var peaks = await _liveWaveforms
-                .ExtractPeaksAsync(_livePartPath, from, to, LivePeaksPerSecond, ct)
+                .ExtractPeaksAsync(_livePartPath, from, to, LiveWaveformLogic.PeaksPerSecond, ct)
                 .ConfigureAwait(true);
             if (ct.IsCancellationRequested || _disposed || !IsLiveSession)
             {
                 return;
             }
 
-            var expectedCount = (int)Math.Round((to - from).TotalSeconds * LivePeaksPerSecond);
-            AppendLivePeaks(peaks, expectedCount);
+            AppendLivePeaks(peaks, window.ExpectedCount);
             _livePeaksExtractedUntil = to;
             RebuildLiveWaveformData();
             RaiseTimelineChanged();
@@ -962,23 +958,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
     private void AppendLivePeaks(IReadOnlyList<float> peaks, int expectedCount)
     {
-        if (expectedCount <= 0)
-        {
-            return;
-        }
-
-        var existing = _livePeaks ?? Array.Empty<float>();
-        var merged = new float[existing.Length + expectedCount];
-        Array.Copy(existing, merged, existing.Length);
-
-        // 每段长度严格对齐到 0.5s 桶数：多出截断、不足补 0，保证时间轴与音频相位一致。
-        var copyCount = Math.Min(peaks.Count, expectedCount);
-        for (var i = 0; i < copyCount; i++)
-        {
-            merged[existing.Length + i] = peaks[i];
-        }
-
-        _livePeaks = merged;
+        _livePeaks = LiveWaveformLogic.AppendPeaks(_livePeaks, peaks, expectedCount);
     }
 
     /// <summary>按实时已录时长重建固定 0.5s 分辨率的波形数据（音频峰值 + 弹幕密度）。</summary>
@@ -989,43 +969,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             return;
         }
 
-        var bucketCount = Math.Max(1, (int)Math.Ceiling(LiveRecordedDuration.TotalSeconds / LivePeakBucketSeconds));
-        var peaks = new float[bucketCount];
-        if (_livePeaks is { Length: > 0 } source)
-        {
-            Array.Copy(source, peaks, Math.Min(source.Length, bucketCount));
-        }
-
-        var density = new float[bucketCount];
-        var maxPerBucket = 0;
-        if (_danmakuItems is { Count: > 0 } items)
-        {
-            var counts = new int[bucketCount];
-            foreach (var item in items)
-            {
-                var index = (int)(item.OffsetMs / (LivePeakBucketSeconds * 1000));
-                if (index < 0 || index >= bucketCount)
-                {
-                    continue;
-                }
-
-                counts[index]++;
-                if (counts[index] > maxPerBucket)
-                {
-                    maxPerBucket = counts[index];
-                }
-            }
-
-            if (maxPerBucket > 0)
-            {
-                for (var i = 0; i < bucketCount; i++)
-                {
-                    density[i] = counts[i] / (float)maxPerBucket;
-                }
-            }
-        }
-
-        Waveform = new WaveformData(LiveRecordedDuration, peaks, density, maxPerBucket);
+        Waveform = LiveWaveformLogic.Build(LiveRecordedDuration, _livePeaks, _danmakuItems);
     }
 
     /// <summary>手动同步（按钮 / F5）：进度、弹幕、高能、波形全量增量刷新，并重载播放器尾部数据。</summary>
