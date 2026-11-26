@@ -207,3 +207,43 @@ public sealed class MainWindowStatusTextTests
     public void RecordingStopped_uses_alias()
         => Assert.Equal("已停止 别名 的录制。", MainWindowStatusText.RecordingStopped("别名"));
 }
+
+public sealed class MainWindowHostStatusTextTests
+{
+    [Fact]
+    public void Picker_titles_and_file_type_keep_original_copy()
+    {
+        Assert.Equal("选择录像保存目录", MainWindowStatusText.PickRecordingDirectoryTitle);
+        Assert.Equal("选择本地视频文件", MainWindowStatusText.PickClipVideoFileTitle);
+        Assert.Equal("选择切片导出目录", MainWindowStatusText.PickClipExportDirectoryTitle);
+        Assert.Equal("视频文件 (mkv / mp4)", MainWindowStatusText.VideoFileTypeName);
+        Assert.Equal("启动失败", MainWindowStatusText.StartupFailedTitle);
+        Assert.Equal("方案名称", MainWindowStatusText.ProfileNamePromptLabel);
+        Assert.Equal("新方案", MainWindowStatusText.NewProfileName);
+    }
+
+    [Fact]
+    public void Fullscreen_and_settings_messages_keep_original_copy()
+    {
+        Assert.Equal("已进入桌面全屏：F11 或 Esc 退出。", MainWindowStatusText.DesktopFullscreenEntered);
+        Assert.Equal("已退出桌面全屏。", MainWindowStatusText.DesktopFullscreenExited);
+        Assert.Equal("设置已应用。", MainWindowStatusText.SettingsApplied);
+    }
+
+    [Fact]
+    public void FailureMessages_prefix_reason()
+    {
+        Assert.Equal("切换主副屏布局失败：超时", MainWindowStatusText.HeroLayoutSwitchFailed("超时"));
+        Assert.Equal("拖入工作区失败：越界", MainWindowStatusText.DropIntoWorkspaceFailed("越界"));
+        Assert.Equal("切换自由布局失败：异常", MainWindowStatusText.FreeformLayoutToggleFailed("异常"));
+        Assert.Equal("修改失败：重名", MainWindowStatusText.RoomUpdateFailed("重名"));
+        Assert.Equal("删除失败：占用中", MainWindowStatusText.RoomDeleteFailed("占用中"));
+        Assert.Equal("保存失败：只读", MainWindowStatusText.LayoutSaveFailed("只读"));
+        Assert.Equal("另存失败：无权限", MainWindowStatusText.LayoutSaveAsFailed("无权限"));
+        Assert.Equal("弹幕设置热更新失败：管道断开", MainWindowStatusText.DanmakuReloadFailed("管道断开"));
+    }
+
+    [Fact]
+    public void PlacementApplied_quotes_display_title()
+        => Assert.Equal("已把「房间A」放到指定位置", MainWindowStatusText.PlacementApplied("房间A"));
+}

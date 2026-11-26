@@ -226,7 +226,7 @@ public partial class MainWindow : Window
             {
                 var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
                 {
-                    Title = "选择录像保存目录",
+                    Title = MainWindowStatusText.PickRecordingDirectoryTitle,
                     AllowMultiple = false
                 });
                 return folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
@@ -235,11 +235,11 @@ public partial class MainWindow : Window
             {
                 var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
                 {
-                    Title = "选择本地视频文件",
+                    Title = MainWindowStatusText.PickClipVideoFileTitle,
                     AllowMultiple = false,
                     FileTypeFilter = new[]
                     {
-                        new FilePickerFileType("视频文件 (mkv / mp4)")
+                        new FilePickerFileType(MainWindowStatusText.VideoFileTypeName)
                         {
                             Patterns = new[] { "*.mkv", "*.mp4" }
                         }
@@ -251,7 +251,7 @@ public partial class MainWindow : Window
             {
                 var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
                 {
-                    Title = "选择切片导出目录",
+                    Title = MainWindowStatusText.PickClipExportDirectoryTitle,
                     AllowMultiple = false
                 });
                 return folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
@@ -334,7 +334,7 @@ public partial class MainWindow : Window
                 // 启动失败时日志写不出去也不能再抛异常。
             }
 
-            var dialog = new StartupErrorWindow("启动失败", details);
+            var dialog = new StartupErrorWindow(MainWindowStatusText.StartupFailedTitle, details);
             await dialog.ShowDialog(this);
         }
         finally
@@ -512,7 +512,7 @@ public partial class MainWindow : Window
         _isDesktopFullscreen = true;
         WindowState = WindowState.FullScreen;
         ApplyShellLayout();
-        _viewModel.SetStatus("已进入桌面全屏：F11 或 Esc 退出。");
+        _viewModel.SetStatus(MainWindowStatusText.DesktopFullscreenEntered);
     }
 
     private void ExitDesktopFullscreen()
@@ -528,7 +528,7 @@ public partial class MainWindow : Window
             : _windowStateBeforeFullscreen;
         WindowState = restore;
         ApplyShellLayout();
-        _viewModel?.SetStatus("已退出桌面全屏。");
+        _viewModel?.SetStatus(MainWindowStatusText.DesktopFullscreenExited);
     }
 
     private void OnToggleDesktopFullscreen(object? sender, RoutedEventArgs e)
@@ -554,7 +554,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _viewModel.SetStatus($"切换主副屏布局失败：{ex.Message}");
+            _viewModel.SetStatus(MainWindowStatusText.HeroLayoutSwitchFailed(ex.Message));
         }
     }
 
@@ -621,11 +621,11 @@ public partial class MainWindow : Window
             // 新拖入的窗格必须立刻置顶：否则它与背景大窗同层时，左键/右键会命中大窗。
             FreeformCanvas.BringToFront(tile.PaneId);
             _viewModel.UpdateFreeformDocument(FreeformCanvas.CaptureDocument());
-            _viewModel.SetStatus($"已把「{tile.DisplayTitle}」放到指定位置");
+            _viewModel.SetStatus(MainWindowStatusText.PlacementApplied(tile.DisplayTitle));
         }
         catch (Exception ex)
         {
-            _viewModel.SetStatus($"拖入工作区失败：{ex.Message}");
+            _viewModel.SetStatus(MainWindowStatusText.DropIntoWorkspaceFailed(ex.Message));
         }
     }
 
@@ -670,7 +670,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _viewModel.SetStatus($"切换自由布局失败：{ex.Message}");
+            _viewModel.SetStatus(MainWindowStatusText.FreeformLayoutToggleFailed(ex.Message));
         }
     }
 
@@ -895,7 +895,7 @@ public partial class MainWindow : Window
             }
             catch (Exception ex)
             {
-                _viewModel.SetStatus($"修改失败：{ex.Message}");
+                _viewModel.SetStatus(MainWindowStatusText.RoomUpdateFailed(ex.Message));
             }
         }
     }
@@ -920,7 +920,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _viewModel.SetStatus($"删除失败：{ex.Message}");
+            _viewModel.SetStatus(MainWindowStatusText.RoomDeleteFailed(ex.Message));
         }
     }
 
@@ -1073,7 +1073,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _viewModel.SetStatus($"保存失败：{ex.Message}");
+            _viewModel.SetStatus(MainWindowStatusText.LayoutSaveFailed(ex.Message));
         }
     }
 
@@ -1084,7 +1084,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        var prompt = new TextPromptWindow("方案名称", _viewModel.SelectedProfile?.Name ?? "新方案");
+        var prompt = new TextPromptWindow(
+            MainWindowStatusText.ProfileNamePromptLabel,
+            _viewModel.SelectedProfile?.Name ?? MainWindowStatusText.NewProfileName);
         var name = await prompt.ShowDialog<string?>(this);
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -1097,7 +1099,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _viewModel.SetStatus($"另存失败：{ex.Message}");
+            _viewModel.SetStatus(MainWindowStatusText.LayoutSaveAsFailed(ex.Message));
         }
     }
 
@@ -1123,12 +1125,12 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _viewModel.SetStatus($"弹幕设置热更新失败：{ex.Message}");
+            _viewModel.SetStatus(MainWindowStatusText.DanmakuReloadFailed(ex.Message));
             return;
         }
 
         await _viewModel.ApplyDanmakuMasterSettingAsync();
-        _viewModel.SetStatus("设置已应用。");
+        _viewModel.SetStatus(MainWindowStatusText.SettingsApplied);
     }
 
     private void OnClearHighlightEvents(object? sender, RoutedEventArgs e)
