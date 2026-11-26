@@ -147,7 +147,7 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string ExportButtonText => _isExporting ? "导出中…" : "开始导出 MP4";
+    public string ExportButtonText => _isExporting ? ClipExportStatusText.ExportButtonBusy : ClipExportStatusText.ExportButtonIdle;
 
     public bool CanExport =>
         _host.HasVideo && !IsExporting
@@ -156,7 +156,7 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
         && !string.IsNullOrWhiteSpace(_outputFileName);
 
     /// <summary>关键帧对齐误差提示（无损切割可能提前 1~3 秒）。</summary>
-    public string KeyframeTip => "无弹幕版使用 -c copy 无损切割，入点会自动对齐到最近关键帧，可能提前 1~3 秒。";
+    public string KeyframeTip => ClipExportStatusText.KeyframeTip;
 
     /// <summary>由宿主在初始化时调用：按配置解析默认导出目录。</summary>
     public async Task InitializeAsync(CancellationToken ct = default)
@@ -198,7 +198,7 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
         var videoPath = _host.CurrentVideoPath;
         if (!CanExport || videoPath is null)
         {
-            _host.SetStatusText("请先加载视频、设置有效入出点与输出目录。");
+            _host.SetStatusText(ClipExportStatusText.MissingInputs);
             return;
         }
 
@@ -206,7 +206,7 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
         var safeClipDuration = _host.SafeClipDuration;
         if (_host.IsLiveSession && safeClipDuration <= TimeSpan.Zero)
         {
-            _host.SetStatusText("安全缓冲生成中（已录不足 5 秒），请稍后再导出。");
+            _host.SetStatusText(ClipExportStatusText.SafetyBufferBuilding);
             return;
         }
 
@@ -215,14 +215,14 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
         {
             if (_host.InPoint >= safeClipDuration)
             {
-                _host.SetStatusText("当前入点已超过安全可剪范围，请把入点移到录制进度稍早的位置。");
+                _host.SetStatusText(ClipExportStatusText.InPointBeyondSafeRange);
                 return;
             }
 
             if (_host.OutPoint > safeClipDuration)
             {
                 _host.SetSelection(_host.InPoint, safeClipDuration);
-                _host.SetStatusText("已自动保留 5 秒安全缓冲避免影响录制。");
+                _host.SetStatusText(ClipExportStatusText.SafetyBufferReserved);
             }
         }
 
@@ -246,7 +246,7 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
         IsExporting = true;
         _exportCts?.Dispose();
         _exportCts = new CancellationTokenSource();
-        _host.SetStatusText($"开始导出：{task.RangeText} · {task.ModeText}");
+        _host.SetStatusText(ClipExportStatusText.Started(task.RangeText, task.ModeText));
         try
         {
             await task.RunAsync(_exportCts.Token).ConfigureAwait(true);
@@ -257,10 +257,10 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
         }
 
         _host.SetStatusText(task.IsCompleted
-            ? $"导出完成：{task.OutputText}"
+            ? ClipExportStatusText.Completed(task.OutputText)
             : task.IsCanceled
-                ? "导出已取消。"
-                : $"导出失败：{task.ErrorMessage}");
+                ? ClipExportStatusText.Canceled
+                : ClipExportStatusText.Failed(task.ErrorMessage));
     }
 
     [RelayCommand]
@@ -273,7 +273,7 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _host.SetStatusText("正在取消导出…");
+        _host.SetStatusText(ClipExportStatusText.Canceling);
         try
         {
             _exportCts.Cancel();
@@ -288,7 +288,7 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
     {
         if (PickExportDirectoryAsync is null)
         {
-            _host.SetStatusText("当前界面未接入目录选择器。");
+            _host.SetStatusText(ClipExportStatusText.DirectoryPickerMissing);
             return;
         }
 
@@ -302,7 +302,7 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            _host.SetStatusText($"选择导出目录失败：{ex.Message}");
+            _host.SetStatusText(ClipExportStatusText.PickDirectoryFailed(ex.Message));
         }
     }
 
@@ -311,7 +311,7 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
     {
         if (string.IsNullOrWhiteSpace(_outputDirectory) || !Directory.Exists(_outputDirectory))
         {
-            _host.SetStatusText("输出目录尚不存在，导出时会自动创建。");
+            _host.SetStatusText(ClipExportStatusText.OutputDirectoryMissing);
             return;
         }
 
@@ -321,7 +321,7 @@ public sealed partial class ClipExportViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            _host.SetStatusText($"打开输出目录失败：{ex.Message}。请手动在资源管理器中打开：{_outputDirectory}");
+            _host.SetStatusText(ClipExportStatusText.OpenDirectoryFailed(ex.Message, _outputDirectory));
         }
     }
 
