@@ -25,8 +25,6 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
     private static readonly TimeSpan RenderReadyTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StartPlaybackTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan HealthInterval = TimeSpan.FromSeconds(1);
-    private static readonly TimeSpan SeekPollInterval = TimeSpan.FromMilliseconds(500);
-    private static readonly TimeSpan SeekCommitDelay = TimeSpan.FromMilliseconds(160);
 
     private static readonly ConditionalWeakTable<MpvContext, string> AudioMeterPaths = new();
 
@@ -66,19 +64,18 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
 
     // 回放支持：只有 mpv 报告 seekable=yes 且 duration 有限（如支持 Range 的清流、
     // HLS 点播/带 DVR 窗口的源）才显示进度条；普通直播流不受影响。
-    private bool _seekAvailable;
-    private double _seekDuration;
+    // 探测值换算、拖动防抖与 seek 目标格式等纯逻辑在 ReplaySeekLogic 中，便于单测。
+    private readonly ReplaySeekLogic _seekLogic = new();
     private int _suppressSeekChange;
-    private double _pendingSeekSeconds = -1;
 
     public MpvPlayerView()
     {
         InitializeComponent();
         _audioMeterTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
         _audioMeterTimer.Tick += (_, _) => UpdateAudioMeter();
-        _seekPollTimer = new DispatcherTimer { Interval = SeekPollInterval };
+        _seekPollTimer = new DispatcherTimer { Interval = ReplaySeekLogic.PollInterval };
         _seekPollTimer.Tick += (_, _) => UpdateSeekBar();
-        _seekCommitTimer = new DispatcherTimer { Interval = SeekCommitDelay };
+        _seekCommitTimer = new DispatcherTimer { Interval = ReplaySeekLogic.CommitDelay };
         _seekCommitTimer.Tick += (_, _) => CommitSeek();
         ApplyStateVisuals(PlayerState.Offline, "等待加入房间");
     }
@@ -1115,9 +1112,7 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
     {
         _seekPollTimer.Stop();
         _seekCommitTimer.Stop();
-        _pendingSeekSeconds = -1;
-        _seekAvailable = false;
-        _seekDuration = 0;
+        _seekLogic.Reset();
         if (SeekBarHost is not null)
         {
             SeekBarHost.IsVisible = false;
@@ -1141,52 +1136,12 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
 
         try
         {
-            var seekable = string.Equals(context.GetPropertyString("seekable"), "yes", StringComparison.OrdinalIgnoreCase);
-            var duration = seekable ? context.GetPropertyDouble("duration") : null;
-            if (!seekable || duration is not { } total || !double.IsFinite(total) || total < 1d)
-            {
-                if (SeekBarHost.IsVisible)
-                {
-                    SeekBarHost.IsVisible = false;
-                    _seekAvailable = false;
-                    _seekDuration = 0;
-                }
-
-                return;
-            }
-
-            _seekAvailable = true;
-            _seekDuration = total;
-            if (!SeekBarHost.IsVisible)
-            {
-                SeekBarHost.IsVisible = true;
-            }
-
+            var seekable = context.GetPropertyString("seekable");
+            double? duration = string.Equals(seekable, "yes", StringComparison.OrdinalIgnoreCase)
+                ? context.GetPropertyDouble("duration")
+                : null;
             var position = context.GetPropertyDouble("time-pos");
-            _suppressSeekChange++;
-            try
-            {
-                if (Math.Abs(SeekSlider.Maximum - total) > 0.01)
-                {
-                    SeekSlider.Maximum = total;
-                }
-
-                // 用户正在拖动（提交定时器在跑）时不回写位置，避免进度条被轮询抢回去。
-                if (!_seekCommitTimer.IsEnabled && position is { } current)
-                {
-                    var clamped = Math.Clamp(current, 0d, total);
-                    if (Math.Abs(SeekSlider.Value - clamped) > 0.25)
-                    {
-                        SeekSlider.Value = clamped;
-                    }
-                }
-            }
-            finally
-            {
-                _suppressSeekChange--;
-            }
-
-            SeekTimeText.Text = $"{FormatClock(SeekSlider.Value)} / {FormatClock(total)}";
+            ApplySeekBarUpdate(_seekLogic.Update(seekable, duration, position, SeekSlider.Maximum, SeekSlider.Value));
         }
         catch
         {
@@ -1194,15 +1149,51 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
         }
     }
 
-    private void OnSeekChanged(object? sender, RangeBaseValueChangedEventArgs e)
+    private void ApplySeekBarUpdate(SeekBarUpdate update)
     {
-        if (_suppressSeekChange != 0 || !_seekAvailable)
+        if (update.VisibilityChanged && SeekBarHost is not null)
+        {
+            SeekBarHost.IsVisible = update.IsVisible;
+        }
+
+        if (!update.IsVisible)
         {
             return;
         }
 
-        _pendingSeekSeconds = e.NewValue;
-        SeekTimeText.Text = $"{FormatClock(e.NewValue)} / {FormatClock(_seekDuration)}";
+        _suppressSeekChange++;
+        try
+        {
+            if (update.Maximum is { } maximum)
+            {
+                SeekSlider.Maximum = maximum;
+            }
+
+            if (update.Value is { } value)
+            {
+                SeekSlider.Value = value;
+            }
+        }
+        finally
+        {
+            _suppressSeekChange--;
+        }
+
+        if (update.TimeText is { } text)
+        {
+            SeekTimeText.Text = text;
+        }
+    }
+
+    private void OnSeekChanged(object? sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (_suppressSeekChange != 0 || !_seekLogic.IsAvailable)
+        {
+            return;
+        }
+
+        _seekLogic.BeginDrag(e.NewValue);
+        SeekTimeText.Text = _seekLogic.FormatDragTime(e.NewValue);
         // 拖动会连续触发 ValueChanged：短暂防抖后只发一次 seek，避免一次拖动打出几十条命令。
         _seekCommitTimer.Stop();
         _seekCommitTimer.Start();
@@ -1211,34 +1202,19 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
     private void CommitSeek()
     {
         _seekCommitTimer.Stop();
-        if (_pendingSeekSeconds < 0 || !_seekAvailable)
+        if (!_seekLogic.TryTakePendingTarget(out var target))
         {
             return;
         }
 
-        var target = _pendingSeekSeconds;
-        _pendingSeekSeconds = -1;
         try
         {
-            _context?.Command("seek", target.ToString("0.###", CultureInfo.InvariantCulture), "absolute+exact");
+            _context?.Command("seek", target, "absolute+exact");
         }
         catch
         {
             // 流已切换或 mpv 已释放时忽略本次 seek。
         }
-    }
-
-    private static string FormatClock(double seconds)
-    {
-        if (!double.IsFinite(seconds) || seconds < 0)
-        {
-            seconds = 0;
-        }
-
-        var span = TimeSpan.FromSeconds(seconds);
-        return span.TotalHours >= 1
-            ? span.ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture)
-            : span.ToString(@"mm\:ss", CultureInfo.InvariantCulture);
     }
 
     private void StartHealthTimer()
