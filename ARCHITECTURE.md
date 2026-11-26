@@ -30,7 +30,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | WebView 登录 | WebView2（临时用户目录，登录后采集 Cookie） |
 | 平台解析 | 各家 HTTP API + Jint（斗鱼签名、抖音 sign.js）；yt-dlp 作为 YouTube/Twitch 兜底 |
 | 插件签名 | Ed25519（BouncyCastle）+ SHA256 清单校验 |
-| 测试 | xUnit（6 个测试工程，当前共 1613 个用例） |
+| 测试 | xUnit（6 个测试工程，当前共 1662 个用例） |
 
 ### 平台支持矩阵
 
@@ -520,7 +520,7 @@ Program.Main
   - `FreeformLayoutDocument`：`{"version":2,"mode":"freeform","tiles":[{paneId,liveRoomId,left,top,width,height,zIndex,isPinned,isLocked}]}`，复用 `LayoutProfiles.DockLayoutJson` 列；`LooksLikeFreeform`/`TryParse` 兼容旧 Dock JSON（旧方案按窗格数自动迁移）。
   - `FreeformLayoutPresets`：`AutoFit`（网格）、`Hero`（主画面 0.72 + 右侧纵列）、`PictureInPicture`（首路铺满 + 2~4 路 0.28×0.28 右下置顶）、`DefaultLanding`（新拖入房间居中错开落位）；`FreeformPreset` 枚举。
 - `Controls/` 交互层：
-  - `FreeformWorkspaceCanvas : Panel`：按归一化矩形 `Measure/Arrange` 窗格（`ContentControl` + 共享 `RoomTileView` 模板）；指针事件通过 `Tunnel + handledEventsToo` 接管（`RoomTileView` 自身会处理点击/双击，普通冒泡会被吞掉）；按下后移动超过 3px 阈值才进入拖动/缩放（单击/双击语义保留），命中 6px 边缘 / 10px 角进入缩放，其余区域进入移动；右键菜单（置顶画中画/取消置顶、锁定/解锁、置顶/置底、贴合 16:9）、Z 轴普通层 1~999 与置顶层 1000~1999；`LayoutChanged` 事件回写文档（仅在真正发生移动/缩放后触发）。
+  - `FreeformWorkspaceCanvas : Panel`：按归一化矩形 `Measure/Arrange` 窗格（`ContentControl` + 共享 `RoomTileView` 模板）；指针事件通过 `Tunnel + handledEventsToo` 接管（`RoomTileView` 自身会处理点击/双击，普通冒泡会被吞掉）；按下后移动超过 3px 阈值才进入拖动/缩放（单击/双击语义保留），命中边缘/角 6px 热区进入缩放（角落优先），其余区域进入移动；热区命中、拖动阈值、缩放光标映射、拖动 HUD 文案、拖放落位、贴合 16:9 与画布宽高比等纯几何交互在 `Controls/FreeformInteractionLogic`（`FreeformInteractionLogicTests` 覆盖），控件只负责套用结果（V0.7.5）；右键菜单（置顶画中画/取消置顶、锁定/解锁、置顶/置底、贴合 16:9）、Z 轴普通层 1~999 与置顶层 1000~1999；`LayoutChanged` 事件回写文档（仅在真正发生移动/缩放后触发）。
   - 拖动反馈：拖动中窗格透明度降至 0.92 并临时升至最上层，浮层绘制蓝色落位框 + 跟随指针的尺寸/吸附 HUD（如 `1168 × 812 px · 100% × 100% · 已吸附`），光标切换为移动/缩放光标；拖动中按 `Esc` 取消并恢复按下前位置。
   - `SnapGuidesOverlay`：磁吸参考线 + 落位框 + HUD 浮层（蓝普通线 1.5px / 琥珀虚线中心线 + 端帽，不参与命中测试）。
 - `MainWindowViewModel` 集成：`IsFreeformMode`/`FreeformDocument`/`WorkspaceTiles` 事件；`EnterFreeformMode`/`ToggleFreeformMode`/`ApplyFreeformPreset`/`UpdateFreeformDocument`；保存方案时自由布局写 v2 JSON（`SerializeCurrentLayout`），加载时自动识别并进入自由模式；`一键自适应排布` 自动退出自由模式。
@@ -590,7 +590,7 @@ dotnet build LiveMonitor.sln --no-restore
 - 工程目标框架：`Data`、`Media`、`Desktop` 为 `net8.0-windows`，其余类库为 `net8.0`；测试工程对应同目标框架（`Data`/`Media`/`Desktop` 测试为 `net8.0-windows`，`Platforms`/`Danmaku` 测试为 `net8.0`）。
 - 需要 `tools/` 下的 ffmpeg/mpv 才能运行应用（`scripts/fetch-tools.ps1` 自动下载并校验）。
 
-### 13.2 测试（当前 1613 个用例）
+### 13.2 测试（当前 1662 个用例）
 
 | 测试工程 | 覆盖范围 | 用例数 |
 | --- | --- | --- |
@@ -598,9 +598,9 @@ dotnet build LiveMonitor.sln --no-restore
 | `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退、自定义清流 Provider、斗鱼流接缝、抖音帧接缝与断线通知、弹幕重连退避 | 505 |
 | `tests/LiveMonitor.Danmaku.Tests` | 过滤器、高能检测、会话管理、重连/释放竞态 | 100 |
 | `tests/LiveMonitor.Media.Tests` | 录制状态机与并发收尾、轮询器与会话工作器、分段合并、剪辑导出、波形、增量波形/增量弹幕读取、FFmpeg 参数协议分支 | 232 |
-| `tests/LiveMonitor.Desktop.Tests` | ViewModel（主窗口拆分/房间目录/布局方案/状态栏/高亮/录制中心/剪辑台与 ASR/导出子视图模型/设置页 ASR/组件更新/通用与弹幕）、Dock/自由画布布局、时间轴几何（`ClipTimelineGeometry`）与缩放视口/拖拽钳制（`ClipTimelineViewLogic`）、播放器管理器与 `IWorkspacePlayer`、回放 seek 探测/防抖逻辑（`ReplaySeekLogic`）、剪辑预览位置推进与安全上界（`ClipPlaybackPositionLogic`）、剪辑台展示层纯逻辑（`ClipStudioPresentationLogic`）、音量表解析与平滑（`AudioMeterLogic`）、mpv 流选项映射与请求头清理（`StreamOptionMapper`）、AppServices 释放、登录配置、播放状态文本、录制目标排序、自由布局命中与宿主切换、录制中心历史子视图模型（`RecordingHistoryViewModel`） | 738 |
+| `tests/LiveMonitor.Desktop.Tests` | ViewModel（主窗口拆分/房间目录/布局方案/状态栏/高亮/录制中心/剪辑台与 ASR/导出子视图模型/设置页 ASR/组件更新/通用与弹幕）、Dock/自由画布布局、时间轴几何（`ClipTimelineGeometry`）与缩放视口/拖拽钳制（`ClipTimelineViewLogic`）、播放器管理器与 `IWorkspacePlayer`、回放 seek 探测/防抖逻辑（`ReplaySeekLogic`）、剪辑预览位置推进与安全上界（`ClipPlaybackPositionLogic`）、剪辑台展示层纯逻辑（`ClipStudioPresentationLogic`）、音量表解析与平滑（`AudioMeterLogic`）、mpv 流选项映射与请求头清理（`StreamOptionMapper`）、AppServices 释放、登录配置、播放状态文本、录制目标排序、自由布局命中与宿主切换、自由画布交互几何（`FreeformInteractionLogic`）、录制中心历史子视图模型（`RecordingHistoryViewModel`） | 787 |
 
-合计 **1613** 个用例，五套全部通过（0 失败 0 跳过）。
+合计 **1662** 个用例，五套全部通过（0 失败 0 跳过）。
 
 运行方式（使用已构建的测试 dll，避免重复构建）：
 
