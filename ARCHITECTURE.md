@@ -30,7 +30,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | WebView 登录 | WebView2（临时用户目录，登录后采集 Cookie） |
 | 平台解析 | 各家 HTTP API + Jint（斗鱼签名、抖音 sign.js）；yt-dlp 作为 YouTube/Twitch 兜底 |
 | 插件签名 | Ed25519（BouncyCastle）+ SHA256 清单校验 |
-| 测试 | xUnit（6 个测试工程，当前共 1415 个用例） |
+| 测试 | xUnit（6 个测试工程，当前共 1442 个用例） |
 
 ### 平台支持矩阵
 
@@ -485,7 +485,7 @@ Program.Main
   - 焦点模式：双击窗格进入单窗格全屏（`IsFocused` + 静音策略 + 恢复原布局）、Esc 退出；
   - 锚点/未开播文字与状态同步：`SetDanmakuEnabled` 控制清流弹幕按钮显隐；
   - 底部控制条：音量/静音、弹幕开关、紧凑模式，以及 V0.7 新增的「暂停/继续」（`TogglePause`，同步 mpv `pause` 属性并切换 ⏸/▶ 图标）与「刷新播放」（`RequestRefresh` → `RefreshRequested` → `WorkspacePlayerManager.RefreshTileAsync`，清空退避/离线计时器后立即重新解析地址并起播）；刷新按钮图标使用 `Icons.axaml` 的 `IconRefresh` PathIcon（矢量绘制，避免字体码点被裁切）。
-- 播放器句柄创建/复用/销毁归属：上层只依赖 `IWorkspacePlayer` 契约（通过 `View` 取回挂载控件），`WorkspacePlayerManager` 用可注入工厂（默认 `static () => new MpvPlayerView()`）独占创建句柄；`EnsurePlayer` 按窗格复用或创建，`TransferPlayer` 让新句柄经 `IWorkspacePlayer.TryAdoptSessionFrom` 接管旧 mpv 会话（具体类型校验收敛在实现内，迁移失败时释放新句柄并保持旧窗格不变）；销毁统一走 `RemovePlayer`（停止轮询/重试 → 清空 `PlayerView` → Dispose），由 `MainWindowViewModel` 在窗格移除、方案差集销毁、拖拽换位与 `DisposePlayers` 中调用；`Stop` 只停止播放与跟踪（自由画布切换等仍需复用句柄的场景），`Dispose` 兜底释放仍被跟踪的句柄（幂等）。可回放 seek（进度条/seek 轮询计时器）是播放器视图内部 chrome，不纳入契约。
+- 播放器句柄创建/复用/销毁归属：上层只依赖 `IWorkspacePlayer` 契约（通过 `View` 取回挂载控件），`WorkspacePlayerManager` 用可注入工厂（默认 `static () => new MpvPlayerView()`）独占创建句柄；`EnsurePlayer` 按窗格复用或创建，`TransferPlayer` 让新句柄经 `IWorkspacePlayer.TryAdoptSessionFrom` 接管旧 mpv 会话（具体类型校验收敛在实现内，迁移失败时释放新句柄并保持旧窗格不变）；销毁统一走 `RemovePlayer`（停止轮询/重试 → 清空 `PlayerView` → Dispose），由 `MainWindowViewModel` 在窗格移除、方案差集销毁、拖拽换位与 `DisposePlayers` 中调用；`Stop` 只停止播放与跟踪（自由画布切换等仍需复用句柄的场景），`Dispose` 兜底释放仍被跟踪的句柄（幂等）。可回放 seek（进度条/seek 轮询计时器）是播放器视图内部 chrome，不纳入契约；其探测值换算（可回放判定）、滑块增量阈值、拖动防抖后的 seek 目标格式与时间文本已抽到 `Player/ReplaySeekLogic`，由 `Player/ReplaySeekLogicTests` 覆盖，视图只保留计时器与控件写回（V0.7.5）。
 - `QualityPolicy`：按 Height/Fps 降序；大窗/焦点取最高；紧凑模式上限 480p；普通窗口优先 ≤720p，取第一个满足者。
 - `MpvPlayerView`（libmpv 封装）：
   - 初始化选项：`hwdec=auto-safe`、`vo=libmpv`、`gpu-api=opengl`、`cache=yes`、`demuxer-max-bytes`（按分辨率 3M/4M/8M）、`network-timeout=10`、`audio-buffer=0.8`、`audio-stream-silence=yes`、关闭 OSC/默认快捷键（键位由应用处理）；
@@ -589,7 +589,7 @@ dotnet build LiveMonitor.sln --no-restore
 - 工程目标框架：`Data`、`Media`、`Desktop` 为 `net8.0-windows`，其余类库为 `net8.0`；测试工程对应同目标框架（`Data`/`Media`/`Desktop` 测试为 `net8.0-windows`，`Platforms`/`Danmaku` 测试为 `net8.0`）。
 - 需要 `tools/` 下的 ffmpeg/mpv 才能运行应用（`scripts/fetch-tools.ps1` 自动下载并校验）。
 
-### 13.2 测试（当前 1415 个用例）
+### 13.2 测试（当前 1442 个用例）
 
 | 测试工程 | 覆盖范围 | 用例数 |
 | --- | --- | --- |
@@ -597,9 +597,9 @@ dotnet build LiveMonitor.sln --no-restore
 | `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退、自定义清流 Provider、斗鱼流接缝、抖音帧接缝与断线通知、弹幕重连退避 | 505 |
 | `tests/LiveMonitor.Danmaku.Tests` | 过滤器、高能检测、会话管理、重连/释放竞态 | 100 |
 | `tests/LiveMonitor.Media.Tests` | 录制状态机与并发收尾、轮询器与会话工作器、分段合并、剪辑导出、波形、增量波形/增量弹幕读取、FFmpeg 参数协议分支 | 232 |
-| `tests/LiveMonitor.Desktop.Tests` | ViewModel（主窗口拆分/房间目录/布局方案/状态栏/高亮/录制中心/剪辑台与 ASR/导出子视图模型/设置页 ASR/组件更新/通用与弹幕）、Dock/自由画布布局、时间轴几何、播放器管理器与 `IWorkspacePlayer`、AppServices 释放、登录配置、播放状态文本、录制目标排序、自由布局命中与宿主切换 | 540 |
+| `tests/LiveMonitor.Desktop.Tests` | ViewModel（主窗口拆分/房间目录/布局方案/状态栏/高亮/录制中心/剪辑台与 ASR/导出子视图模型/设置页 ASR/组件更新/通用与弹幕）、Dock/自由画布布局、时间轴几何、播放器管理器与 `IWorkspacePlayer`、回放 seek 探测/防抖逻辑（`ReplaySeekLogic`）、AppServices 释放、登录配置、播放状态文本、录制目标排序、自由布局命中与宿主切换 | 567 |
 
-合计 **1415** 个用例，五套全部通过（0 失败 0 跳过）。
+合计 **1442** 个用例，五套全部通过（0 失败 0 跳过）。
 
 运行方式（使用已构建的测试 dll，避免重复构建）：
 
