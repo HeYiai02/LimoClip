@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using LiveMonitor.Core.Models;
+using LiveMonitor.Desktop.ViewModels;
 using Control = Avalonia.Controls.Control;
 using Point = Avalonia.Point;
 using Rect = Avalonia.Rect;
@@ -1132,14 +1133,5 @@ public sealed class ClipTimelineControl : Control
         return ClipTimelineViewLogic.FormatRulerTime(seconds, withHours);
     }
 
-    private static string FormatClock(TimeSpan time)
-    {
-        var ts = time < TimeSpan.Zero ? TimeSpan.Zero : time;
-        if (ts.TotalHours >= 1)
-        {
-            return $"{(int)ts.TotalHours}:{ts.Minutes:00}:{ts.Seconds:00}.{ts.Milliseconds / 100}";
-        }
-
-        return $"{ts.Minutes}:{ts.Seconds:00}.{ts.Milliseconds / 100}";
-    }
+    private static string FormatClock(TimeSpan time) => TimeCodeFormat.ClockWithTenths(time);
 }

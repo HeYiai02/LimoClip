@@ -15,18 +15,8 @@ internal static class ClipListDisplayLogic
 
     private const string RoomFallbackFormat = "房间 {0}";
 
-    /// <summary>秒级时间码；超过 1 小时用 h:mm:ss，否则 mm:ss，负值按 0。</summary>
-    public static string FormatTime(TimeSpan time)
-    {
-        if (time < TimeSpan.Zero)
-        {
-            time = TimeSpan.Zero;
-        }
-
-        return time.TotalHours >= 1
-            ? time.ToString(@"h\:mm\:ss")
-            : time.ToString(@"mm\:ss");
-    }
+    /// <summary>秒级时间码；实现见 <see cref="TimeCodeFormat.Clock(TimeSpan)"/>（保留委托以兼容既有调用）。</summary>
+    public static string FormatTime(TimeSpan time) => TimeCodeFormat.Clock(time);
 
     /// <summary>场次标题：展示名为空时回退到「房间 {房间 Id}」。</summary>
     public static string RoomTitle(string? roomDisplayName, string? roomId)
