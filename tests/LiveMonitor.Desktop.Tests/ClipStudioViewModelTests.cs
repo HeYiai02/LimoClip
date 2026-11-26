@@ -541,14 +541,14 @@ public sealed class ClipStudioViewModelTests
             try
             {
                 await viewModel.OpenSessionAsync(session);
-                viewModel.OutputDirectory = tempDirectory;
-                viewModel.OutputFileName = "live-clip.mp4";
+                viewModel.Export.OutputDirectory = tempDirectory;
+                viewModel.Export.OutputFileName = "live-clip.mp4";
 
                 // 用户把出点拖到已录尾部：live 模式下先被选区钳制到安全截止。
                 viewModel.UpdateSelection(TimeSpan.Zero, TimeSpan.FromSeconds(11));
                 Assert.Equal(TimeSpan.FromSeconds(7), viewModel.OutPoint);
 
-                await viewModel.ExportCommand.ExecuteAsync(null);
+                await viewModel.Export.ExportCommand.ExecuteAsync(null);
 
                 var request = Assert.Single(exporter.Requests);
                 Assert.Equal(TimeSpan.Zero, request.StartTime);
@@ -732,9 +732,9 @@ public sealed class ClipStudioViewModelTests
                 Assert.True(viewModel.IsLiveSession);
                 Assert.Equal(TimeSpan.Zero, viewModel.SafeClipDuration);
 
-                viewModel.OutputDirectory = tempDirectory;
-                viewModel.OutputFileName = "too-early.mp4";
-                await viewModel.ExportCommand.ExecuteAsync(null);
+                viewModel.Export.OutputDirectory = tempDirectory;
+                viewModel.Export.OutputFileName = "too-early.mp4";
+                await viewModel.Export.ExportCommand.ExecuteAsync(null);
 
                 Assert.Empty(exporter.Requests);
                 Assert.Contains("安全缓冲生成中", viewModel.StatusText);

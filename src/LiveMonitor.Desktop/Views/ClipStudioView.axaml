@@ -463,93 +463,98 @@
                                    FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0" />
                     </Grid>
 
-                    <!-- 导出模式 -->
-                    <TextBlock Classes="studio-section" Text="导出模式" Margin="0,14,0,5" />
-                    <StackPanel Spacing="1">
-                        <RadioButton Classes="studio-mode" GroupName="clipMode" Content="仅无弹幕（秒切）"
-                                     IsChecked="{Binding IsCleanOnlyExport}" />
-                        <RadioButton Classes="studio-mode" GroupName="clipMode" Content="仅有弹幕（硬编烧录）"
-                                     IsChecked="{Binding IsDanmakuOnlyExport}" />
-                        <RadioButton Classes="studio-mode" GroupName="clipMode" Content="同时导出两版"
-                                     IsChecked="{Binding IsBothExport}" />
+                    <!-- 导出面板：模式/输出设置/命令/队列由 ClipExportViewModel 子视图模型承载，这里块级 opt-in 编译绑定。 -->
+                    <StackPanel DataContext="{Binding Export}"
+                                x:CompileBindings="True"
+                                x:DataType="vm:ClipExportViewModel">
+                        <!-- 导出模式 -->
+                        <TextBlock Classes="studio-section" Text="导出模式" Margin="0,14,0,5" />
+                        <StackPanel Spacing="1">
+                            <RadioButton Classes="studio-mode" GroupName="clipMode" Content="仅无弹幕（秒切）"
+                                         IsChecked="{Binding IsCleanOnlyExport}" />
+                            <RadioButton Classes="studio-mode" GroupName="clipMode" Content="仅有弹幕（硬编烧录）"
+                                         IsChecked="{Binding IsDanmakuOnlyExport}" />
+                            <RadioButton Classes="studio-mode" GroupName="clipMode" Content="同时导出两版"
+                                         IsChecked="{Binding IsBothExport}" />
+                        </StackPanel>
+
+                        <!-- 编码器 -->
+                        <TextBlock Classes="studio-section" Text="编码器" Margin="0,12,0,5" />
+                        <Border Background="{DynamicResource BrushBgBase}"
+                                BorderBrush="{DynamicResource BrushBorderSubtle}" BorderThickness="1"
+                                CornerRadius="{DynamicResource RadiusControl}" Padding="8,5">
+                            <TextBlock Text="{Binding EncoderText}" FontSize="10.5" Classes="mono"
+                                       Foreground="{DynamicResource BrushTextSecondary}"
+                                       TextTrimming="CharacterEllipsis" />
+                        </Border>
+
+                        <!-- 输出设置 -->
+                        <TextBlock Classes="studio-section" Text="输出设置" Margin="0,12,0,5" />
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBox Classes="studio-field" Text="{Binding OutputDirectory}"
+                                     Watermark="输出目录" />
+                            <Button Grid.Column="1" Classes="studio-mini" Content="浏览…" Margin="6,0,0,0"
+                                    VerticalAlignment="Stretch"
+                                    Command="{Binding PickOutputDirectoryCommand}" />
+                        </Grid>
+                        <TextBlock Classes="studio-caption" Text="文件名（不含扩展名）" Margin="0,8,0,3" />
+                        <TextBox Classes="studio-field" Text="{Binding OutputFileName}" />
+                        <TextBlock Classes="studio-caption" Text="{Binding KeyframeTip}"
+                                   TextWrapping="Wrap" Margin="0,6,0,0" />
+
+                        <!-- 主操作 -->
+                        <Button Classes="primary-btn" Height="32" Margin="0,12,0,0" FontSize="12"
+                                Content="{Binding ExportButtonText}"
+                                Command="{Binding ExportCommand}"
+                                IsEnabled="{Binding CanExport}" />
+                        <Button Classes="subtle-btn" Height="26" Margin="0,6,0,0" FontSize="10.5"
+                                Content="取消当前导出"
+                                Command="{Binding CancelExportCommand}"
+                                IsVisible="{Binding IsExporting}" />
+
+                        <!-- 导出队列 -->
+                        <TextBlock Classes="studio-section" Text="导出队列" Margin="0,14,0,5" />
+                        <ItemsControl ItemsSource="{Binding ExportTasks}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:ClipExportTaskViewModel">
+                                    <Border Background="{DynamicResource BrushBgBase}"
+                                            BorderBrush="{DynamicResource BrushBorderSubtle}"
+                                            BorderThickness="1"
+                                            CornerRadius="{DynamicResource RadiusControl}"
+                                            Padding="9" Margin="0,0,0,6">
+                                        <StackPanel Spacing="4">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock Text="{Binding FileName}" FontSize="10.5"
+                                                           Foreground="{DynamicResource BrushTextPrimary}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Grid.Column="1" Text="{Binding ModeText}" FontSize="9"
+                                                           Foreground="{DynamicResource BrushTextMuted}"
+                                                           Margin="6,0,0,0" />
+                                            </Grid>
+                                            <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress}"
+                                                         Height="4"
+                                                         Background="{DynamicResource BrushBgElevated}"
+                                                         Foreground="{DynamicResource BrushAccent}" />
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock Text="{Binding StateText}" FontSize="9.5"
+                                                           Foreground="{DynamicResource BrushTextSecondary}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Grid.Column="1" Text="{Binding SpeedText}" FontSize="9.5"
+                                                           Classes="mono"
+                                                           Foreground="{DynamicResource BrushTextMuted}"
+                                                           Margin="6,0,0,0" />
+                                            </Grid>
+                                            <TextBlock Text="{Binding OutputText}" FontSize="9"
+                                                       Foreground="{DynamicResource BrushSuccess}"
+                                                       TextWrapping="Wrap" IsVisible="{Binding HasOutput}" />
+                                            <TextBlock Text="{Binding RangeText}" FontSize="9" Classes="mono"
+                                                       Foreground="{DynamicResource BrushTextMuted}" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                     </StackPanel>
-
-                    <!-- 编码器 -->
-                    <TextBlock Classes="studio-section" Text="编码器" Margin="0,12,0,5" />
-                    <Border Background="{DynamicResource BrushBgBase}"
-                            BorderBrush="{DynamicResource BrushBorderSubtle}" BorderThickness="1"
-                            CornerRadius="{DynamicResource RadiusControl}" Padding="8,5">
-                        <TextBlock Text="{Binding EncoderText}" FontSize="10.5" Classes="mono"
-                                   Foreground="{DynamicResource BrushTextSecondary}"
-                                   TextTrimming="CharacterEllipsis" />
-                    </Border>
-
-                    <!-- 输出设置 -->
-                    <TextBlock Classes="studio-section" Text="输出设置" Margin="0,12,0,5" />
-                    <Grid ColumnDefinitions="*,Auto">
-                        <TextBox Classes="studio-field" Text="{Binding OutputDirectory}"
-                                 Watermark="输出目录" />
-                        <Button Grid.Column="1" Classes="studio-mini" Content="浏览…" Margin="6,0,0,0"
-                                VerticalAlignment="Stretch"
-                                Command="{Binding PickOutputDirectoryAsyncCommand}" />
-                    </Grid>
-                    <TextBlock Classes="studio-caption" Text="文件名（不含扩展名）" Margin="0,8,0,3" />
-                    <TextBox Classes="studio-field" Text="{Binding OutputFileName}" />
-                    <TextBlock Classes="studio-caption" Text="{Binding KeyframeTip}"
-                               TextWrapping="Wrap" Margin="0,6,0,0" />
-
-                    <!-- 主操作 -->
-                    <Button Classes="primary-btn" Height="32" Margin="0,12,0,0" FontSize="12"
-                            Content="{Binding ExportButtonText}"
-                            Command="{Binding ExportCommand}"
-                            IsEnabled="{Binding CanExport}" />
-                    <Button Classes="subtle-btn" Height="26" Margin="0,6,0,0" FontSize="10.5"
-                            Content="取消当前导出"
-                            Command="{Binding CancelExportCommand}"
-                            IsVisible="{Binding IsExporting}" />
-
-                    <!-- 导出队列 -->
-                    <TextBlock Classes="studio-section" Text="导出队列" Margin="0,14,0,5" />
-                    <ItemsControl ItemsSource="{Binding ExportTasks}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border Background="{DynamicResource BrushBgBase}"
-                                        BorderBrush="{DynamicResource BrushBorderSubtle}"
-                                        BorderThickness="1"
-                                        CornerRadius="{DynamicResource RadiusControl}"
-                                        Padding="9" Margin="0,0,0,6">
-                                    <StackPanel Spacing="4">
-                                        <Grid ColumnDefinitions="*,Auto">
-                                            <TextBlock Text="{Binding FileName}" FontSize="10.5"
-                                                       Foreground="{DynamicResource BrushTextPrimary}"
-                                                       TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Grid.Column="1" Text="{Binding ModeText}" FontSize="9"
-                                                       Foreground="{DynamicResource BrushTextMuted}"
-                                                       Margin="6,0,0,0" />
-                                        </Grid>
-                                        <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress}"
-                                                     Height="4"
-                                                     Background="{DynamicResource BrushBgElevated}"
-                                                     Foreground="{DynamicResource BrushAccent}" />
-                                        <Grid ColumnDefinitions="*,Auto">
-                                            <TextBlock Text="{Binding StateText}" FontSize="9.5"
-                                                       Foreground="{DynamicResource BrushTextSecondary}"
-                                                       TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Grid.Column="1" Text="{Binding SpeedText}" FontSize="9.5"
-                                                       Classes="mono"
-                                                       Foreground="{DynamicResource BrushTextMuted}"
-                                                       Margin="6,0,0,0" />
-                                        </Grid>
-                                        <TextBlock Text="{Binding OutputText}" FontSize="9"
-                                                   Foreground="{DynamicResource BrushSuccess}"
-                                                   TextWrapping="Wrap" IsVisible="{Binding HasOutput}" />
-                                        <TextBlock Text="{Binding RangeText}" FontSize="9" Classes="mono"
-                                                   Foreground="{DynamicResource BrushTextMuted}" />
-                                    </StackPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
                     <TextBlock Text="{Binding StatusText}" FontSize="10.5"
                                Foreground="{DynamicResource BrushTextSecondary}"
                                TextWrapping="Wrap" Margin="0,8,0,0" />
