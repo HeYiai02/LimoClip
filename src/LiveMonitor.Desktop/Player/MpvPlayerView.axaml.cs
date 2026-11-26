@@ -950,31 +950,26 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
     {
         // 720P 以上的直播码率明显更高，4M 的 demuxer cache 在 HLS 分段/网络抖动时
         // 容易让音频输出断粮；这里按档位给更宽的缓冲，低清仍保持低内存。
-        context.SetOptionString("demuxer-max-bytes", quality.Height >= 720 ? "8M" : "3M");
+        // 档位选择、默认 UA、可选头清理与 Cookie 拼装等纯逻辑在 StreamOptionMapper 中，便于单测。
+        var options = StreamOptionMapper.Build(quality);
+        context.SetOptionString("demuxer-max-bytes", options.DemuxerMaxBytes);
+        context.SetOptionString("user-agent", options.UserAgent);
 
-        var userAgent = FindHeader(quality, "User-Agent")
-                        ?? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-        context.SetOptionString("user-agent", SanitizeHeaderValue(userAgent));
-
-        var referer = FindHeader(quality, "Referer");
-        if (!string.IsNullOrWhiteSpace(referer))
+        if (options.Referrer is not null)
         {
-            context.SetOptionString("referrer", SanitizeHeaderValue(referer));
+            context.SetOptionString("referrer", options.Referrer);
         }
 
-        var cookie = FindHeader(quality, "Cookie");
-        if (!string.IsNullOrWhiteSpace(cookie))
+        if (options.HttpHeaderFields is not null)
         {
-            context.SetOptionString("http-header-fields", "Cookie: " + SanitizeHeaderValue(cookie));
+            context.SetOptionString("http-header-fields", options.HttpHeaderFields);
         }
 
         // YouTube 等平台的直播 HLS 音视频分离：视频轨走 loadfile，音频轨通过 audio-file 附加。
         // 必须显式设置（无音频时清空），否则上一路播放的音轨会残留到下一次。
         try
         {
-            context.SetOptionString(
-                "audio-file",
-                quality.HasSeparateAudio ? quality.AudioStreamUrl!.Trim() : string.Empty);
+            context.SetOptionString("audio-file", options.AudioFile ?? string.Empty);
         }
         catch
         {
@@ -1352,24 +1347,6 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
             throw new ObjectDisposedException(nameof(MpvPlayerView));
         }
     }
-
-    private static string? FindHeader(StreamQuality quality, string name)
-    {
-        foreach (var (key, value) in quality.RequiredHeaders)
-        {
-            if (string.Equals(key, name, StringComparison.OrdinalIgnoreCase))
-            {
-                return value;
-            }
-        }
-
-        return null;
-    }
-
-    private static string SanitizeHeaderValue(string value)
-        => value.Replace("\r", string.Empty, StringComparison.Ordinal)
-            .Replace("\n", " ", StringComparison.Ordinal)
-            .Trim();
 
     private static string Trim(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];
