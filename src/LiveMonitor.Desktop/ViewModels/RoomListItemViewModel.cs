@@ -41,19 +41,9 @@ public sealed class RoomListItemViewModel : ObservableObject
         }
     }
 
-    public string StatusBrush => _isLive switch
-    {
-        true => "#3DDC97",
-        false => "#5B6472",
-        null => "#3A414D"
-    };
+    public string StatusBrush => RoomListStatusText.Brush(_isLive);
 
-    public string StatusTip => _isLive switch
-    {
-        true => "直播中",
-        false => "未开播",
-        null => "在线状态未知（双击放入工作区后检测）"
-    };
+    public string StatusTip => RoomListStatusText.Tip(_isLive);
 
     public string Meta => string.IsNullOrWhiteSpace(Room.GroupTag)
         ? Room.RoomId
