@@ -1,16 +1,13 @@
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using LiveMonitor.Core;
 using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Enums;
 using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Core.Models;
 using LiveMonitor.Desktop.Controls;
 using LiveMonitor.Media.Editing;
-using LiveMonitor.Media.Recording;
 
 namespace LiveMonitor.Desktop.ViewModels;
 
@@ -19,10 +16,9 @@ namespace LiveMonitor.Desktop.ViewModels;
 /// 双波形时间轴选区与双版切片导出。所有播放器/控件交互都通过事件交给 View 桥接，
 /// 本类不直接引用 Avalonia 控件，保证可独立演进与测试。
 /// </summary>
-public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable, IClipAsrHost
+public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable, IClipAsrHost, IClipExportHost
 {
     private const int MaxSessionCount = 100;
-    private const int MaxExportTasks = 6;
     private const int MaxHighlightCount = 500;
     private static readonly TimeSpan MinSelection = TimeSpan.FromSeconds(0.2);
     private static readonly TimeSpan LiveSyncInterval = TimeSpan.FromSeconds(10);
@@ -31,7 +27,6 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
     private readonly IRecordingSessionRepository _sessions;
     private readonly IHighlightEventRepository _highlights;
-    private readonly IAppSettingsRepository _settings;
     private readonly VideoProbeService _videoProbe;
     private readonly IWaveformService _waveforms;
     private readonly IHardwareEncoderDetector _encoders;
@@ -45,7 +40,6 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     private bool _suppressSessionOpen;
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _waveformCts;
-    private CancellationTokenSource? _exportCts;
 
     private ClipSessionOption? _selectedSession;
     private RecordingSession? _currentSession;
@@ -62,19 +56,13 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     private TimeSpan _outPoint;
     private double _speed = 1.0;
     private ClipSpeedOption _selectedSpeedOption;
-    private ClipExportMode _exportMode = ClipExportMode.Both;
     private string _videoTitle = "未加载视频";
     private string _videoSubtitle = "从左侧选择录像场次，或打开本地 mkv / mp4 文件";
     private string _encoderText = "自动探测中…";
     private string _statusText = "从左侧选择录像，或打开本地视频开始剪辑。";
-    private string _outputDirectory = string.Empty;
-    private string _outputFileName = string.Empty;
-    private bool _outputFileNameAuto = true;
-    private bool _settingAutoOutputFileName;
     private bool _isWaveformLoading;
     private bool _isPlaying;
     private bool _isBusy;
-    private bool _isExporting;
     private bool _danmakuPlaybackEnabled = true;
 
     // ---- 边录边剪状态 ----
@@ -107,13 +95,14 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     {
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
         _highlights = highlights ?? throw new ArgumentNullException(nameof(highlights));
-        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _videoProbe = videoProbe ?? throw new ArgumentNullException(nameof(videoProbe));
         _waveforms = waveforms ?? throw new ArgumentNullException(nameof(waveforms));
         _encoders = encoders ?? throw new ArgumentNullException(nameof(encoders));
         _exporter = exporter ?? throw new ArgumentNullException(nameof(exporter));
         _liveRecordings = liveRecordings ?? throw new ArgumentNullException(nameof(liveRecordings));
         _liveWaveforms = liveWaveforms ?? throw new ArgumentNullException(nameof(liveWaveforms));
+        Export = new ClipExportViewModel(this, settings);
         Asr = new ClipAsrViewModel(asr ?? throw new ArgumentNullException(nameof(asr)), this);
         _liveRecordings.SessionCompleted += OnLiveRecordingSessionCompleted;
 
@@ -132,8 +121,12 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     /// <summary>由 View 注入：选择本地视频文件（mkv/mp4），返回绝对路径；null 表示取消。</summary>
     public Func<Task<string?>>? PickVideoFileAsync { get; set; }
 
-    /// <summary>由 View 注入：选择切片导出目录，返回绝对路径；null 表示取消。</summary>
-    public Func<Task<string?>>? PickExportDirectoryAsync { get; set; }
+    /// <summary>由 View 注入：选择切片导出目录，返回绝对路径；null 表示取消。转发到导出子视图模型。</summary>
+    public Func<Task<string?>>? PickExportDirectoryAsync
+    {
+        get => Export.PickExportDirectoryAsync;
+        set => Export.PickExportDirectoryAsync = value;
+    }
 
     /// <summary>时间轴/选区/波形数据变化，由 View 重新拉取后写入 ClipTimelineControl。</summary>
     public event EventHandler? TimelineDataChanged;
@@ -172,10 +165,11 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
     public ObservableCollection<ClipHighlightItemViewModel> Highlights { get; } = new();
 
-    public ObservableCollection<ClipExportTaskViewModel> ExportTasks { get; } = new();
-
     /// <summary>剪辑台「语音识别」子视图模型：面板状态、命令与结果行统一由它维护。</summary>
     public ClipAsrViewModel Asr { get; }
+
+    /// <summary>剪辑台「切片导出」子视图模型：导出面板状态、命令与导出队列统一由它维护。</summary>
+    public ClipExportViewModel Export { get; }
 
     public IReadOnlyList<ClipSpeedOption> SpeedOptions { get; }
 
@@ -242,7 +236,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             OnPropertyChanged(nameof(DurationText));
             OnPropertyChanged(nameof(PositionText));
             OnPropertyChanged(nameof(HasVideo));
-            RaiseExportAvailability();
+            Export.NotifyAvailabilityChanged();
             Asr.NotifyAvailabilityChanged();
         }
     }
@@ -368,84 +362,16 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     public string EncoderText
     {
         get => _encoderText;
-        private set => SetProperty(ref _encoderText, value);
-    }
-
-    public string OutputDirectory
-    {
-        get => _outputDirectory;
-        set
-        {
-            if (SetProperty(ref _outputDirectory, value))
-            {
-                RaiseExportAvailability();
-            }
-        }
-    }
-
-    public string OutputFileName
-    {
-        get => _outputFileName;
-        set
-        {
-            if (!SetProperty(ref _outputFileName, value))
-            {
-                return;
-            }
-
-            if (!_settingAutoOutputFileName)
-            {
-                // 用户手动改过文件名后，不再随选区自动覆盖。
-                _outputFileNameAuto = false;
-            }
-
-            RaiseExportAvailability();
-        }
-    }
-
-    public bool IsCleanOnlyExport
-    {
-        get => _exportMode == ClipExportMode.CleanOnly;
-        set => SetExportMode(ClipExportMode.CleanOnly, value);
-    }
-
-    public bool IsDanmakuOnlyExport
-    {
-        get => _exportMode == ClipExportMode.BurnedDanmaku;
-        set => SetExportMode(ClipExportMode.BurnedDanmaku, value);
-    }
-
-    public bool IsBothExport
-    {
-        get => _exportMode == ClipExportMode.Both;
-        set => SetExportMode(ClipExportMode.Both, value);
-    }
-
-    public ClipExportMode ExportMode => _exportMode;
-
-    public bool IsExporting
-    {
-        get => _isExporting;
         private set
         {
-            if (SetProperty(ref _isExporting, value))
+            if (SetProperty(ref _encoderText, value))
             {
-                RaiseExportAvailability();
-                OnPropertyChanged(nameof(ExportButtonText));
+                Export.NotifyEncoderTextChanged();
             }
         }
     }
 
-    public string ExportButtonText => _isExporting ? "导出中…" : "开始导出 MP4";
-
-    public bool CanExport =>
-        HasVideo && !IsExporting
-        && _outPoint - _inPoint >= MinSelection
-        && !string.IsNullOrWhiteSpace(_outputDirectory)
-        && !string.IsNullOrWhiteSpace(_outputFileName);
-
-    /// <summary>关键帧对齐误差提示（无损切割可能提前 1~3 秒）。</summary>
-    public string KeyframeTip => "无弹幕版使用 -c copy 无损切割，入点会自动对齐到最近关键帧，可能提前 1~3 秒。";
+    // ---- 导出面板（其余状态、命令与导出队列已抽离到 ClipExportViewModel） ----
 
     public string StatusText
     {
@@ -480,6 +406,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
             SyncLiveProgressCommand.NotifyCanExecuteChanged();
             OnPropertyChanged(nameof(DanmakuInfoText));
+            Export.NotifyAvailabilityChanged();
         }
     }
 
@@ -542,7 +469,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
 
         _initialized = true;
-        OutputDirectory = await ResolveDefaultOutputDirectoryAsync(ct).ConfigureAwait(true);
+        await Export.InitializeAsync(ct).ConfigureAwait(true);
         await RefreshSessionsAsync(ct).ConfigureAwait(true);
         _ = DetectEncoderAsync();
     }
@@ -741,14 +668,14 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
                 await LoadHighlightsAsync(session, metadata.Duration, ct).ConfigureAwait(true);
             }
 
-            SetAutoOutputFileName(BuildDefaultOutputName(videoPath, _inPoint, _outPoint));
+            Export.SetGeneratedOutputFileName(videoPath, _inPoint, _outPoint);
             IsWaveformLoading = true;
             RaiseTimelineChanged();
             DanmakuEnabledChanged?.Invoke(_danmakuPlaybackEnabled);
             DanmakuSyncRequested?.Invoke(Array.Empty<DanmakuMessage>(), true);
             LoadVideoRequested?.Invoke(videoPath);
             StatusText = $"已加载 {Path.GetFileName(videoPath)}（{ClipExportTaskViewModel.FormatTime(metadata.Duration)}）";
-            RaiseExportAvailability();
+            Export.NotifyAvailabilityChanged();
 
             _ = LoadWaveformAsync(videoPath, danmakuPath, metadata.Duration, waveformCt);
         }
@@ -875,7 +802,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
             // 先用占位数组按实时时长生成波形，等增量音频峰值提取完成后再刷新。
             RebuildLiveWaveformData();
-            SetAutoOutputFileName(BuildDefaultOutputName(partPath, _inPoint, _outPoint));
+            Export.SetGeneratedOutputFileName(partPath, _inPoint, _outPoint);
             IsWaveformLoading = true;
             LiveStatusText = BuildLiveStatusText();
             RaiseTimelineChanged();
@@ -883,7 +810,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             DanmakuSyncRequested?.Invoke(Array.Empty<DanmakuMessage>(), true);
             LoadLiveVideoRequested?.Invoke(partPath);
             StatusText = "正在录制中，可对已录制部分进行剪辑。";
-            RaiseExportAvailability();
+            Export.NotifyAvailabilityChanged();
             StartLiveSyncTimer();
             _ = ExtractLiveWaveformAsync(waveformCt);
         }
@@ -1594,9 +1521,9 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         OnPropertyChanged(nameof(OutPoint));
         RaiseSelectionChanged();
 
-        if (_outputFileNameAuto && _currentVideoPath is not null)
+        if (_currentVideoPath is not null)
         {
-            SetAutoOutputFileName(BuildDefaultOutputName(_currentVideoPath, _inPoint, _outPoint));
+            Export.UpdateGeneratedOutputFileName(_currentVideoPath, _inPoint, _outPoint);
         }
     }
 
@@ -1665,157 +1592,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         SeekTo(item.Position);
     }
 
-    // ---- 导出 ----
-
-    [RelayCommand]
-    private async Task ExportAsync()
-    {
-        if (!CanExport || _currentVideoPath is null)
-        {
-            StatusText = "请先加载视频、设置有效入出点与输出目录。";
-            return;
-        }
-
-        // 边录边剪且安全缓冲尚未成型（已录不足 5 秒）：此时导出可能读到半截写入的数据。
-        if (IsLiveSession && _safeClipDuration <= TimeSpan.Zero)
-        {
-            StatusText = "安全缓冲生成中（已录不足 5 秒），请稍后再导出。";
-            return;
-        }
-
-        // 边录边剪：录制结束前保留 5 秒安全缓冲，导出终点自动钳制到安全截止时间。
-        if (IsLiveSession && _safeClipDuration > TimeSpan.Zero)
-        {
-            if (_inPoint >= _safeClipDuration)
-            {
-                StatusText = "当前入点已超过安全可剪范围，请把入点移到录制进度稍早的位置。";
-                return;
-            }
-
-            if (_outPoint > _safeClipDuration)
-            {
-                UpdateSelection(_inPoint, _safeClipDuration);
-                StatusText = "已自动保留 5 秒安全缓冲避免影响录制。";
-            }
-        }
-
-        var request = new ClipExportRequest(
-            _currentVideoPath,
-            _danmakuItems is { Count: > 0 } ? _currentDanmakuPath : null,
-            _outputDirectory,
-            SanitizeFileName(_outputFileName),
-            _inPoint,
-            _outPoint,
-            _exportMode);
-
-        var task = new ClipExportTaskViewModel(request, _danmakuItems, _sourceVideoCodec, _exporter);
-        ExportTasks.Insert(0, task);
-        while (ExportTasks.Count > MaxExportTasks)
-        {
-            ExportTasks.RemoveAt(ExportTasks.Count - 1);
-        }
-
-        IsExporting = true;
-        _exportCts?.Dispose();
-        _exportCts = new CancellationTokenSource();
-        StatusText = $"开始导出：{task.RangeText} · {task.ModeText}";
-        try
-        {
-            await task.RunAsync(_exportCts.Token).ConfigureAwait(true);
-        }
-        finally
-        {
-            IsExporting = false;
-        }
-
-        StatusText = task.IsCompleted
-            ? $"导出完成：{task.OutputText}"
-            : task.IsCanceled
-                ? "导出已取消。"
-                : $"导出失败：{task.ErrorMessage}";
-    }
-
-    [RelayCommand]
-    private void CancelExport() => CancelCurrentExport();
-
-    public void CancelCurrentExport()
-    {
-        if (_exportCts is null || !_isExporting)
-        {
-            return;
-        }
-
-        StatusText = "正在取消导出…";
-        try
-        {
-            _exportCts.Cancel();
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-    }
-
-    [RelayCommand]
-    private async Task PickOutputDirectoryAsync()
-    {
-        if (PickExportDirectoryAsync is null)
-        {
-            StatusText = "当前界面未接入目录选择器。";
-            return;
-        }
-
-        try
-        {
-            var directory = await PickExportDirectoryAsync().ConfigureAwait(true);
-            if (!string.IsNullOrWhiteSpace(directory))
-            {
-                OutputDirectory = directory;
-            }
-        }
-        catch (Exception ex)
-        {
-            StatusText = $"选择导出目录失败：{ex.Message}";
-        }
-    }
-
-    [RelayCommand]
-    private void OpenOutputDirectory()
-    {
-        if (string.IsNullOrWhiteSpace(_outputDirectory) || !Directory.Exists(_outputDirectory))
-        {
-            StatusText = "输出目录尚不存在，导出时会自动创建。";
-            return;
-        }
-
-        try
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "explorer.exe",
-                Arguments = $"\"{_outputDirectory}\"",
-                UseShellExecute = true
-            });
-        }
-        catch (Exception ex)
-        {
-            StatusText = $"打开输出目录失败：{ex.Message}。请手动在资源管理器中打开：{_outputDirectory}";
-        }
-    }
-
     // ---- 私有辅助 ----
-
-    private async Task<string> ResolveDefaultOutputDirectoryAsync(CancellationToken ct)
-    {
-        var configured = await _settings
-            .GetAsync(AppSettingKeys.RecordingDefaultDirectory, ct)
-            .ConfigureAwait(true);
-        if (!string.IsNullOrWhiteSpace(configured))
-        {
-            return Environment.ExpandEnvironmentVariables(configured.Trim());
-        }
-
-        return RecordingManager.DefaultDirectory;
-    }
 
     private static string BuildVideoSubtitle(string videoPath, RecordingSession? session, VideoMetadata metadata)
     {
@@ -1830,19 +1607,6 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         return $"{session.RoomDisplayName} · {title} · {geometry}";
     }
 
-    private static string BuildDefaultOutputName(string videoPath, TimeSpan start, TimeSpan end)
-    {
-        var baseName = Path.GetFileNameWithoutExtension(videoPath);
-        var startText = FormatClock(start);
-        var endText = FormatClock(end);
-        var name = $"{baseName}_{startText}-{endText}";
-        return name.Length <= 90 ? name : name[..90];
-    }
-
-    private static string FormatClock(TimeSpan time) => time.TotalHours >= 1
-        ? time.ToString(@"h\.mm\.ss")
-        : time.ToString(@"mm\.ss");
-
     /// <summary>本地文件若存在同名 .jsonl 则自动作为弹幕伴随文件。</summary>
     private static string? FindCompanionDanmaku(string videoPath)
     {
@@ -1854,19 +1618,6 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
         var candidate = truncated + ".jsonl";
         return File.Exists(candidate) ? candidate : null;
-    }
-
-    private static string SanitizeFileName(string fileName)
-    {
-        var invalidChars = Path.GetInvalidFileNameChars();
-        var builder = new System.Text.StringBuilder(fileName.Length);
-        foreach (var ch in fileName.Trim())
-        {
-            builder.Append(invalidChars.Contains(ch) ? '_' : ch);
-        }
-
-        var sanitized = builder.ToString().Trim();
-        return sanitized.Length == 0 ? $"clip_{DateTime.Now:yyyyMMdd_HHmmss}" : sanitized;
     }
 
     private static TimeSpan Clamp(TimeSpan value, TimeSpan min, TimeSpan max)
@@ -1901,45 +1652,14 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         return messages;
     }
 
-    private void SetExportMode(ClipExportMode mode, bool isChecked)
-    {
-        if (!isChecked || _exportMode == mode)
-        {
-            return;
-        }
-
-        _exportMode = mode;
-        OnPropertyChanged(nameof(IsCleanOnlyExport));
-        OnPropertyChanged(nameof(IsDanmakuOnlyExport));
-        OnPropertyChanged(nameof(IsBothExport));
-    }
-
-    /// <summary>自动填充输出文件名；用户手动改过文件名后由 setter 关闭自动覆盖。</summary>
-    private void SetAutoOutputFileName(string name)
-    {
-        _settingAutoOutputFileName = true;
-        try
-        {
-            OutputFileName = name;
-        }
-        finally
-        {
-            _settingAutoOutputFileName = false;
-        }
-
-        _outputFileNameAuto = true;
-    }
-
     private void RaiseSelectionChanged()
     {
         OnPropertyChanged(nameof(InText));
         OnPropertyChanged(nameof(OutText));
         OnPropertyChanged(nameof(SelectionText));
-        RaiseExportAvailability();
+        Export.NotifyAvailabilityChanged();
         Asr.NotifyAvailabilityChanged();
     }
-
-    private void RaiseExportAvailability() => OnPropertyChanged(nameof(CanExport));
 
     private void RaiseTimelineChanged() => TimelineDataChanged?.Invoke(this, EventArgs.Empty);
 
@@ -1976,6 +1696,36 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     void IClipAsrHost.SetStatusText(string text) => StatusText = text;
 
     void IClipAsrHost.RefreshHighlightAvailability() => RefreshHighlightTranscribeAvailability();
+
+    // ---- IClipExportHost：导出子视图模型读取的剪辑台边界 ----
+
+    string? IClipExportHost.CurrentVideoPath => _currentVideoPath;
+
+    bool IClipExportHost.HasVideo => HasVideo;
+
+    TimeSpan IClipExportHost.InPoint => _inPoint;
+
+    TimeSpan IClipExportHost.OutPoint => _outPoint;
+
+    TimeSpan IClipExportHost.SelectionMinimum => MinSelection;
+
+    bool IClipExportHost.IsLiveSession => _isLiveSession;
+
+    TimeSpan IClipExportHost.SafeClipDuration => _safeClipDuration;
+
+    IReadOnlyList<RecordedDanmakuItem>? IClipExportHost.DanmakuItems => _danmakuItems;
+
+    string? IClipExportHost.DanmakuPath => _currentDanmakuPath;
+
+    string IClipExportHost.SourceVideoCodec => _sourceVideoCodec;
+
+    IClipExporter IClipExportHost.Exporter => _exporter;
+
+    string IClipExportHost.EncoderText => _encoderText;
+
+    void IClipExportHost.SetStatusText(string text) => StatusText = text;
+
+    void IClipExportHost.SetSelection(TimeSpan start, TimeSpan end) => UpdateSelection(start, end);
 
     /// <summary>按全局互斥状态刷新每张高能卡片「🎙 转写」按钮的可用性。</summary>
     private void RefreshHighlightTranscribeAvailability()
@@ -2019,7 +1769,6 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         {
             _loadCts?.Cancel();
             _waveformCts?.Cancel();
-            _exportCts?.Cancel();
         }
         catch (ObjectDisposedException)
         {
@@ -2027,14 +1776,12 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
         _loadCts?.Dispose();
         _waveformCts?.Dispose();
-        _exportCts?.Dispose();
         _loadCts = null;
         _waveformCts = null;
-        _exportCts = null;
         Asr.Dispose();
+        Export.Dispose();
         Highlights.Clear();
         Sessions.Clear();
-        ExportTasks.Clear();
     }
 }
 
