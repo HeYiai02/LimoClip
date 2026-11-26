@@ -80,7 +80,9 @@ public sealed class ClipExporterTests : IDisposable
         using var guard = new ProcessJobGuard();
         var exporter = CreateExporter(guard);
         var progressReports = new List<ClipExportProgress>();
-        var progress = new Progress<ClipExportProgress>(progressReports.Add);
+        // 用同步回调替代 Progress<T>（其回调是异步派发，导出返回后最后一个 100% 报告可能尚未入列），
+        // 避免断言进度末项时与回调线程竞争。
+        var progress = new InlineProgress<ClipExportProgress>(progressReports.Add);
 
         var outputs = await exporter.ExportAsync(
             BuildRequest(video, "both-clip", TimeSpan.FromSeconds(0.5), TimeSpan.FromSeconds(2.5), ClipExportMode.Both),
