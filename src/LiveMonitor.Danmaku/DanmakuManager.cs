@@ -28,18 +28,6 @@ internal readonly record struct RoomKey(PlatformType Platform, string RoomId)
 /// </summary>
 public sealed class DanmakuManager : IAsyncDisposable
 {
-    /// <summary>断线重连退避序列：3s → 10s → 30s → 60s，之后固定 60s。</summary>
-    private static readonly TimeSpan[] BackoffSchedule =
-    {
-        TimeSpan.FromSeconds(3),
-        TimeSpan.FromSeconds(10),
-        TimeSpan.FromSeconds(30),
-        TimeSpan.FromSeconds(60),
-    };
-
-    /// <summary>一次连接持续超过该时长后，断线时把退避重置回 3 秒。</summary>
-    private static readonly TimeSpan StableConnectionThreshold = TimeSpan.FromSeconds(30);
-
     private readonly IDanmakuClientFactory _clientFactory;
     private readonly ICredentialStore _credentials;
     private readonly IBlocklistRepository _blocklistRepository;
@@ -560,13 +548,12 @@ public sealed class DanmakuManager : IAsyncDisposable
                 }
 
                 // 持续稳定超过阈值后，断线重连从头开始退避，避免长期连接偶发断开直接退到 60 秒。
-                if (connected && _clock() - connectedAt >= StableConnectionThreshold)
-                {
-                    backoffIndex = 0;
-                }
+                backoffIndex = DanmakuReconnectPolicy.ResetIndexIfStable(
+                    backoffIndex,
+                    connected ? _clock() - connectedAt : TimeSpan.Zero);
 
-                var wait = BackoffSchedule[Math.Min(backoffIndex, BackoffSchedule.Length - 1)];
-                backoffIndex = Math.Min(backoffIndex + 1, BackoffSchedule.Length - 1);
+                var wait = DanmakuReconnectPolicy.DelayFor(backoffIndex);
+                backoffIndex = DanmakuReconnectPolicy.NextAttemptIndex(backoffIndex);
                 Log($"[{session.Platform}:{session.RoomId}] {wait.TotalSeconds:0} 秒后重连。");
 
                 try
