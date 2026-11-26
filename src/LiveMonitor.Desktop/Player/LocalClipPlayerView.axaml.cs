@@ -87,8 +87,7 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
 
     public ClipPlayerState State => _state;
 
-    public bool IsLoaded => _filePath is not null && _state is ClipPlayerState.Ready
-        or ClipPlayerState.Playing or ClipPlayerState.Paused or ClipPlayerState.Ended;
+    public bool IsLoaded => _filePath is not null && ClipPlaybackStateLogic.IsLoadedState(_state);
 
     public bool IsPlaying => _state == ClipPlayerState.Playing;
 
@@ -320,7 +319,7 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
     {
         if (!File.Exists(filePath))
         {
-            var missing = $"找不到视频文件：{filePath}";
+            var missing = ClipPlaybackStateLogic.BuildMissingFileMessage(filePath);
             SetState(ClipPlayerState.Failed, missing);
             PlaybackFailed?.Invoke(missing);
             throw new FileNotFoundException(missing, filePath);
@@ -331,7 +330,7 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
         _position = TimeSpan.Zero;
         _paused = true;
         _completionRaised = false;
-        SetState(ClipPlayerState.Loading, "正在加载本地视频…");
+        SetState(ClipPlayerState.Loading, ClipPlaybackStateLogic.LoadingDetail);
 
         var loadTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _loadTcs = loadTcs;
@@ -368,7 +367,7 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            SetState(ClipPlayerState.Empty, "已取消加载");
+            SetState(ClipPlayerState.Empty, ClipPlaybackStateLogic.CancelledDetail);
             throw;
         }
         catch (Exception ex)
@@ -395,7 +394,7 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
             return;
         }
 
-        if (_state == ClipPlayerState.Ended)
+        if (ClipPlaybackStateLogic.ShouldRestartBeforePlay(_state))
         {
             Seek(TimeSpan.Zero);
         }
@@ -420,7 +419,7 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
     /// <summary>暂停。</summary>
     public void Pause()
     {
-        if (_state != ClipPlayerState.Playing)
+        if (!ClipPlaybackStateLogic.CanPause(_state))
         {
             return;
         }
@@ -475,7 +474,7 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
 
         _position = target;
         _completionRaised = false;
-        if (_state == ClipPlayerState.Ended)
+        if (ClipPlaybackStateLogic.ShouldReturnToPausedAfterSeek(_state))
         {
             SetState(ClipPlayerState.Paused, null);
         }
@@ -489,7 +488,7 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
     /// <summary>设置播放倍速（0.5x~2.0x），同时同步弹幕层速度。</summary>
     public void SetSpeed(double speed)
     {
-        _speed = Math.Clamp(speed, 0.5, 2.0);
+        _speed = ClipPlaybackStateLogic.ClampSpeed(speed);
         ApplySpeed();
         DanmakuLayer.PlaybackRate = _speed;
     }
@@ -666,9 +665,9 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
     {
         Dispatcher.UIThread.Post(() =>
         {
-            if (_disposed == 0 && _state == ClipPlayerState.Loading)
+            if (_disposed == 0 && ClipPlaybackStateLogic.ShouldShowPreparingDetail(_state))
             {
-                SetState(ClipPlayerState.Loading, "正在准备解码…");
+                SetState(ClipPlayerState.Loading, ClipPlaybackStateLogic.PreparingDetail);
             }
         });
     }
@@ -689,10 +688,17 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
 
     private void OnEndFile(object? sender, MpvEndFileEventArgs e)
     {
-        var reason = e.EventData.Reason;
+        var reason = e.EventData.Reason switch
+        {
+            MpvEndFileReason.MpvEndFileReasonStop => ClipEndReason.Stop,
+            MpvEndFileReason.MpvEndFileReasonQuit => ClipEndReason.Quit,
+            MpvEndFileReason.MpvEndFileReasonError => ClipEndReason.Error,
+            MpvEndFileReason.MpvEndFileReasonEof => ClipEndReason.Eof,
+            _ => ClipEndReason.Other
+        };
         var error = e.EventData.Error;
 
-        if (reason is MpvEndFileReason.MpvEndFileReasonStop or MpvEndFileReason.MpvEndFileReasonQuit)
+        if (reason is ClipEndReason.Stop or ClipEndReason.Quit)
         {
             return;
         }
@@ -704,23 +710,29 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
                 return;
             }
 
-            if (reason == MpvEndFileReason.MpvEndFileReasonError)
+            var isLoading = _state == ClipPlayerState.Loading;
+            var action = ClipPlaybackStateLogic.ClassifyEnd(reason, IsLoaded, isLoading);
+            if (action == ClipEndAction.FailWhileLoading)
             {
-                var message = $"本地视频播放失败 (code {error})";
-                if (Volatile.Read(ref _disposed) == 0 && _state == ClipPlayerState.Loading)
-                {
-                    _loadTcs?.TrySetException(new InvalidOperationException(message));
-                }
-                else if (IsLoaded || _state == ClipPlayerState.Failed)
-                {
-                    SetState(ClipPlayerState.Failed, message);
-                    PlaybackFailed?.Invoke(message);
-                }
-
+                _loadTcs?.TrySetException(
+                    new InvalidOperationException(ClipPlaybackStateLogic.BuildPlaybackFailedMessage(error)));
                 return;
             }
 
-            if (reason == MpvEndFileReason.MpvEndFileReasonEof && IsLoaded)
+            if (action == ClipEndAction.Fail)
+            {
+                if (!IsLoaded && _state != ClipPlayerState.Failed)
+                {
+                    return;
+                }
+
+                var message = ClipPlaybackStateLogic.BuildPlaybackFailedMessage(error);
+                SetState(ClipPlayerState.Failed, message);
+                PlaybackFailed?.Invoke(message);
+                return;
+            }
+
+            if (action == ClipEndAction.Complete)
             {
                 RaiseCompleted();
             }
@@ -729,7 +741,7 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
 
     private void RaiseCompleted()
     {
-        if (_completionRaised || _state is not (ClipPlayerState.Playing or ClipPlayerState.Paused))
+        if (!ClipPlaybackStateLogic.CanRaiseCompletion(_state, _completionRaised))
         {
             return;
         }
@@ -746,7 +758,7 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
             // mpv 释放中忽略。
         }
 
-        _position = _duration > TimeSpan.Zero ? _duration : _position;
+        _position = ClipPlaybackStateLogic.CompletionPosition(_duration, _position);
         DanmakuLayer.IsPaused = true;
         SetState(ClipPlayerState.Ended, null);
         PlaybackCompleted?.Invoke(this, EventArgs.Empty);
@@ -754,7 +766,7 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
 
     private void SetState(ClipPlayerState state, string? detail)
     {
-        if (_state == state && state != ClipPlayerState.Failed)
+        if (!ClipPlaybackStateLogic.ShouldRaiseStateChanged(_state, state))
         {
             return;
         }
