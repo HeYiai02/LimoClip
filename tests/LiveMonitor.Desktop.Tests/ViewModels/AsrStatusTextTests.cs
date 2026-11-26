@@ -25,4 +25,23 @@ public sealed class AsrStatusTextTests
     [Fact]
     public void CopyFailed_includes_message()
         => Assert.Equal("复制识别文本失败：剪贴板被占用", AsrStatusText.CopyFailed("剪贴板被占用"));
+
+    [Fact]
+    public void ExtendedConstants_keep_original_copy()
+    {
+        Assert.Equal("语音识别失败，请稍后重试。", AsrStatusText.FailedMessage);
+        Assert.Equal("未知服务商", AsrStatusText.UnknownProvider);
+        Assert.Equal("识别完成：未识别到文本", AsrStatusText.CompletedEmpty);
+    }
+
+    [Fact]
+    public void FailedWithMessage_prefixes_reason()
+        => Assert.Equal("语音识别失败：尚未配置语音识别 API", AsrStatusText.FailedWithMessage("尚未配置语音识别 API"));
+
+    [Fact]
+    public void Completed_includes_line_count()
+    {
+        Assert.Equal("识别完成：2 句", AsrStatusText.Completed(2));
+        Assert.Equal("识别完成：1 句", AsrStatusText.Completed(1));
+    }
 }

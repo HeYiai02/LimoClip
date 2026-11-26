@@ -159,4 +159,51 @@ public sealed class MainWindowStatusTextTests
         Assert.Equal("方案「方案A」反序列化失败，已重建：坏 JSON",
             MainWindowStatusText.ProfileDeserializeFailed("方案A", "坏 JSON"));
     }
+
+    [Fact]
+    public void FreeformMode_uses_two_sided_copy()
+    {
+        Assert.Equal("自由布局：开", MainWindowStatusText.FreeformModeLabel(true));
+        Assert.Equal("自由布局：关", MainWindowStatusText.FreeformModeLabel(false));
+        Assert.Contains("Alt+拖动", MainWindowStatusText.FreeformModeHint(true));
+        Assert.Contains("磁吸", MainWindowStatusText.FreeformModeHint(false));
+    }
+
+    [Fact]
+    public void FailureMessages_prefix_reason()
+    {
+        Assert.Equal("录制引擎初始化失败：坏引擎", MainWindowStatusText.RecordingEngineInitFailed("坏引擎"));
+        Assert.Equal("刷新录制中心失败：超时", MainWindowStatusText.RecordingCenterRefreshFailed("超时"));
+        Assert.Equal("初始化剪辑台失败：缺文件", MainWindowStatusText.ClipStudioInitFailed("缺文件"));
+        Assert.Equal("打开剪辑台失败：无权限", MainWindowStatusText.ClipStudioOpenFailed("无权限"));
+        Assert.Equal("停止录制失败，已取消删除：锁占用", MainWindowStatusText.RecordingStopFailedCancelingDelete("锁占用"));
+    }
+
+    [Fact]
+    public void ClipStudioEntered_uses_room_display_name()
+        => Assert.Equal("已进入剪辑台：#4 蛋蛋的BJ", MainWindowStatusText.ClipStudioEntered("#4 蛋蛋的BJ"));
+
+    [Fact]
+    public void RoomFlow_messages()
+    {
+        Assert.Equal("工作区尚未初始化。", MainWindowStatusText.WorkspaceNotInitialized);
+        Assert.Equal("房间不存在。", MainWindowStatusText.RoomNotFound);
+        Assert.Equal("已添加 别名", MainWindowStatusText.RoomAdded("别名"));
+        Assert.Equal("已自适应 4 路", MainWindowStatusText.AutoFitAppliedShort(4));
+        Assert.Equal("已自动适配 4 路", MainWindowStatusText.AutoAdaptedShort(4));
+        Assert.Equal("自定义比例（恢复）", MainWindowStatusText.CustomRatioRestoreProfileName);
+        Assert.Equal("已移出 房间B（保留自定义比例）", MainWindowStatusText.RoomRemovedKeepingRatio("房间B"));
+    }
+
+    [Fact]
+    public void HeroSide_messages()
+    {
+        Assert.Equal("正在重新连接…", MainWindowStatusText.PlayerReconnecting);
+        Assert.Equal("房间不足 3 路，主副屏布局暂按单行排布", MainWindowStatusText.HeroSideMinimumHint);
+        Assert.Equal("已切换为主副屏布局（5 路）", MainWindowStatusText.HeroSideApplied(5));
+    }
+
+    [Fact]
+    public void RecordingStopped_uses_alias()
+        => Assert.Equal("已停止 别名 的录制。", MainWindowStatusText.RecordingStopped("别名"));
 }
