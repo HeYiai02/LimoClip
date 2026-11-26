@@ -1,5 +1,4 @@
 using System;
-using System.Globalization;
 using System.IO;
 
 namespace LiveMonitor.Desktop.ViewModels;
@@ -29,10 +28,8 @@ internal static class ClipExportNamingLogic
         return name.Length <= MaxOutputNameLength ? name : name[..MaxOutputNameLength];
     }
 
-    /// <summary>选区时间码：≥1 小时为 <c>h.mm.ss</c>，否则 <c>mm.ss</c>（与界面历史文案一致）。</summary>
-    public static string FormatClock(TimeSpan time) => time.TotalHours >= 1
-        ? time.ToString(@"h\.mm\.ss", CultureInfo.InvariantCulture)
-        : time.ToString(@"mm\.ss", CultureInfo.InvariantCulture);
+    /// <summary>选区时间码：≥1 小时为 <c>h.mm.ss</c>，否则 <c>mm.ss</c>（实现见 <see cref="TimeCodeFormat.FileSafeClock"/>）。</summary>
+    public static string FormatClock(TimeSpan time) => TimeCodeFormat.FileSafeClock(time);
 
     /// <summary>把文件名中的非法字符替换为下划线；去空白后为空则回退到时间戳文件名。</summary>
     public static string SanitizeFileName(string? fileName, DateTimeOffset now)

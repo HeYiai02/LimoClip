@@ -1,4 +1,5 @@
 using System.Globalization;
+using LiveMonitor.Desktop.ViewModels;
 
 namespace LiveMonitor.Desktop.Player;
 
@@ -127,18 +128,7 @@ internal sealed class ReplaySeekLogic
         $"{FormatClock(seconds)} / {FormatClock(duration)}";
 
     /// <summary>秒数格式化为 mm:ss；超过 1 小时为 h:mm:ss；非法值或负数按 0 处理。</summary>
-    public static string FormatClock(double seconds)
-    {
-        if (!double.IsFinite(seconds) || seconds < 0)
-        {
-            seconds = 0;
-        }
-
-        var span = TimeSpan.FromSeconds(seconds);
-        return span.TotalHours >= 1
-            ? span.ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture)
-            : span.ToString(@"mm\:ss", CultureInfo.InvariantCulture);
-    }
+    public static string FormatClock(double seconds) => TimeCodeFormat.Clock(seconds);
 }
 
 /// <summary>一次探测后需要写回进度条控件的增量；为 null 的字段表示无需更新。</summary>

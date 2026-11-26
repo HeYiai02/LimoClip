@@ -49,18 +49,7 @@ internal static class RecordingUiFormat
         _ => "其他平台"
     };
 
-    public static string FormatDuration(TimeSpan duration)
-    {
-        if (duration < TimeSpan.Zero)
-        {
-            duration = TimeSpan.Zero;
-        }
-
-        var totalHours = (int)duration.TotalHours;
-        return totalHours > 0
-            ? $"{totalHours:00}:{duration.Minutes:00}:{duration.Seconds:00}"
-            : $"{duration.Minutes:00}:{duration.Seconds:00}";
-    }
+    public static string FormatDuration(TimeSpan duration) => TimeCodeFormat.DurationZeroPadded(duration);
 
     public static string FormatDuration(double seconds)
         => FormatDuration(TimeSpan.FromSeconds(Math.Max(0d, seconds)));
