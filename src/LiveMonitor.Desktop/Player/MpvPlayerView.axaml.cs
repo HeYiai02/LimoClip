@@ -308,14 +308,13 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
 
     private void UpdateMuteVisual(bool muted)
     {
-        // Segoe Fluent Icons: E74F = Mute，E767 = Volume。
-        MuteIcon.Text = muted ? "\uE74F" : "\uE767";
-        Avalonia.Controls.ToolTip.SetTip(MuteButton, muted ? "开声" : "静音");
+        MuteIcon.Text = PlayerChromeLogic.MuteIcon(muted);
+        Avalonia.Controls.ToolTip.SetTip(MuteButton, PlayerChromeLogic.MuteTip(muted));
     }
 
     public void SetVolume(int volume)
     {
-        _volume = Math.Clamp(volume, 0, 100);
+        _volume = PlayerChromeLogic.ClampVolume(volume);
         _suppressVolumeChange++;
         try
         {
@@ -339,8 +338,8 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
     public void SetCompactMode(bool enabled)
     {
         _compact = enabled;
-        CompactButton.Content = enabled ? "15fps" : "60fps";
-        DanmakuLayer.MaxConcurrent = enabled ? 15 : 30;
+        CompactButton.Content = PlayerChromeLogic.CompactButtonText(enabled);
+        DanmakuLayer.MaxConcurrent = PlayerChromeLogic.MaxConcurrentFor(enabled);
         ApplyVideoFilter();
     }
 
@@ -444,7 +443,9 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
 
     private void UpdateDanmakuLayerVisibility()
     {
-        var visible = _danmakuMasterEnabled && _boundTile?.IsDanmakuVisible == true;
+        var visible = PlayerChromeLogic.DanmakuLayerVisible(
+            _danmakuMasterEnabled,
+            _boundTile?.IsDanmakuVisible == true);
         if (DanmakuLayer.IsVisible == visible)
         {
             return;
