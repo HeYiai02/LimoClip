@@ -30,7 +30,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | WebView 登录 | WebView2（临时用户目录，登录后采集 Cookie） |
 | 平台解析 | 各家 HTTP API + Jint（斗鱼签名、抖音 sign.js）；yt-dlp 作为 YouTube/Twitch 兜底 |
 | 插件签名 | Ed25519（BouncyCastle）+ SHA256 清单校验 |
-| 测试 | xUnit（6 个测试工程，当前共 2038 个用例） |
+| 测试 | xUnit（6 个测试工程，当前共 2067 个用例） |
 
 ### 平台支持矩阵
 
@@ -366,6 +366,7 @@ Program.Main
   - `Acquire(platform, roomId)`：返回 `DanmakuSessionHandle`；监控窗格、录制、剪辑回放分别克隆句柄，最后一个句柄 Dispose 时才真正断开连接；
   - `ReloadSettingsAsync` / `UpdateHighlightRulesAsync` / `SetUnicycleEnabledAsync`：设置页变更后热更新过滤链与检测参数；
   - `GetRecentHighlightEventsAsync`：供 UI 展示最近高能事件。
+  - 主窗口窗格订阅同步规则：进入工作区的窗格按 `(平台, 房间号)` 订阅，清流与空房间号不订阅；窗格离开工作区或平台/房间号变化时释放旧句柄后重订阅；设置项（弹幕总闸/贴纸/表情图片）缺省开启、仅显式保存 `false` 才关闭。这些纯规则位于 `ViewModels/DanmakuSubscriptionLogic`（`DanmakuSubscriptionLogicTests` 覆盖），主控制条「全部静音」图标与提示复用 `Player/PlayerChromeLogic`（V0.7.5）。
 - 过滤器链（`IDanmakuFilter`）：
   - `BilibiliUnicycleFilter`：B 站独轮车识别（同用户高频、复读机式复制弹幕、短文本豁免），命中后仅计数不渲染；
   - `KeywordFilter`：`DanmakuBlockKeywords` 黑名单，支持子串匹配。
@@ -593,7 +594,7 @@ dotnet build LiveMonitor.sln --no-restore
 - 工程目标框架：`Data`、`Media`、`Desktop` 为 `net8.0-windows`，其余类库为 `net8.0`；测试工程对应同目标框架（`Data`/`Media`/`Desktop` 测试为 `net8.0-windows`，`Platforms`/`Danmaku` 测试为 `net8.0`）。
 - 需要 `tools/` 下的 ffmpeg/mpv 才能运行应用（`scripts/fetch-tools.ps1` 自动下载并校验）。
 
-### 13.2 测试（当前 2038 个用例）
+### 13.2 测试（当前 2067 个用例）
 
 | 测试工程 | 覆盖范围 | 用例数 |
 | --- | --- | --- |
@@ -603,7 +604,7 @@ dotnet build LiveMonitor.sln --no-restore
 | `tests/LiveMonitor.Media.Tests` | 录制状态机与并发收尾、轮询器与会话工作器、分段合并、剪辑导出、波形、增量波形/增量弹幕读取、FFmpeg 参数协议分支 | 232 |
 | `tests/LiveMonitor.Desktop.Tests` | ViewModel（主窗口拆分/房间目录/布局方案/状态栏/高亮/录制中心/剪辑台与 ASR/导出子视图模型/设置页 ASR/组件更新/通用与弹幕）、Dock/自由画布布局、时间轴几何（`ClipTimelineGeometry`）与缩放视口/拖拽钳制（`ClipTimelineViewLogic`）、播放器管理器与 `IWorkspacePlayer`、回放 seek 探测/防抖逻辑（`ReplaySeekLogic`）、剪辑预览位置推进与安全上界（`ClipPlaybackPositionLogic`）、剪辑预览播放状态机与守卫（`ClipPlaybackStateLogic`）、剪辑台展示层纯逻辑（`ClipStudioPresentationLogic`）、音量表解析与平滑（`AudioMeterLogic`）、mpv 流选项映射与请求头清理（`StreamOptionMapper`）、AppServices 释放、登录配置、播放状态文本、录制目标排序、自由布局命中与宿主切换、自由画布交互几何（`FreeformInteractionLogic`）、录制中心历史子视图模型（`RecordingHistoryViewModel`）、弹幕渲染层纯逻辑（`DanmakuOverlayLogic`）、窗格控制条 chrome 规则（`PlayerChromeLogic`）、健康采样规则（`PlayerHealthSampling`）、录制目标行展示规则（`RecordingTargetDisplayLogic`）、历史录像行展示规则（`RecordingHistoryDisplayLogic`）、播放器丢帧降档守护（`DropGuardPolicy`）、状态栏 GPU 指标解析与展示（`GpuMetricsLogic`）、边录边剪增量波形纯逻辑（`LiveWaveformLogic`）、剪辑台选区/步进/高能窗口纯规则（`ClipSelectionLogic`）、剪辑台列表行展示规则（`ClipListDisplayLogic`）、导出任务行展示规则（`ClipExportTaskDisplayLogic`） | 1131 |
 
-合计 **2038** 个用例，五套全部通过（0 失败 0 跳过）。
+合计 **2067** 个用例，五套全部通过（0 失败 0 跳过）。
 
 运行方式（使用已构建的测试 dll，避免重复构建）：
 
