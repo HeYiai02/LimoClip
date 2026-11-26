@@ -498,7 +498,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         if (IsFreeformMode)
         {
             IsFreeformMode = false;
-            StatusText = "已退出自由布局：恢复平铺布局。";
+            StatusText = MainWindowStatusText.FreeformExited();
             return;
         }
 
@@ -518,19 +518,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         _freeformDocument = document;
         FreeformApplyRequested?.Invoke(this, document);
         LayoutProfiles.MarkDirty();
-        StatusText = preset switch
-        {
-            FreeformPreset.Hero => "已应用自由布局预设：主副屏。",
-            FreeformPreset.PictureInPicture => "已应用自由布局预设：画中画。",
-            _ => "已应用自由布局预设：自动平铺。"
-        };
+        StatusText = MainWindowStatusText.FreeformPresetApplied(preset);
     }
 
     private void EnterFreeformMode(FreeformPreset preset)
     {
         if (WorkspaceTiles.Count == 0)
         {
-            StatusText = "工作区还没有窗格：先双击左侧直播间加入工作区。";
+            StatusText = MainWindowStatusText.WorkspaceEmptyHint();
             return;
         }
 
@@ -539,12 +534,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         _freeformDocument = document;
         FreeformApplyRequested?.Invoke(this, document);
         LayoutProfiles.MarkDirty();
-        StatusText = preset switch
-        {
-            FreeformPreset.Hero => "已进入自由布局（主副屏）：拖动/缩放窗格，右键设置画中画。",
-            FreeformPreset.PictureInPicture => "已进入自由布局（画中画）：拖动/缩放窗格，右键可置顶。",
-            _ => "已进入自由布局：拖动/缩放窗格，右键设置画中画。"
-        };
+        StatusText = MainWindowStatusText.FreeformEntered(preset);
     }
 
     private string SerializeCurrentLayout(IRootDock layout) =>
@@ -889,7 +879,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
             {
                 // 管理器未初始化/已释放时不让整个方案加载失败：跳过该窗格，等待下次 Sync 重试。
-                StatusText = $"弹幕订阅失败：{ex.Message}";
+                StatusText = MainWindowStatusText.DanmakuSubscribeFailed(ex.Message);
                 continue;
             }
 
@@ -971,7 +961,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         var existing = tiles.FirstOrDefault(tile => tile.LiveRoomId == roomId);
         if (existing is not null)
         {
-            StatusText = $"{existing.DisplayTitle} 已在工作区";
+            StatusText = MainWindowStatusText.RoomAlreadyInWorkspace(existing.DisplayTitle);
             return;
         }
 
@@ -1002,7 +992,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         {
             empty.Assign(room);
             LayoutProfiles.MarkDirty();
-            StatusText = $"已放入 {empty.DisplayTitle}";
+            StatusText = MainWindowStatusText.RoomAddedToWorkspace(empty.DisplayTitle);
             if (startPlayback)
             {
                 await _players.StartAsync(empty, ct).ConfigureAwait(true);
@@ -1058,7 +1048,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         {
             SetCustomLayout(false);
             LayoutProfiles.MarkDirty();
-            StatusText = rooms.Count == 0 ? "已重置为自动适配" : $"已自适应 {rooms.Count} 路（比例已归位）";
+            StatusText = rooms.Count == 0 ? MainWindowStatusText.AutoFitReset() : MainWindowStatusText.AutoFitApplied(rooms.Count);
             ProportionsRestored?.Invoke(this, EventArgs.Empty);
             return;
         }
@@ -1106,7 +1096,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             }
             catch (Exception ex)
             {
-                StatusText = $"自定义比例快照解析失败，将重建布局：{ex.Message}";
+                StatusText = MainWindowStatusText.RatioSnapshotParseFailed(ex.Message);
             }
 
             if (snapshot is not null && WorkspaceDockBuilder.TryApplyProportions(Layout, snapshot))
@@ -1115,7 +1105,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
                 SetHeroLayout(WorkspaceDockBuilder.ContainsDockId(snapshot, "workspace-hero"));
                 LayoutProfiles.RestoreDirty(_customLayoutSnapshotDirty);
                 ClearCustomLayoutSnapshot();
-                StatusText = "已恢复自定义比例";
+                StatusText = MainWindowStatusText.RatioRestored();
                 ProportionsRestored?.Invoke(this, EventArgs.Empty);
                 // 从自由画布切回时宿主切换已解绑播放器，恢复比例不会重建布局，必须补一次起播。
                 if (exitedFreeform)
@@ -1151,7 +1141,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         SetCustomLayout(true);
         LayoutProfiles.RestoreDirty(_customLayoutSnapshotDirty);
         ClearCustomLayoutSnapshot();
-        StatusText = "已恢复自定义比例（播放器已重建）";
+        StatusText = MainWindowStatusText.RatioRestoredWithRebuild();
         ProportionsRestored?.Invoke(this, EventArgs.Empty);
     }
 
@@ -1222,7 +1212,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             _players.StartAsync(target)).ConfigureAwait(true);
 
         LayoutProfiles.MarkDirty();
-        StatusText = $"已交换 {source.DisplayTitle} 与 {target.DisplayTitle}";
+        StatusText = MainWindowStatusText.RoomsSwapped(source.DisplayTitle, target.DisplayTitle);
         SyncDanmakuSubscriptions();
     }
 
@@ -1268,7 +1258,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
                       ?? tile.Status.AvailableQualities.FirstOrDefault();
         if (quality is null)
         {
-            StatusText = "全屏失败：当前房间没有可用画质";
+            StatusText = MainWindowStatusText.FullscreenNoQuality();
             return;
         }
 
@@ -1301,7 +1291,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
 
         FocusPlayer = player;
-        StatusText = $"全屏：{tile.DisplayTitle}（Esc 退出）";
+        StatusText = MainWindowStatusText.FullscreenEntered(tile.DisplayTitle);
 
         try
         {
@@ -1311,7 +1301,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
         catch (Exception ex)
         {
-            StatusText = $"全屏播放失败：{ex.Message}";
+            StatusText = MainWindowStatusText.FullscreenPlayFailed(ex.Message);
         }
     }
 
@@ -1342,7 +1332,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         HideFocusHint();
         OnPropertyChanged(nameof(IsFocused));
         OnPropertyChanged(nameof(FocusedTitle));
-        StatusText = "已退出全屏";
+        StatusText = MainWindowStatusText.FullscreenExited();
     }
 
     private void ShowFocusHint()
@@ -1395,7 +1385,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             }
 
             IsMasterMuted = true;
-            StatusText = "已全部静音";
+            StatusText = MainWindowStatusText.AllMuted();
             return;
         }
 
@@ -1417,7 +1407,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
         _masterMuteSnapshot = null;
         IsMasterMuted = false;
-        StatusText = "已恢复全部静音前的状态";
+        StatusText = MainWindowStatusText.MuteRestored();
     }
 
     /// <summary>把房间移出工作区：停止播放并清空窗格，主库记录保留。</summary>
@@ -1481,7 +1471,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
         await RoomCatalog.ReloadRoomsAsync(ct).ConfigureAwait(true);
 
-        StatusText = $"已更新 {room.Alias}";
+        StatusText = MainWindowStatusText.RoomUpdated(room.Alias);
     }
 
     public Task DeleteRoomAsync(Guid roomId, CancellationToken ct = default)
@@ -1518,7 +1508,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
             SyncDanmakuSubscriptions();
             LayoutProfiles.MarkDirty();
-            StatusText = $"已移出 {title}";
+            StatusText = MainWindowStatusText.RoomRemoved(title);
             NotifyWorkspaceSummaryChanged();
             return;
         }
@@ -1830,7 +1820,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         AttachLayoutTracking(layout);
         WireTileInteractions(layout);
         NotifyWorkspaceSummaryChanged();
-        StatusText = $"已拆分新窗格并放入 {room.Alias}";
+        StatusText = MainWindowStatusText.PaneSplitAdded(room.Alias);
 
         await Task.Yield();
         if (!startPlayback)
@@ -1906,7 +1896,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
         SetCustomLayout(true);
         LayoutProfiles.MarkDirty();
-        StatusText = "已切换为自定义比例；新增房间只追加，不会重排";
+        StatusText = MainWindowStatusText.CustomRatioEnabled();
     }
 
     public void Dispose()
@@ -1997,7 +1987,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             }
             catch (Exception ex)
             {
-                StatusText = $"方案「{profile.Name}」反序列化失败，已重建：{ex.Message}";
+                StatusText = MainWindowStatusText.ProfileDeserializeFailed(profile.Name, ex.Message);
             }
         }
 
