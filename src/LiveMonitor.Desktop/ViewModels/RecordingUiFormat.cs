@@ -7,47 +7,13 @@ namespace LiveMonitor.Desktop.ViewModels;
 /// </summary>
 internal static class RecordingUiFormat
 {
-    public static string PlatformBadge(PlatformType platform) => platform switch
-    {
-        PlatformType.Bilibili => "B站",
-        PlatformType.Douyin => "抖音",
-        PlatformType.Douyu => "斗鱼",
-        PlatformType.Huya => "虎牙",
-        PlatformType.Twitch => "Twitch",
-        PlatformType.YouTube => "YouTube",
-        PlatformType.CustomStream => "清流",
-        _ => "—"
-    };
+    public static string PlatformBadge(PlatformType platform) => PlatformBadgeFormat.Text(platform);
 
-    public static string PlatformBadgeBackground(PlatformType platform) => platform switch
-    {
-        PlatformType.Bilibili => "#FB7299",
-        PlatformType.Twitch => "#9146FF",
-        PlatformType.Douyin => "#FE2C55",
-        PlatformType.Douyu => "#FF6A00",
-        PlatformType.Huya => "#FFB300",
-        PlatformType.YouTube => "#FF0033",
-        PlatformType.CustomStream => "#0EA5E9",
-        _ => "#2A3140"
-    };
+    public static string PlatformBadgeBackground(PlatformType platform) => PlatformBadgeFormat.Background(platform);
 
-    public static string PlatformBadgeForeground(PlatformType platform) => platform switch
-    {
-        PlatformType.Huya => "#1A1A1A",
-        _ => "#FFFFFF"
-    };
+    public static string PlatformBadgeForeground(PlatformType platform) => PlatformBadgeFormat.Foreground(platform);
 
-    public static string PlatformName(PlatformType platform) => platform switch
-    {
-        PlatformType.Bilibili => "哔哩哔哩",
-        PlatformType.Douyin => "抖音",
-        PlatformType.Douyu => "斗鱼",
-        PlatformType.Huya => "虎牙",
-        PlatformType.Twitch => "Twitch",
-        PlatformType.YouTube => "YouTube",
-        PlatformType.CustomStream => "自定义清流",
-        _ => "其他平台"
-    };
+    public static string PlatformName(PlatformType platform) => PlatformBadgeFormat.DisplayName(platform);
 
     public static string FormatDuration(TimeSpan duration) => TimeCodeFormat.DurationZeroPadded(duration);
 

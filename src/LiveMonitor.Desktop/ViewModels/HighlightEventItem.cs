@@ -53,15 +53,20 @@ public sealed class HighlightEventItem
 
     public string RateText => $"短窗 {CurrentRatePerSec:F1} 条/秒 · 基线 {BaselineRatePerSec:F1} 条/秒";
 
-    private static (string Badge, string Background, string Foreground) ResolvePlatform(PlatformType platform) => platform switch
+    private static (string Badge, string Background, string Foreground) ResolvePlatform(PlatformType platform)
     {
-        PlatformType.Bilibili => ("B站", "#3A1B26", "#FB7299"),
-        PlatformType.Douyin => ("抖音", "#1B2A2E", "#22D3EE"),
-        PlatformType.Douyu => ("斗鱼", "#2E2415", "#FB923C"),
-        PlatformType.Huya => ("虎牙", "#31230F", "#FACC15"),
-        PlatformType.Twitch => ("Twitch", "#2A1B3D", "#C4A7FF"),
-        PlatformType.YouTube => ("YouTube", "#3A1B1B", "#F87171"),
-        PlatformType.CustomStream => ("清流", "#0B2933", "#22D3EE"),
-        _ => ("其他", "#23262E", "#94A3B8")
-    };
+        var (background, foreground) = platform switch
+        {
+            PlatformType.Bilibili => ("#3A1B26", "#FB7299"),
+            PlatformType.Douyin => ("#1B2A2E", "#22D3EE"),
+            PlatformType.Douyu => ("#2E2415", "#FB923C"),
+            PlatformType.Huya => ("#31230F", "#FACC15"),
+            PlatformType.Twitch => ("#2A1B3D", "#C4A7FF"),
+            PlatformType.YouTube => ("#3A1B1B", "#F87171"),
+            PlatformType.CustomStream => ("#0B2933", "#22D3EE"),
+            _ => ("#23262E", "#94A3B8")
+        };
+        var badge = Enum.IsDefined(platform) ? PlatformBadgeFormat.Text(platform) : "其他";
+        return (badge, background, foreground);
+    }
 }

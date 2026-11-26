@@ -21,35 +21,11 @@ public sealed class RoomListItemViewModel : ObservableObject
     public string DisplayTitle => $"#{Room.DisplayNumber} {Room.Alias}";
 
     /// <summary>平台徽章文字。</summary>
-    public string PlatformBadge => Room.Platform switch
-    {
-        PlatformType.Bilibili => "B站",
-        PlatformType.Twitch => "Twitch",
-        PlatformType.Douyin => "抖音",
-        PlatformType.Douyu => "斗鱼",
-        PlatformType.Huya => "虎牙",
-        PlatformType.YouTube => "YouTube",
-        PlatformType.CustomStream => "清流",
-        _ => "—"
-    };
+    public string PlatformBadge => PlatformBadgeFormat.Text(Room.Platform);
 
-    public string PlatformBadgeBackground => Room.Platform switch
-    {
-        PlatformType.Bilibili => "#FB7299",
-        PlatformType.Twitch => "#9146FF",
-        PlatformType.Douyin => "#FE2C55",
-        PlatformType.Douyu => "#FF6A00",
-        PlatformType.Huya => "#FFB300",
-        PlatformType.YouTube => "#FF0033",
-        PlatformType.CustomStream => "#0EA5E9",
-        _ => "#2A3140"
-    };
+    public string PlatformBadgeBackground => PlatformBadgeFormat.Background(Room.Platform);
 
-    public string PlatformBadgeForeground => Room.Platform switch
-    {
-        PlatformType.Huya => "#1A1A1A",
-        _ => "#FFFFFF"
-    };
+    public string PlatformBadgeForeground => PlatformBadgeFormat.Foreground(Room.Platform);
 
     /// <summary>null 表示尚未拿到状态，不应显示成在线。</summary>
     public bool? IsLive

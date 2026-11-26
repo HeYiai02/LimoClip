@@ -177,15 +177,5 @@ public sealed class RoomTileViewModel : ObservableObject
     public string DisplayTitle => DisplayNumber > 0 ? $"#{DisplayNumber} {Alias}" : Alias;
 
     [JsonIgnore]
-    public string PlatformBadge => Platform switch
-    {
-        PlatformType.Bilibili => "B站",
-        PlatformType.Twitch => "Twitch",
-        PlatformType.Douyin => "抖音",
-        PlatformType.Douyu => "斗鱼",
-        PlatformType.Huya => "虎牙",
-        PlatformType.YouTube => "YouTube",
-        PlatformType.CustomStream => "清流",
-        _ => "—"
-    };
+    public string PlatformBadge => PlatformBadgeFormat.Text(Platform);
 }
