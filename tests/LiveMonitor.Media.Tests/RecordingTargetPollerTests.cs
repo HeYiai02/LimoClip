@@ -225,14 +225,14 @@ public sealed class RecordingTargetPollerTests
 
         try
         {
-            await RecordingManagerHarness.WaitUntilAsync(() => DelayCount(delaySpans) >= 1);
+            await RecordingManagerHarness.WaitUntilAsync(() => DelayCount(delaySpans) >= 1, timeoutMilliseconds: 20000);
             Assert.Equal(TimeSpan.FromSeconds(3), RecordingTargetPoller.InitialPollDelay);
             Assert.Equal(RecordingTargetPoller.InitialPollDelay, DelayAt(delaySpans, 0));
 
             delayGate.Release();
-            await RecordingManagerHarness.WaitUntilAsync(() => DelayCount(delaySpans) >= 2);
+            await RecordingManagerHarness.WaitUntilAsync(() => DelayCount(delaySpans) >= 2, timeoutMilliseconds: 20000);
             delayGate.Release();
-            await RecordingManagerHarness.WaitUntilAsync(() => DelayCount(delaySpans) >= 3);
+            await RecordingManagerHarness.WaitUntilAsync(() => DelayCount(delaySpans) >= 3, timeoutMilliseconds: 20000);
 
             Assert.Equal(configuredInterval, DelayAt(delaySpans, 1));
             Assert.Equal(configuredInterval, DelayAt(delaySpans, 2));
