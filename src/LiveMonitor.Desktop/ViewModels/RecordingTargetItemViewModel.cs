@@ -217,7 +217,7 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
                 ApplyStatus(RecordingTargetDisplayLogic.IdleStatus(enabled));
             }
 
-            _parent.ReportStatus($"「{DisplayTitle}」自动录制已{(enabled ? "开启" : "关闭")}。");
+            _parent.ReportStatus(RecordingTargetStatusText.AutoRecordChanged(DisplayTitle, enabled));
             _parent.NotifyRecordingStateChanged();
         }
         catch (Exception ex)
@@ -232,7 +232,7 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
                 _suppressAutoRecordSave = false;
             }
 
-            _parent.ReportStatus($"更新自动录制失败（{DisplayTitle}）：{ex.Message}");
+            _parent.ReportStatus(RecordingTargetStatusText.AutoRecordUpdateFailed(DisplayTitle, ex.Message));
         }
     }
 
@@ -273,16 +273,16 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            _parent.ReportStatus($"正在启动录制「{DisplayTitle}」…");
+            _parent.ReportStatus(RecordingTargetStatusText.RecordingStarting(DisplayTitle));
             var session = await _recordings.StartAsync(Room).ConfigureAwait(true);
             ApplySessionStarted(session);
-            _parent.ReportStatus($"「{DisplayTitle}」已开始录制，文件将写入 {session.VideoFilePath}");
+            _parent.ReportStatus(RecordingTargetStatusText.RecordingStarted(DisplayTitle, session.VideoFilePath));
             _parent.NotifyRecordingStateChanged();
             await _parent.RefreshHistoryAsync().ConfigureAwait(true);
         }
         catch (Exception ex)
         {
-            _parent.ReportStatus($"开录失败（{DisplayTitle}）：{ex.Message}");
+            _parent.ReportStatus(RecordingTargetStatusText.RecordingStartFailed(DisplayTitle, ex.Message));
             RefreshFromManager();
         }
         finally
@@ -296,17 +296,17 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            _parent.ReportStatus($"正在停止录制「{DisplayTitle}」…");
+            _parent.ReportStatus(RecordingTargetStatusText.RecordingStopping(DisplayTitle));
             await _recordings.StopAsync(Room.Id).ConfigureAwait(true);
             IsRecording = false;
             SetStatus("已停止", "#3DDC97");
-            _parent.ReportStatus($"「{DisplayTitle}」录制已停止。");
+            _parent.ReportStatus(RecordingTargetStatusText.RecordingStopped(DisplayTitle));
             _parent.NotifyRecordingStateChanged();
             await _parent.RefreshHistoryAsync().ConfigureAwait(true);
         }
         catch (Exception ex)
         {
-            _parent.ReportStatus($"停止录制失败（{DisplayTitle}）：{ex.Message}");
+            _parent.ReportStatus(RecordingTargetStatusText.RecordingStopFailed(DisplayTitle, ex.Message));
             RefreshFromManager();
         }
         finally

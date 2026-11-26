@@ -111,8 +111,8 @@ public sealed partial class ClipAsrViewModel : ObservableObject, IDisposable
         var end = _host.OutPoint;
         if (end - start < _host.SelectionMinimum)
         {
-            ErrorText = "请先在时间轴上选择有效的入出点区间。";
-            StatusText = "选区无效";
+            ErrorText = AsrStatusText.SelectionInvalidError;
+            StatusText = AsrStatusText.SelectionInvalid;
             return;
         }
 
@@ -153,9 +153,9 @@ public sealed partial class ClipAsrViewModel : ObservableObject, IDisposable
         var end = Clamp(item.Position + HighlightTail, TimeSpan.Zero, duration);
         if (end - start < _host.SelectionMinimum)
         {
-            item.AsrError = "高能片段过短，无法转写。";
+            item.AsrError = AsrStatusText.HighlightTooShortError;
             ErrorText = item.AsrError;
-            StatusText = "片段过短，无法转写";
+            StatusText = AsrStatusText.HighlightTooShort;
             return;
         }
 
@@ -185,7 +185,7 @@ public sealed partial class ClipAsrViewModel : ObservableObject, IDisposable
             return;
         }
 
-        StatusText = "正在取消…";
+        StatusText = AsrStatusText.Canceling;
         try
         {
             _cts.Cancel();
@@ -210,13 +210,13 @@ public sealed partial class ClipAsrViewModel : ObservableObject, IDisposable
     public void NotifyTextCopied()
     {
         ErrorText = null;
-        StatusText = "已复制到剪贴板";
+        StatusText = AsrStatusText.Copied;
     }
 
     /// <summary>复制失败时由 View 调用：把异常转成面板上的中文提示，避免 async void 事件处理器崩溃。</summary>
     public void NotifyCopyFailed(string message)
     {
-        ErrorText = $"复制识别文本失败：{message}";
+        ErrorText = AsrStatusText.CopyFailed(message);
     }
 
     /// <summary>父视图模型的视频/选区/时长变化后调用：刷新命令可用性与绑定。</summary>
@@ -247,7 +247,7 @@ public sealed partial class ClipAsrViewModel : ObservableObject, IDisposable
         ProviderLabel = string.Empty;
         RangeText = string.Empty;
         ErrorText = null;
-        StatusText = "尚未识别";
+        StatusText = AsrStatusText.Idle;
         OnPropertyChanged(nameof(HasResult));
         NotifyAvailabilityChanged();
     }
@@ -295,7 +295,7 @@ public sealed partial class ClipAsrViewModel : ObservableObject, IDisposable
 
         IsRunning = true;
         ErrorText = null;
-        StatusText = highlight is null ? "正在识别当前选区…" : "正在转写高能片段…";
+        StatusText = highlight is null ? AsrStatusText.RunningSelection : AsrStatusText.RunningHighlight;
         if (highlight is not null)
         {
             highlight.IsTranscribing = true;
@@ -323,7 +323,7 @@ public sealed partial class ClipAsrViewModel : ObservableObject, IDisposable
             if (version == _version && !_disposed)
             {
                 ErrorText = null;
-                StatusText = "已取消";
+                StatusText = AsrStatusText.Canceled;
             }
         }
         catch (Exception ex)
@@ -334,7 +334,7 @@ public sealed partial class ClipAsrViewModel : ObservableObject, IDisposable
                     ? "语音识别失败，请稍后重试。"
                     : ex.Message.Trim();
                 ErrorText = message;
-                StatusText = "识别失败";
+                StatusText = AsrStatusText.Failed;
                 _host.SetStatusText($"语音识别失败：{message}");
                 if (highlight is not null)
                 {
@@ -397,8 +397,8 @@ public sealed partial class ClipAsrViewModel : ObservableObject, IDisposable
     /// <summary>没有视频时的友好提示：同时写入状态与错误行，保证面板可见。</summary>
     private void ReportUnavailable()
     {
-        ErrorText = "请先打开本地视频";
-        StatusText = "请先打开本地视频";
+        ErrorText = AsrStatusText.NoVideo;
+        StatusText = AsrStatusText.NoVideo;
     }
 
     private void ReplaceCancellationSource()
