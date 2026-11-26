@@ -20,10 +20,6 @@ public enum UpdateStatusKind
 /// </summary>
 public sealed class PluginAndToolUpdateViewModel : ObservableObject
 {
-    private const string YtDlpNotCheckedText = "尚未检查";
-    private const string PluginNotCheckedText = "尚未检查（内置 B 站 / Twitch / YouTube / 虎牙 / 斗鱼 / 抖音）";
-    private const string InitialStatusText = "更新组件会从 GitHub 下载，需要联网。";
-
     private readonly Func<CancellationToken, Task<CliUpdateCheckResult>> _checkYtDlpAsync;
     private readonly Func<CliUpdateCheckResult, CancellationToken, Task<CliUpdateResult>> _installYtDlpAsync;
     private readonly Func<CancellationToken, Task<PluginUpdateCheckResult>> _checkPluginUpdatesAsync;
@@ -38,9 +34,9 @@ public sealed class PluginAndToolUpdateViewModel : ObservableObject
     private bool _isBusy;
     private bool _canInstallYtDlp;
     private bool _canInstallPlugins;
-    private string _ytDlpVersionText = YtDlpNotCheckedText;
-    private string _pluginUpdateSummaryText = PluginNotCheckedText;
-    private string _statusText = InitialStatusText;
+    private string _ytDlpVersionText = PluginAndToolUpdateStatusText.YtDlpNotChecked;
+    private string _pluginUpdateSummaryText = PluginAndToolUpdateStatusText.PluginsNotChecked;
+    private string _statusText = PluginAndToolUpdateStatusText.Initial;
     private UpdateStatusKind _statusKind = UpdateStatusKind.Neutral;
 
     /// <summary>生产构造：直接复用组合根中的 yt-dlp 更新器与平台插件更新服务。</summary>
@@ -137,32 +133,32 @@ public sealed class PluginAndToolUpdateViewModel : ObservableObject
         }
 
         IsBusy = true;
-        SetStatus("正在检查 yt-dlp 更新…", UpdateStatusKind.Neutral);
+        SetStatus(PluginAndToolUpdateStatusText.CheckingYtDlp, UpdateStatusKind.Neutral);
         try
         {
             var result = await _checkYtDlpAsync(ct).ConfigureAwait(true);
             _ytDlpUpdate = result;
             if (!result.CheckSucceeded)
             {
-                YtDlpVersionText = "检查失败";
+                YtDlpVersionText = PluginAndToolUpdateStatusText.CheckFailed;
                 CanInstallYtDlp = false;
-                SetStatus($"检查 yt-dlp 更新失败：{result.ErrorMessage}", UpdateStatusKind.Error);
+                SetStatus(PluginAndToolUpdateStatusText.YtDlpCheckFailed(result.ErrorMessage), UpdateStatusKind.Error);
                 return;
             }
 
-            YtDlpVersionText = $"本地 {result.LocalVersion} · 最新 {result.LatestVersion}";
+            YtDlpVersionText = PluginAndToolUpdateStatusText.YtDlpVersion(result.LocalVersion, result.LatestVersion);
             CanInstallYtDlp = result.UpdateAvailable && !string.IsNullOrWhiteSpace(result.DownloadUrl);
             SetStatus(
                 result.UpdateAvailable
-                    ? $"发现新版本 {result.LatestVersion}，点击「下载并更新」替换 tools 目录内的 yt-dlp.exe。"
-                    : "yt-dlp 已是最新版本。",
+                    ? PluginAndToolUpdateStatusText.YtDlpUpdateAvailable(result.LatestVersion)
+                    : PluginAndToolUpdateStatusText.YtDlpUpToDate,
                 result.UpdateAvailable ? UpdateStatusKind.Neutral : UpdateStatusKind.Success);
         }
         catch (Exception ex)
         {
             // 与旧实现一致：检查异常只禁用安装按钮，不清空上一次的检查结果。
             CanInstallYtDlp = false;
-            SetStatus($"检查 yt-dlp 更新失败：{ex.Message}", UpdateStatusKind.Error);
+            SetStatus(PluginAndToolUpdateStatusText.YtDlpCheckFailed(ex.Message), UpdateStatusKind.Error);
         }
         finally
         {
@@ -186,29 +182,29 @@ public sealed class PluginAndToolUpdateViewModel : ObservableObject
 
         if (!check.UpdateAvailable || string.IsNullOrWhiteSpace(check.DownloadUrl))
         {
-            SetStatus("没有可用的 yt-dlp 更新，请先点击「检查更新」。", UpdateStatusKind.Error);
+            SetStatus(PluginAndToolUpdateStatusText.NoYtDlpUpdate, UpdateStatusKind.Error);
             return;
         }
 
         IsBusy = true;
         CanInstallYtDlp = false;
-        SetStatus("正在下载并替换 yt-dlp…", UpdateStatusKind.Neutral);
+        SetStatus(PluginAndToolUpdateStatusText.DownloadingYtDlp, UpdateStatusKind.Neutral);
         try
         {
             var installed = await _installYtDlpAsync(check, ct).ConfigureAwait(true);
             if (!installed.Success)
             {
-                SetStatus($"更新 yt-dlp 失败：{installed.ErrorMessage}", UpdateStatusKind.Error);
+                SetStatus(PluginAndToolUpdateStatusText.YtDlpUpdateFailed(installed.ErrorMessage), UpdateStatusKind.Error);
                 return;
             }
 
-            YtDlpVersionText = $"本地 {installed.NewVersion} · 已更新";
+            YtDlpVersionText = PluginAndToolUpdateStatusText.YtDlpLocalUpdated(installed.NewVersion);
             _ytDlpUpdate = null;
-            SetStatus($"yt-dlp 已更新到 {installed.NewVersion}。", UpdateStatusKind.Success);
+            SetStatus(PluginAndToolUpdateStatusText.YtDlpUpdated(installed.NewVersion), UpdateStatusKind.Success);
         }
         catch (Exception ex)
         {
-            SetStatus($"更新 yt-dlp 失败：{ex.Message}", UpdateStatusKind.Error);
+            SetStatus(PluginAndToolUpdateStatusText.YtDlpUpdateFailed(ex.Message), UpdateStatusKind.Error);
         }
         finally
         {
@@ -225,39 +221,39 @@ public sealed class PluginAndToolUpdateViewModel : ObservableObject
         }
 
         IsBusy = true;
-        SetStatus("正在检查平台插件更新…", UpdateStatusKind.Neutral);
+        SetStatus(PluginAndToolUpdateStatusText.CheckingPlugins, UpdateStatusKind.Neutral);
         try
         {
             var result = await _checkPluginUpdatesAsync(ct).ConfigureAwait(true);
             _pluginUpdates = result;
             if (!result.Succeeded)
             {
-                PluginUpdateSummaryText = "检查失败";
+                PluginUpdateSummaryText = PluginAndToolUpdateStatusText.CheckFailed;
                 CanInstallPlugins = false;
-                SetStatus($"检查插件更新失败：{result.ErrorMessage}", UpdateStatusKind.Error);
+                SetStatus(PluginAndToolUpdateStatusText.PluginCheckFailed(result.ErrorMessage), UpdateStatusKind.Error);
                 return;
             }
 
             if (result.Updates.Count == 0)
             {
-                PluginUpdateSummaryText = $"已是最新（清单来源：{result.ManifestSource}）";
+                PluginUpdateSummaryText = PluginAndToolUpdateStatusText.PluginLatest(result.ManifestSource);
                 CanInstallPlugins = false;
-                SetStatus("没有可用的平台插件更新。", UpdateStatusKind.Success);
+                SetStatus(PluginAndToolUpdateStatusText.NoPluginUpdates, UpdateStatusKind.Success);
                 return;
             }
 
             PluginUpdateSummaryText = string.Join(
-                "；",
-                result.Updates.Select(u => $"{u.Entry.PluginId} {u.Entry.Version}"));
+                PluginAndToolUpdateStatusText.EntrySeparator,
+                result.Updates.Select(u => PluginAndToolUpdateStatusText.PluginEntry(u.Entry.PluginId, u.Entry.Version)));
             CanInstallPlugins = true;
             SetStatus(
-                $"发现 {result.Updates.Count} 个插件更新，点击「下载并安装」（下载后自动验签）。",
+                PluginAndToolUpdateStatusText.PluginUpdatesFound(result.Updates.Count),
                 UpdateStatusKind.Neutral);
         }
         catch (Exception ex)
         {
             CanInstallPlugins = false;
-            SetStatus($"检查插件更新失败：{ex.Message}", UpdateStatusKind.Error);
+            SetStatus(PluginAndToolUpdateStatusText.PluginCheckFailed(ex.Message), UpdateStatusKind.Error);
         }
         finally
         {
@@ -281,46 +277,53 @@ public sealed class PluginAndToolUpdateViewModel : ObservableObject
 
         IsBusy = true;
         CanInstallPlugins = false;
-        SetStatus("正在下载并安装平台插件…", UpdateStatusKind.Neutral);
+        SetStatus(PluginAndToolUpdateStatusText.DownloadingPlugins, UpdateStatusKind.Neutral);
         try
         {
             var result = await _installPluginUpdatesAsync(check.Updates, ct).ConfigureAwait(true);
             if (!result.Succeeded)
             {
-                SetStatus($"安装平台插件失败：{result.ErrorMessage}", UpdateStatusKind.Error);
+                SetStatus(PluginAndToolUpdateStatusText.PluginInstallFailed(result.ErrorMessage), UpdateStatusKind.Error);
                 return;
             }
 
             var parts = new List<string>();
             if (result.Installed.Count > 0)
             {
-                parts.Add($"已安装 {result.Installed.Count} 个");
+                parts.Add(PluginAndToolUpdateStatusText.PluginInstalled(result.Installed.Count));
             }
 
             if (result.Applied.Count > 0)
             {
-                parts.Add($"已生效 {result.Applied.Count} 个");
+                parts.Add(PluginAndToolUpdateStatusText.PluginApplied(result.Applied.Count));
             }
 
             if (result.Deferred.Count > 0)
             {
-                parts.Add($"待下次启动生效 {result.Deferred.Count} 个");
+                parts.Add(PluginAndToolUpdateStatusText.PluginDeferred(result.Deferred.Count));
             }
 
             if (result.Failures.Count > 0)
             {
-                parts.Add($"失败 {result.Failures.Count} 个：{string.Join("；", result.Failures.Select(f => $"{f.PluginId}（{f.ErrorMessage}）"))}");
+                parts.Add(PluginAndToolUpdateStatusText.PluginFailures(
+                    result.Failures.Count,
+                    string.Join(
+                        PluginAndToolUpdateStatusText.EntrySeparator,
+                        result.Failures.Select(f => PluginAndToolUpdateStatusText.PluginFailureDetail(f.PluginId, f.ErrorMessage)))));
             }
 
-            PluginUpdateSummaryText = parts.Count > 0 ? string.Join("，", parts) : "没有变化";
+            var summary = parts.Count > 0
+                ? string.Join(PluginAndToolUpdateStatusText.PartSeparator, parts)
+                : PluginAndToolUpdateStatusText.NoPluginChanges;
+            PluginUpdateSummaryText = summary;
             _pluginUpdates = null;
             SetStatus(
-                parts.Count > 0 ? $"插件更新完成：{string.Join("，", parts)}。" : "没有可安装的插件更新。",
+                parts.Count > 0 ? PluginAndToolUpdateStatusText.PluginUpdateCompleted(summary) : PluginAndToolUpdateStatusText.NoPluginUpdateToInstall,
                 result.Failures.Count > 0 ? UpdateStatusKind.Error : UpdateStatusKind.Success);
         }
         catch (Exception ex)
         {
-            SetStatus($"安装平台插件失败：{ex.Message}", UpdateStatusKind.Error);
+            SetStatus(PluginAndToolUpdateStatusText.PluginInstallFailed(ex.Message), UpdateStatusKind.Error);
         }
         finally
         {
