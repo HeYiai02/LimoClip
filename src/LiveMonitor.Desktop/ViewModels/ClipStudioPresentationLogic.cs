@@ -151,4 +151,29 @@ internal static class ClipStudioPresentationLogic
 
         return messages;
     }
+
+    /// <summary>播放器时间文本：「当前位置 / 总时长」。</summary>
+    public static string BuildPositionText(TimeSpan position, TimeSpan duration) =>
+        $"{TimeCodeFormat.Clock(position)} / {TimeCodeFormat.Clock(duration)}";
+
+    /// <summary>选区时长文本（未加载视频时为 00:00）。</summary>
+    public static string BuildSelectionText(TimeSpan duration, TimeSpan inPoint, TimeSpan outPoint) =>
+        duration > TimeSpan.Zero ? TimeCodeFormat.Clock(outPoint - inPoint) : "00:00";
+
+    /// <summary>弹幕信息行：无文件/无弹幕提示，或「弹幕 N 条（· 录制中）」。</summary>
+    public static string BuildDanmakuInfoText(IReadOnlyCollection<RecordedDanmakuItem>? items, bool isLive)
+    {
+        if (items is null)
+        {
+            return isLive ? "弹幕录制中…" : "无伴随弹幕文件";
+        }
+
+        return $"弹幕 {items.Count} 条" + (isLive ? " · 录制中" : string.Empty);
+    }
+
+    /// <summary>边录边剪标题：「房间名 · 录制中」。</summary>
+    public static string BuildLiveVideoTitle(RecordingSession session) => $"{session.RoomDisplayName} · 录制中";
+
+    /// <summary>播放/暂停按钮字形。</summary>
+    public static string PlayPauseGlyph(bool isPlaying) => isPlaying ? "⏸" : "▶";
 }
