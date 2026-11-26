@@ -1054,8 +1054,8 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
             {
                 // 直播流被 CDN/网络中断时 mpv 表现为 EOF；这并不代表主播下播，
                 // 用「重连中」状态提示用户，同时交给上层退避重连。
-                SetState(PlayerState.Reconnecting, "直播流已中断，正在自动重连…");
-                _loadTcs?.TrySetException(new EndOfStreamException("直播流已中断"));
+                SetState(PlayerState.Reconnecting, RoomStatusText.AutoReconnectDetail);
+                _loadTcs?.TrySetException(new EndOfStreamException(RoomStatusText.StreamInterrupted));
                 ReconnectRequested?.Invoke(this, EventArgs.Empty);
             }
         });

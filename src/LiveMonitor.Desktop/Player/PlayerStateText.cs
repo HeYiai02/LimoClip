@@ -12,10 +12,10 @@ public static class PlayerStateText
     public static string Describe(PlayerState state) => state switch
     {
         PlayerState.Loading => "连接中",
-        PlayerState.Playing => "直播中",
+        PlayerState.Playing => RoomStatusText.Live,
         PlayerState.Offline => "已停止",
-        PlayerState.Reconnecting => "重连中",
-        PlayerState.Failed => "播放失败",
+        PlayerState.Reconnecting => RoomStatusText.Reconnecting,
+        PlayerState.Failed => RoomStatusText.PlaybackFailed,
         _ => state.ToString(),
     };
 

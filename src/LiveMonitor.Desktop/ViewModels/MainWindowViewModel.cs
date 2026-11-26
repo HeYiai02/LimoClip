@@ -2218,8 +2218,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         {
             bool? live = tile.StateText switch
             {
-                "未开播" => false,
-                "播放失败" => false,
+                RoomStatusText.Offline => false,
+                RoomStatusText.PlaybackFailed => false,
                 _ => tile.Status?.IsLive
             };
 
