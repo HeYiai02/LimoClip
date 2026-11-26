@@ -24,7 +24,7 @@ public sealed class RecordingHistoryItemViewModelTests
             VideoFilePath = Path.Combine(Path.GetTempPath(), "not-yet-merged.mkv"),
         };
 
-        var item = new RecordingHistoryItemViewModel(session, parent: null!);
+        var item = new RecordingHistoryItemViewModel(session, history: null!);
 
         Assert.True(item.IsLive);
         Assert.False(item.CanShowClip);
@@ -43,7 +43,7 @@ public sealed class RecordingHistoryItemViewModelTests
             VideoFilePath = Path.Combine(Path.GetTempPath(), "finished.mkv"),
         };
 
-        var item = new RecordingHistoryItemViewModel(session, parent: null!);
+        var item = new RecordingHistoryItemViewModel(session, history: null!);
 
         Assert.False(item.IsLive);
         Assert.True(item.CanShowClip);

@@ -1,9 +1,9 @@
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LiveMonitor.Core;
+using LiveMonitor.Desktop.Services;
 using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Core.Models;
@@ -15,16 +15,15 @@ namespace LiveMonitor.Desktop.ViewModels;
 /// V0.3 录制中心：全局保存目录、按直播间的录制目标列表（自动录制/立即开录/实时指标）
 /// 以及历史录像列表（打开文件夹/删除记录）。录制引擎在后台常驻，关闭本页不中断录制。
 /// </summary>
-public sealed partial class RecordingCenterViewModel : ObservableObject, IDisposable
+public sealed partial class RecordingCenterViewModel : ObservableObject, IDisposable, IRecordingHistoryHost
 {
     private readonly IRoomRepository _rooms;
     private readonly IRecordingTargetRepository _targets;
-    private readonly IRecordingSessionRepository _sessions;
     private readonly IAppSettingsRepository _settings;
     private readonly RecordingManager _recordings;
+    private readonly RecordingHistoryViewModel _history;
     private bool _initialized;
     private bool _disposed;
-    private int _historyVersion;
     private string _globalDirectory = RecordingManager.DefaultDirectory;
     private string _statusText = "就绪";
     private bool _isBusy;
@@ -38,14 +37,29 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
     {
         _rooms = rooms ?? throw new ArgumentNullException(nameof(rooms));
         _targets = targets ?? throw new ArgumentNullException(nameof(targets));
-        _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
+        ArgumentNullException.ThrowIfNull(sessions);
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _recordings = recordings ?? throw new ArgumentNullException(nameof(recordings));
+        _history = new RecordingHistoryViewModel(sessions, this);
+        // 历史子视图模型自己负责通知；录制中心保留同名只读转发属性（历史区绑定路径不变），
+        // 因此需要把子视图模型的变化转发到本对象，避免绑定收不到通知。
+        _history.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(RecordingHistoryViewModel.IsEmpty))
+            {
+                OnPropertyChanged(nameof(IsHistoryEmpty));
+            }
+            else if (e.PropertyName is nameof(RecordingHistoryViewModel.Summary))
+            {
+                OnPropertyChanged(nameof(HistorySummary));
+            }
+        };
     }
 
     public ObservableCollection<RecordingTargetItemViewModel> Targets { get; } = new();
 
-    public ObservableCollection<RecordingHistoryItemViewModel> History { get; } = new();
+    /// <summary>历史录像列表（V0.7.5 起由 <see cref="RecordingHistoryViewModel"/> 持有，这里保持原绑定路径）。</summary>
+    public ObservableCollection<RecordingHistoryItemViewModel> History => _history.Items;
 
     /// <summary>由 MainWindow 注入：删除历史录像前的确认弹窗，返回 true 才真正删除。</summary>
     public Func<RecordingHistoryItemViewModel, Task<bool>>? ConfirmDeleteAsync { get; set; }
@@ -93,12 +107,12 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
 
     public bool IsTargetsEmpty => Targets.Count == 0;
 
-    public bool IsHistoryEmpty => History.Count == 0;
+    public bool IsHistoryEmpty => _history.IsEmpty;
 
     public string TargetSummary =>
         $"共 {Targets.Count} 个直播间 · 正在录制 {Targets.Count(item => item.IsRecording)} 路";
 
-    public string HistorySummary => $"最近 {History.Count} 条录像";
+    public string HistorySummary => _history.Summary;
 
     /// <summary>由 MainWindowViewModel 在弹幕初始化之后调用（幂等）。</summary>
     public async Task InitializeAsync(CancellationToken ct = default)
@@ -169,41 +183,8 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         }
     }
 
-    /// <summary>只刷新历史录像列表（开始/结束录制事件后调用）。</summary>
-    public async Task RefreshHistoryAsync(CancellationToken ct = default)
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        var version = Interlocked.Increment(ref _historyVersion);
-        try
-        {
-            var sessions = await _sessions.GetRecentAsync(200, ct).ConfigureAwait(true);
-            if (_disposed || version != Volatile.Read(ref _historyVersion))
-            {
-                return;
-            }
-
-            History.Clear();
-            foreach (var session in sessions)
-            {
-                History.Add(new RecordingHistoryItemViewModel(session, this));
-            }
-
-            OnPropertyChanged(nameof(IsHistoryEmpty));
-            OnPropertyChanged(nameof(HistorySummary));
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            StatusText = $"读取录制历史失败：{ex.Message}";
-        }
-    }
+    /// <summary>只刷新历史录像列表（开始/结束录制事件后调用）。历史实现见 <see cref="RecordingHistoryViewModel"/>。</summary>
+    public Task RefreshHistoryAsync(CancellationToken ct = default) => _history.RefreshAsync(ct);
 
     [RelayCommand]
     private async Task Refresh(CancellationToken ct) => await RefreshAsync(ct).ConfigureAwait(true);
@@ -258,13 +239,13 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         try
         {
             Directory.CreateDirectory(GlobalDirectory);
-            if (TryOpenInExplorer(GlobalDirectory, out var error))
+            if (ExplorerLauncher.TryOpenDirectory(GlobalDirectory, out var error))
             {
                 StatusText = $"已打开目录：{GlobalDirectory}";
             }
             else
             {
-                StatusText = DescribeOpenDirectoryFailure(GlobalDirectory, error);
+                StatusText = ExplorerLauncher.DescribeFailure(GlobalDirectory, error);
             }
         }
         catch (Exception ex)
@@ -340,13 +321,13 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         try
         {
             Directory.CreateDirectory(directory);
-            if (TryOpenInExplorer(directory, out var error))
+            if (ExplorerLauncher.TryOpenDirectory(directory, out var error))
             {
                 StatusText = $"已打开目录：{directory}";
             }
             else
             {
-                StatusText = DescribeOpenDirectoryFailure(directory, error);
+                StatusText = ExplorerLauncher.DescribeFailure(directory, error);
             }
         }
         catch (Exception ex)
@@ -357,168 +338,22 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         return Task.CompletedTask;
     }
 
-    /// <summary>用资源管理器定位录像文件；文件不存在时退回到所在目录。</summary>
-    internal Task OpenHistoryFolderAsync(RecordingHistoryItemViewModel item)
-    {
-        try
-        {
-            var path = item.VideoFilePath;
-            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
-            {
-                if (TrySelectInExplorer(path, out var selectError))
-                {
-                    StatusText = $"已在资源管理器中定位：{item.VideoFileName}";
-                }
-                else
-                {
-                    StatusText = $"定位录像文件失败：{selectError}。请手动在资源管理器中打开：{path}";
-                }
-
-                return Task.CompletedTask;
-            }
-
-            var directory = string.IsNullOrWhiteSpace(path) ? null : Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(directory) && Directory.Exists(directory))
-            {
-                if (TryOpenInExplorer(directory, out var openError))
-                {
-                    StatusText = $"录像文件不存在，已打开所在目录：{directory}";
-                }
-                else
-                {
-                    StatusText = DescribeOpenDirectoryFailure(directory, openError);
-                }
-
-                return Task.CompletedTask;
-            }
-
-            StatusText = "找不到录像文件或所在目录（可能已被手动删除）。";
-        }
-        catch (Exception ex)
-        {
-            StatusText = $"打开文件夹失败：{ex.Message}";
-        }
-
-        return Task.CompletedTask;
-    }
-
-    /// <summary>删除历史录像：在录会话直接拒绝；弹窗确认后连 .mkv/.jsonl 一起删除。</summary>
-    internal async Task RequestDeleteAsync(RecordingHistoryItemViewModel item)
-    {
-        if (item.IsActive)
-        {
-            StatusText = "该录制仍在进行中，请先停止录制再删除记录。";
-            return;
-        }
-
-        if (ConfirmDeleteAsync is null)
-        {
-            StatusText = "当前界面未接入删除确认弹窗，已取消删除。";
-            return;
-        }
-
-        bool confirmed;
-        try
-        {
-            confirmed = await ConfirmDeleteAsync(item).ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            StatusText = $"删除确认失败：{ex.Message}";
-            return;
-        }
-
-        if (!confirmed)
-        {
-            return;
-        }
-
-        try
-        {
-            await _recordings.DeleteSessionAsync(item.SessionId).ConfigureAwait(true);
-            StatusText = $"已删除录制记录：{item.RoomTitle} · {item.StartedAtText}";
-            await RefreshHistoryAsync().ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            StatusText = $"删除录制记录失败：{ex.Message}";
-        }
-    }
-
-    /// <summary>V0.4：把已完成的录像送进剪辑台；在录/文件缺失时只提示不跳转。</summary>
-    internal async Task RequestOpenClipAsync(RecordingHistoryItemViewModel item)
-    {
-        if (item.IsActive)
-        {
-            StatusText = "该录制仍在进行中，请先停止录制再进入剪辑台。";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(item.VideoFilePath) || !File.Exists(item.VideoFilePath))
-        {
-            StatusText = $"录像文件不存在，无法剪辑：{item.VideoFilePath}";
-            return;
-        }
-
-        if (OpenClipStudioAsync is null)
-        {
-            StatusText = "当前界面未接入剪辑台。";
-            return;
-        }
-
-        try
-        {
-            await OpenClipStudioAsync(item.Session).ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            StatusText = $"打开剪辑台失败：{ex.Message}";
-        }
-    }
-
     /// <summary>
     /// 边录边剪：把正在录制的直播间送进剪辑台（读取仍在写入的分片）。
-    /// 录制刚结束、拿不到实时信息时退化为刷新列表。
+    /// 实现见 <see cref="RecordingHistoryViewModel"/>，这里保留录制目标卡片的调用入口。
     /// </summary>
-    internal async Task RequestOpenLiveClipAsync(Guid liveRoomId)
-    {
-        if (_disposed)
-        {
-            return;
-        }
+    internal Task RequestOpenLiveClipAsync(Guid liveRoomId) => _history.RequestOpenLiveClipAsync(liveRoomId);
+    RecordingManager IRecordingHistoryHost.Recordings => _recordings;
 
-        var live = _recordings.GetLiveRecordings()
-            .FirstOrDefault(recording => recording.LiveRoomId == liveRoomId);
-        if (live is null)
-        {
-            ReportStatus("该录制刚刚结束，正在刷新录制列表…");
-            await RefreshAsync().ConfigureAwait(true);
-            return;
-        }
+    Func<RecordingHistoryItemViewModel, Task<bool>>? IRecordingHistoryHost.ConfirmDeleteAsync => ConfirmDeleteAsync;
 
-        if (OpenClipStudioAsync is null)
-        {
-            ReportStatus("当前界面未接入剪辑台。");
-            return;
-        }
+    Func<RecordingSession, Task>? IRecordingHistoryHost.OpenClipStudioAsync => OpenClipStudioAsync;
 
-        try
-        {
-            var session = await _sessions.GetByIdAsync(live.SessionId).ConfigureAwait(true);
-            if (session is null)
-            {
-                ReportStatus("该录制刚刚结束，正在刷新录制列表…");
-                await RefreshAsync().ConfigureAwait(true);
-                return;
-            }
+    bool IRecordingHistoryHost.IsDisposed => _disposed;
 
-            await OpenClipStudioAsync(session).ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            ReportStatus($"打开剪辑台失败：{ex.Message}");
-        }
-    }
+    void IRecordingHistoryHost.ReportStatus(string message) => ReportStatus(message);
+
+    Task IRecordingHistoryHost.RefreshCenterAsync(CancellationToken ct) => RefreshAsync(ct);
 
     internal void ReportStatus(string message)
     {
@@ -554,6 +389,8 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
         {
             item.Dispose();
         }
+
+        _history.Dispose();
     }
 
     private void OnProgressUpdated(Guid liveRoomId, RecordingProgress progress)
@@ -735,46 +572,4 @@ public sealed partial class RecordingCenterViewModel : ObservableObject, IDispos
             return raw.Trim();
         }
     }
-
-    /// <summary>启动资源管理器打开目录；失败时返回可展示的失败原因。</summary>
-    private static bool TryOpenInExplorer(string path, out string? error)
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\"")
-            {
-                UseShellExecute = true
-            });
-            error = null;
-            return true;
-        }
-        catch (Exception ex)
-        {
-            error = ex.Message;
-            return false;
-        }
-    }
-
-    /// <summary>启动资源管理器定位文件；失败时返回可展示的失败原因。</summary>
-    private static bool TrySelectInExplorer(string filePath, out string? error)
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{filePath}\"")
-            {
-                UseShellExecute = true
-            });
-            error = null;
-            return true;
-        }
-        catch (Exception ex)
-        {
-            error = ex.Message;
-            return false;
-        }
-    }
-
-    /// <summary>打开目录失败时给用户可执行的替代方案（手动打开路径），而不是只显示异常消息。</summary>
-    private static string DescribeOpenDirectoryFailure(string directory, string? error)
-        => $"打开目录失败：{error}。请手动在资源管理器中打开：{directory}";
 }
