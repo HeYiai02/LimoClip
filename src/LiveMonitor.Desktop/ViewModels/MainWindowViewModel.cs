@@ -576,9 +576,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
     }
 
-    public string MasterMuteIcon => IsMasterMuted ? "\uE74F" : "\uE767";
+    public string MasterMuteIcon => PlayerChromeLogic.MasterMuteIcon(IsMasterMuted);
 
-    public string MasterMuteToolTip => IsMasterMuted ? "取消全部静音" : "全部静音";
+    public string MasterMuteToolTip => PlayerChromeLogic.MasterMuteTip(IsMasterMuted);
 
     /// <summary>全屏浮层专用播放器；与窗格里的播放器互不复用，退出时释放。</summary>
     public MpvPlayerView? FocusPlayer
@@ -799,21 +799,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         var raw = await _services.Settings
             .GetAsync(AppSettingKeys.DanmakuPreviewEnabled, ct)
             .ConfigureAwait(true);
-        _danmakuMasterEnabled = string.IsNullOrWhiteSpace(raw)
-            || !string.Equals(raw.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+        _danmakuMasterEnabled = DanmakuSubscriptionLogic.IsEnabledSetting(raw);
 
         var stickerRaw = await _services.Settings
             .GetAsync(AppSettingKeys.DanmakuStickerVisible, ct)
             .ConfigureAwait(true);
-        _danmakuStickersEnabled = string.IsNullOrWhiteSpace(stickerRaw)
-            || !string.Equals(stickerRaw.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+        _danmakuStickersEnabled = DanmakuSubscriptionLogic.IsEnabledSetting(stickerRaw);
 
         // 表情图片默认开启（用户反馈"[文本]看不出来"）：只有设置页显式保存 false 才关闭；只渲染静态帧。
         var emoteImagesRaw = await _services.Settings
             .GetAsync(AppSettingKeys.DanmakuEmoteImagesVisible, ct)
             .ConfigureAwait(true);
-        _danmakuEmoteImagesEnabled = string.IsNullOrWhiteSpace(emoteImagesRaw)
-            || !string.Equals(emoteImagesRaw.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+        _danmakuEmoteImagesEnabled = DanmakuSubscriptionLogic.IsEnabledSetting(emoteImagesRaw);
 
         ApplyDanmakuMasterEnabled();
     }
@@ -857,17 +854,18 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         ApplyDanmakuMasterEnabled();
 
         var activeTiles = WorkspaceDockBuilder.EnumerateTiles(Layout)
-            .Where(tile => tile.HasRoom
-                           && tile.Platform != PlatformType.CustomStream
-                           && !string.IsNullOrWhiteSpace(tile.RoomId))
+            .Where(tile => DanmakuSubscriptionLogic.IsSubscribeEligible(tile.HasRoom, tile.Platform, tile.RoomId))
             .ToList();
         var activeSet = new HashSet<RoomTileViewModel>(activeTiles, ReferenceEqualityComparer.Instance);
 
         foreach (var pair in _danmakuHandles.ToList())
         {
-            if (activeSet.Contains(pair.Key)
-                && pair.Value.Platform == pair.Key.Platform
-                && string.Equals(pair.Value.RoomId, pair.Key.RoomId, StringComparison.Ordinal))
+            if (DanmakuSubscriptionLogic.ShouldKeepSubscription(
+                    activeSet.Contains(pair.Key),
+                    pair.Key.Platform,
+                    pair.Key.RoomId,
+                    pair.Value.Platform,
+                    pair.Value.RoomId))
             {
                 continue;
             }
