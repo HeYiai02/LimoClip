@@ -315,6 +315,20 @@ public sealed class RecordingManager
         await _poller.PollOnceAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// 按房间立即检查一次开播状态：用户刚启用自动录制时调用，避免要等到下一轮定时轮询才起录。
+    /// 引擎尚未初始化、房间不存在或未开启自动录制时静默返回。
+    /// </summary>
+    public async Task PollRoomNowAsync(Guid liveRoomId, CancellationToken ct = default)
+    {
+        if (Volatile.Read(ref _initialized) == 0)
+        {
+            return;
+        }
+
+        await _poller.PollRoomOnceAsync(liveRoomId, ct).ConfigureAwait(false);
+    }
+
     /// <summary>直播间当前是否正在录制。</summary>
     public bool IsRecording(Guid liveRoomId)
     {

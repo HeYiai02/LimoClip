@@ -438,8 +438,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     {
         foreach (var tile in WorkspaceTiles.Where(tile => tile.HasRoom))
         {
+            // 旧播放器已从视觉树摘除（调用方先 UpdateLayout 并等待布局完成），这里必须显式释放，
+            // 否则 mpv 句柄会继续解码出声，重新起播后形成两个声音。
+            var player = tile.PlayerView;
             _players.Stop(tile.PaneId);
             tile.PlayerView = null;
+            player?.Dispose();
         }
     }
 

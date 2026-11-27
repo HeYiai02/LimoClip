@@ -801,6 +801,140 @@ public sealed class ClipStudioViewModelTests
         }
     }
 
+    /// <summary>
+    /// 已打开离线回放后再切到录制中的场次：应重新进入 live 模式并加载分片文件。
+    /// </summary>
+    [Fact]
+    public async Task OpenSession_LiveSession_AfterOfflineReplay_StillEntersLiveMode()
+    {
+        if (!FfmpegLocator.TryLocate(out var ffmpegPath))
+        {
+            return;
+        }
+
+        var tempDirectory = CreateTempDirectory();
+        try
+        {
+            var replayPath = Path.Combine(tempDirectory, "replay.mp4");
+            GenerateVideo(ffmpegPath, replayPath);
+            var partPath = Path.Combine(tempDirectory, "live.part001.mkv");
+            await File.WriteAllBytesAsync(partPath, Array.Empty<byte>());
+
+            var replay = new RecordingSession
+            {
+                Platform = PlatformType.Bilibili,
+                RoomId = "room-replay",
+                RoomDisplayName = "回放房间",
+                StartedAt = DateTime.UtcNow.AddMinutes(-30),
+                Status = RecordingStatus.Completed,
+                VideoFilePath = replayPath,
+                DanmakuFilePath = string.Empty
+            };
+
+            var liveSession = CreateLiveSession(partPath, out var liveInfo);
+            var monitor = new FakeLiveRecordingMonitor { Live = liveInfo };
+            var viewModel = CreateViewModel(ffmpegPath, live: monitor);
+            try
+            {
+                await viewModel.OpenSessionAsync(replay);
+                Assert.False(viewModel.IsLiveSession);
+                Assert.Equal(replayPath, viewModel.CurrentVideoPath);
+
+                string? loadedPath = null;
+                viewModel.LoadLiveVideoRequested += path => loadedPath = path;
+
+                await viewModel.OpenSessionAsync(liveSession);
+
+                Assert.True(viewModel.IsLiveSession);
+                Assert.Equal(partPath, viewModel.CurrentVideoPath);
+                Assert.Equal(partPath, loadedPath);
+            }
+            finally
+            {
+                viewModel.Dispose();
+            }
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDirectory);
+        }
+    }
+
+    /// <summary>
+    /// 剪辑台下拉列表包含录制中的场次：选中后应触发边录边剪加载（不再停留在旧回放）。
+    /// </summary>
+    [Fact]
+    public async Task SelectedSession_LiveOption_TriggersLiveLoad()
+    {
+        if (!FfmpegLocator.TryLocate(out var ffmpegPath))
+        {
+            return;
+        }
+
+        var tempDirectory = CreateTempDirectory();
+        try
+        {
+            var replayPath = Path.Combine(tempDirectory, "replay.mp4");
+            GenerateVideo(ffmpegPath, replayPath);
+            var partPath = Path.Combine(tempDirectory, "live.part001.mkv");
+            await File.WriteAllBytesAsync(partPath, Array.Empty<byte>());
+
+            var replay = new RecordingSession
+            {
+                Platform = PlatformType.Bilibili,
+                RoomId = "room-replay",
+                RoomDisplayName = "回放房间",
+                StartedAt = DateTime.UtcNow.AddMinutes(-30),
+                Status = RecordingStatus.Completed,
+                VideoFilePath = replayPath,
+                DanmakuFilePath = string.Empty
+            };
+
+            var liveSession = CreateLiveSession(partPath, out var liveInfo);
+            var monitor = new FakeLiveRecordingMonitor { Live = liveInfo };
+            var sessions = new FakeRecordingSessionRepository { Recent = new[] { replay, liveSession } };
+            var viewModel = CreateViewModel(ffmpegPath, live: monitor, sessions: sessions);
+            try
+            {
+                await viewModel.InitializeAsync();
+
+                Assert.Contains(viewModel.Sessions, option => option.IsLive && option.Session.Id == liveSession.Id);
+
+                string? loadedPath = null;
+                viewModel.LoadLiveVideoRequested += path => loadedPath = path;
+                var liveOption = viewModel.Sessions.First(option => option.IsLive);
+
+                viewModel.SelectedSession = liveOption;
+
+                await WaitUntilAsync(() => loadedPath is not null || viewModel.IsLiveSession, TimeSpan.FromSeconds(20));
+                Assert.Equal(partPath, loadedPath);
+                Assert.True(viewModel.IsLiveSession);
+            }
+            finally
+            {
+                viewModel.Dispose();
+            }
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDirectory);
+        }
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException("等待条件超时。");
+            }
+
+            await Task.Delay(50);
+        }
+    }
+
     private static RecordingSession CreateLiveSession(
         string partPath,
         out LiveRecordingInfo liveInfo,
@@ -916,6 +1050,9 @@ public sealed class ClipStudioViewModelTests
         /// <summary>GetByIdAsync 返回的场次；null 表示查无此场次。</summary>
         public RecordingSession? Session { get; set; }
 
+        /// <summary>GetRecentAsync 返回的场次集合（剪辑台下拉列表数据源）。</summary>
+        public IReadOnlyList<RecordingSession> Recent { get; set; } = Array.Empty<RecordingSession>();
+
         public Task AddAsync(RecordingSession session, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task UpdateAsync(RecordingSession session, CancellationToken ct = default) => Task.CompletedTask;
@@ -924,7 +1061,7 @@ public sealed class ClipStudioViewModelTests
             Task.FromResult(Session is not null && Session.Id == id ? Session : null);
 
         public Task<IReadOnlyList<RecordingSession>> GetRecentAsync(int limit = 200, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<RecordingSession>>(Array.Empty<RecordingSession>());
+            Task.FromResult(Recent);
 
         public Task<IReadOnlyList<RecordingSession>> GetByRoomAsync(
             PlatformType platform,

@@ -235,6 +235,62 @@ internal sealed class RecordingTargetPoller : IAsyncDisposable
         await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// 按房间立即检查一次开播状态（用户刚启用自动录制时触发），不改变轮询节拍。
+    /// 复用 <see cref="PollRoomAsync"/> 的并发门与抑制规则；目标不存在或未启用时静默返回。
+    /// </summary>
+    internal async Task PollRoomOnceAsync(Guid liveRoomId, CancellationToken ct = default)
+    {
+        IReadOnlyList<LiveRoom> rooms;
+        IReadOnlyList<RecordingTarget> targets;
+        try
+        {
+            rooms = await _rooms.GetAllAsync(ct).ConfigureAwait(false);
+            targets = await _targets.GetAllAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _host.Log($"读取直播间/录制偏好失败，立即开播检查跳过：{ex.Message}");
+            return;
+        }
+
+        LiveRoom? room = null;
+        foreach (var candidate in rooms)
+        {
+            if (candidate.Id == liveRoomId)
+            {
+                room = candidate;
+                break;
+            }
+        }
+
+        if (room is null)
+        {
+            return;
+        }
+
+        var autoRecordEnabled = false;
+        foreach (var target in targets)
+        {
+            if (target.LiveRoomId == liveRoomId && target.AutoRecordEnabled)
+            {
+                autoRecordEnabled = true;
+                break;
+            }
+        }
+
+        if (!autoRecordEnabled || _host.IsRecording(room.Id))
+        {
+            return;
+        }
+
+        await PollRoomAsync(room, ct).ConfigureAwait(false);
+    }
+
     private async Task PollLoopAsync(CancellationToken token)
     {
         try
