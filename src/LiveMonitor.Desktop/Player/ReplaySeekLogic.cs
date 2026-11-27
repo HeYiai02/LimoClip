@@ -7,6 +7,10 @@ namespace LiveMonitor.Desktop.Player;
 /// 回放进度条的纯交互逻辑：把 mpv 探测结果（seekable / duration / time-pos）换算成
 /// 「是否显示进度条、滑块上限与位置、时间文本」，并管理拖动防抖后待提交的 seek 目标。
 /// 与 mpv 上下文、Avalonia 控件和计时器解耦，便于单元测试（V0.7.5）。
+/// <para>
+/// 直播源（时长随直播持续增长）的进度条固定在最右端，避免每轮探测都改一次位置而抖动；
+/// 用户向左拖动回看时改为跟随播放位置，追回直播边缘后重新固定。
+/// </para>
 /// 我们不做本地时移缓冲，能回放多少完全取决于源站能力。
 /// </summary>
 internal sealed class ReplaySeekLogic
@@ -26,13 +30,31 @@ internal sealed class ReplaySeekLogic
     /// <summary>拖动结束后提交 seek 前的防抖间隔，避免一次拖动打出几十条命令。</summary>
     public static readonly TimeSpan CommitDelay = TimeSpan.FromMilliseconds(160);
 
+    /// <summary>相邻探测中时长增长超过该值，视为直播仍在向前推进；静止的 VOD 时长不会增长。</summary>
+    public const double LiveGrowthToleranceSeconds = 0.25d;
+
+    /// <summary>判定直播所需连续观测到时长增长的次数（消除单次探测噪声）。</summary>
+    public const int LiveGrowthSamplesToDetect = 2;
+
+    /// <summary>拖动位置距直播边缘超过该秒数视为回看，进度条改为跟随播放位置。</summary>
+    public const double LiveEdgeToleranceSeconds = 5d;
+
     private double _pendingSeconds = -1;
+    private double _lastDuration;
+    private int _liveGrowthSamples;
+    private bool _followLiveEdge = true;
 
     /// <summary>当前源是否支持回放（mpv 报 seekable=yes 且 duration 有限）。</summary>
     public bool IsAvailable { get; private set; }
 
     /// <summary>当前源总时长（秒），不可回放时为 0。</summary>
     public double Duration { get; private set; }
+
+    /// <summary>当前源是否为直播（探测到时长随直播持续增长）。</summary>
+    public bool IsLive { get; private set; }
+
+    /// <summary>进度条是否固定在直播最右端；用户拖到回看位置后为 false。</summary>
+    public bool FollowLiveEdge => IsLive && _followLiveEdge;
 
     /// <summary>是否处于拖动中（已记录待提交的 seek 目标，但尚未提交）。</summary>
     public bool IsDragging => _pendingSeconds >= 0;
@@ -72,13 +94,24 @@ internal sealed class ReplaySeekLogic
         var visibilityChanged = !IsAvailable;
         IsAvailable = true;
         Duration = total;
+        UpdateLiveDetection(total);
 
         double? maximum = Math.Abs(currentMaximum - total) > MaximumToleranceSeconds ? total : null;
 
         // 用户正在拖动（提交定时器在跑）时不回写位置，避免进度条被轮询抢回去。
         double? value = null;
         var effectiveValue = currentValue;
-        if (!IsDragging && position is { } current)
+        if (!IsDragging && FollowLiveEdge)
+        {
+            // 直播源：时长随直播持续增长，跟随 time-pos 会让滑块每轮探测都抖一下；
+            // 固定在最右端（PotPlayer 的直播进度条行为），时间文本同步显示直播边缘。
+            effectiveValue = total;
+            if (Math.Abs(currentValue - total) > PositionToleranceSeconds)
+            {
+                value = total;
+            }
+        }
+        else if (!IsDragging && position is { } current)
         {
             var clamped = Math.Clamp(current, 0d, total);
             effectiveValue = clamped;
@@ -86,9 +119,44 @@ internal sealed class ReplaySeekLogic
             {
                 value = clamped;
             }
+
+            // 回看追到直播边缘：重新固定到最右端。
+            if (IsLive && !_followLiveEdge && clamped >= total - LiveEdgeToleranceSeconds)
+            {
+                _followLiveEdge = true;
+                effectiveValue = total;
+                if (Math.Abs(currentValue - total) > PositionToleranceSeconds)
+                {
+                    value = total;
+                }
+            }
         }
 
         return new SeekBarUpdate(true, visibilityChanged, maximum, value, FormatPosition(effectiveValue, total));
+    }
+
+    /// <summary>时长持续增长说明是直播；VOD 的 duration 固定，不会触发。</summary>
+    private void UpdateLiveDetection(double total)
+    {
+        if (!IsLive && _lastDuration > 0d)
+        {
+            if (total > _lastDuration + LiveGrowthToleranceSeconds)
+            {
+                _liveGrowthSamples++;
+                if (_liveGrowthSamples >= LiveGrowthSamplesToDetect)
+                {
+                    IsLive = true;
+                    _followLiveEdge = true;
+                }
+            }
+            else if (total < _lastDuration - LiveGrowthToleranceSeconds)
+            {
+                // 时长回退说明源被重开或回看定位，重新累计增长证据。
+                _liveGrowthSamples = 0;
+            }
+        }
+
+        _lastDuration = total;
     }
 
     /// <summary>记录一次拖动位置；防抖计时器结束后由 <see cref="TryTakePendingTarget"/> 取出并提交。</summary>
@@ -108,6 +176,12 @@ internal sealed class ReplaySeekLogic
 
         var seconds = _pendingSeconds;
         _pendingSeconds = -1;
+        if (IsLive && seconds < Duration - LiveEdgeToleranceSeconds)
+        {
+            // 用户拖到回看位置：进度条改为跟随播放位置，直到追回直播边缘。
+            _followLiveEdge = false;
+        }
+
         target = seconds.ToString("0.###", CultureInfo.InvariantCulture);
         return true;
     }
@@ -120,6 +194,10 @@ internal sealed class ReplaySeekLogic
     {
         IsAvailable = false;
         Duration = 0;
+        IsLive = false;
+        _followLiveEdge = true;
+        _lastDuration = 0;
+        _liveGrowthSamples = 0;
         _pendingSeconds = -1;
     }
 
