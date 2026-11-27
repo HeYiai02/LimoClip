@@ -61,6 +61,13 @@ internal static class RecordingCenterStatusText
 
     public static string HistoryDeleted(string roomTitle, string startedAtText) => $"已删除录制记录：{roomTitle} · {startedAtText}";
 
+
+    public static string HistoryRetryMergeSucceeded(string roomTitle, string? warning)
+        => string.IsNullOrWhiteSpace(warning)
+            ? $"已重试合并：{roomTitle}"
+            : $"已重试合并：{roomTitle}（{warning}）";
+
+    public static string HistoryRetryMergeFailed(string message) => $"重试合并失败：{message}";
     public static string HistoryDeleteFailed(string message) => $"删除录制记录失败：{message}";
 
     public static string ClipRejectedActive() => "该录制仍在进行中，请先停止录制再进入剪辑台。";

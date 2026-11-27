@@ -107,6 +107,35 @@ public sealed partial class RecordingHistoryViewModel : ObservableObject
     }
 
     /// <summary>用资源管理器定位录像文件；文件不存在时退回到所在目录。</summary>
+    /// <summary>合并失败/崩溃恢复后，按分片重试合并并刷新列表与状态栏。</summary>
+    internal async Task RetryMergeAsync(RecordingHistoryItemViewModel item)
+    {
+        if (_host.IsDisposed)
+        {
+            return;
+        }
+
+        SegmentMergeResult result;
+        try
+        {
+            result = await _host.Recordings.RetryMergeAsync(item.Session.Id).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            _host.ReportStatus(RecordingCenterStatusText.HistoryRetryMergeFailed(ex.Message));
+            return;
+        }
+
+        _host.ReportStatus(result.Merged
+            ? RecordingCenterStatusText.HistoryRetryMergeSucceeded(item.RoomTitle, result.Warning)
+            : RecordingCenterStatusText.HistoryRetryMergeFailed(result.ErrorMessage ?? "未知原因"));
+        await RefreshAsync().ConfigureAwait(true);
+    }
+
     internal Task OpenFolderAsync(RecordingHistoryItemViewModel item)
     {
         try

@@ -91,6 +91,25 @@ public sealed class RecordingHistoryDisplayLogicTests
         Assert.Equal(expected, RecordingHistoryDisplayLogic.HasError(message));
     }
 
+    [Theory]
+    [InlineData(RecordingStatus.Failed, "合并失败", true)]
+    [InlineData(RecordingStatus.Completed, "已降级合并", true)]
+    [InlineData(RecordingStatus.Completed, null, false)]
+    [InlineData(RecordingStatus.Completed, "   ", false)]
+    [InlineData(RecordingStatus.Recording, "还在录", false)]
+    public void CanRetryMerge_requires_finished_session_with_error(
+        RecordingStatus status, string? errorMessage, bool expected)
+    {
+        Assert.Equal(expected, RecordingHistoryDisplayLogic.CanRetryMerge(status, errorMessage));
+    }
+
+    [Fact]
+    public void RetryMergeTip_mentions_parts_and_recovery()
+    {
+        Assert.Contains(".part", RecordingHistoryDisplayLogic.RetryMergeTip);
+        Assert.Contains("合并失败", RecordingHistoryDisplayLogic.RetryMergeTip);
+    }
+
     [Fact]
     public void Constants_match_ui_copy()
     {

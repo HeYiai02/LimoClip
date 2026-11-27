@@ -98,6 +98,11 @@ public sealed partial class RecordingHistoryItemViewModel : ObservableObject
 
     public string LiveClipTip => RecordingHistoryDisplayLogic.LiveClipTip;
 
+
+    /// <summary>合并失败或崩溃恢复的已结束会话显示「重试合并」按钮。</summary>
+    public bool CanRetryMerge => RecordingHistoryDisplayLogic.CanRetryMerge(Session.Status, Session.ErrorMessage);
+
+    public string RetryMergeTip => RecordingHistoryDisplayLogic.RetryMergeTip;
     public string ClipTip => RecordingHistoryDisplayLogic.ClipTip(Session.Status, CanClip);
 
     [RelayCommand]
@@ -108,6 +113,9 @@ public sealed partial class RecordingHistoryItemViewModel : ObservableObject
 
     [RelayCommand]
     private Task ClipAsync() => _history.RequestOpenClipAsync(this);
+
+    [RelayCommand]
+    private Task RetryMergeAsync() => _history.RetryMergeAsync(this);
 
     /// <summary>边录边剪：把该场次正在写入的分片直接送进剪辑台实时剪辑。</summary>
     [RelayCommand]
