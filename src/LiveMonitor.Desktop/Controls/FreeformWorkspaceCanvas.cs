@@ -26,7 +26,9 @@ namespace LiveMonitor.Desktop.Controls;
 /// </summary>
 public sealed class FreeformWorkspaceCanvas : Panel
 {
-    private const string RoomDragFormat = "limoclip/room-id";
+    /// <summary>房间拖拽负载格式：应用内字符串格式，拖放源与目标共用同一实例。</summary>
+    internal static readonly DataFormat<string> RoomIdFormat =
+        DataFormat.CreateStringApplicationFormat("limoclip.room-id");
     private const double PinnedZBase = 1000;
     private const int NormalZMax = 999;
     private const int PinnedZMax = 1999;
@@ -682,12 +684,9 @@ public sealed class FreeformWorkspaceCanvas : Panel
         return false;
     }
 
-    // TODO(V0.7.5): Avalonia 11.3 已把 DragEventArgs.Data / DataObject / DoDragDrop 标记过时，
-    // 新 API（DataTransfer / DoDragDropAsync）需要真机拖放冒烟验证后再单独迁移，这里先压制过时警告。
-#pragma warning disable CS0618
     private void OnDropDragOver(object? sender, DragEventArgs e)
     {
-        if (!e.Data.Contains(RoomDragFormat))
+        if (!e.DataTransfer.Contains(RoomIdFormat))
         {
             return;
         }
@@ -710,8 +709,8 @@ public sealed class FreeformWorkspaceCanvas : Panel
         _overlay.SetActiveRect(null);
         _overlay.SetHud(null, default);
 
-        if (!e.Data.Contains(RoomDragFormat)
-            || !Guid.TryParse(e.Data.Get(RoomDragFormat) as string, out var roomId))
+        if (!e.DataTransfer.Contains(RoomIdFormat)
+            || !Guid.TryParse(e.DataTransfer.TryGetValue(RoomIdFormat), out var roomId))
         {
             return;
         }
@@ -720,7 +719,6 @@ public sealed class FreeformWorkspaceCanvas : Panel
         e.Handled = true;
         RoomDropped?.Invoke(this, new RoomDropEventArgs(roomId, ComputeDropRect(e.GetPosition(this))));
     }
-#pragma warning restore CS0618
 
     private NormalizedRect ComputeDropRect(Point position) =>
         FreeformInteractionLogic.ComputeDropRect(position.X, position.Y, Bounds.Width, Bounds.Height);
