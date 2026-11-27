@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LiveMonitor.Core.Entities;
@@ -20,7 +19,6 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 {
     private const int MaxSessionCount = 100;
     private const int MaxHighlightCount = 500;
-    private static readonly TimeSpan LiveSyncInterval = TimeSpan.FromSeconds(10);
 
     private readonly IRecordingSessionRepository _sessions;
     private readonly IHighlightEventRepository _highlights;
@@ -65,10 +63,8 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     // ---- 边录边剪状态 ----
     private readonly SynchronizationContext? _syncContext = SynchronizationContext.Current;
     private readonly LiveClipSession _liveSession = new();
+    private readonly LiveSessionCoordinator _liveSync;
     private bool _isAutoSyncEnabled = true;
-    private bool _isSyncingLive;
-    private DispatcherTimer? _liveSyncTimer;
-    private readonly SemaphoreSlim _liveWaveformGate = new(1, 1);
 
     public ClipStudioViewModel(
         IRecordingSessionRepository sessions,
@@ -91,6 +87,13 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         _exporter = exporter ?? throw new ArgumentNullException(nameof(exporter));
         _liveRecordings = liveRecordings ?? throw new ArgumentNullException(nameof(liveRecordings));
         _liveWaveforms = liveWaveforms ?? throw new ArgumentNullException(nameof(liveWaveforms));
+        _liveSync = new LiveSessionCoordinator(
+            _liveSession,
+            _liveRecordings,
+            _liveWaveforms,
+            new DanmakuJsonlReaderAdapter(),
+            new DispatcherLiveSessionTimer(),
+            new LiveSessionSyncHost(this));
         Export = new ClipExportViewModel(this, settings);
         Asr = new ClipAsrViewModel(asr ?? throw new ArgumentNullException(nameof(asr)), this);
         _liveRecordings.SessionCompleted += OnLiveRecordingSessionCompleted;
@@ -398,17 +401,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     }
 
     /// <summary>是否正在执行同步（防止手动/自动同步重入）。</summary>
-    public bool IsSyncingLive
-    {
-        get => _isSyncingLive;
-        private set
-        {
-            if (SetProperty(ref _isSyncingLive, value))
-            {
-                SyncLiveProgressCommand.NotifyCanExecuteChanged();
-            }
-        }
-    }
+    public bool IsSyncingLive => _liveSync.IsSyncing;
 
     private bool CanSyncLiveProgress => IsLiveSession && !IsBusy && !IsSyncingLive;
 
@@ -762,7 +755,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
             if (danmakuPath is not null)
             {
-                await RefreshLiveDanmakuAsync(ct).ConfigureAwait(true);
+                await _liveSync.RefreshDanmakuAsync(ct).ConfigureAwait(true);
                 if (version != _loadVersion || _disposed)
                 {
                     return;
@@ -785,8 +778,8 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             LoadLiveVideoRequested?.Invoke(partPath);
             StatusText = ClipStudioStatusText.LiveOpened;
             Export.NotifyAvailabilityChanged();
-            StartLiveSyncTimer();
-            _ = ExtractLiveWaveformAsync(waveformCt);
+            _liveSync.StartAutoSync();
+            _ = _liveSync.ExtractWaveformAsync(waveformCt);
         }
         catch (OperationCanceledException)
         {
@@ -808,7 +801,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     /// <summary>退出 live 模式（切到离线视频 / 录制结束时重置定时器与安全截止）。</summary>
     private void ExitLiveMode()
     {
-        StopLiveSyncTimer();
+        _liveSync.StopAutoSync();
         if (!_liveSession.IsActive)
         {
             return;
@@ -824,118 +817,6 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         Export.NotifyAvailabilityChanged();
     }
 
-    /// <summary>增量读取新弹幕（按 byte offset），并同步追加到回放游标。</summary>
-    private async Task RefreshLiveDanmakuAsync(CancellationToken ct)
-    {
-        if (_currentDanmakuPath is null)
-        {
-            return;
-        }
-
-        try
-        {
-            var result = await DanmakuJsonlReader
-                .ReadIncrementalAsync(_currentDanmakuPath, _liveSession.DanmakuOffset, ct)
-                .ConfigureAwait(true);
-            _liveSession.AdviseDanmakuOffset(result.NextByteOffset);
-            if (result.NewItems.Count == 0)
-            {
-                return;
-            }
-
-            var merged = new List<RecordedDanmakuItem>(DanmakuItemCount + result.NewItems.Count);
-            if (_danmakuItems is not null)
-            {
-                merged.AddRange(_danmakuItems);
-            }
-
-            merged.AddRange(result.NewItems);
-            _danmakuItems = merged;
-            _cursor?.Append(result.NewItems);
-            OnPropertyChanged(nameof(HasDanmaku));
-            OnPropertyChanged(nameof(DanmakuInfoText));
-            OnPropertyChanged(nameof(DanmakuItemCount));
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (FileNotFoundException)
-        {
-            // 录制刚开始时 jsonl 可能尚未创建，忽略即可。
-        }
-        catch (Exception ex)
-        {
-            StatusText = ClipStudioStatusText.LiveDanmakuLoadFailed(ex.Message);
-        }
-    }
-
-    /// <summary>边录边剪音频波形：只提取上次截止点之后新增的安全区段，追加到固定分辨率峰值数组。</summary>
-    private async Task ExtractLiveWaveformAsync(CancellationToken ct)
-    {
-        // 初始加载与手动同步可能同时触发提取：串行化，避免重复追加同一段峰值。
-        var entered = false;
-        try
-        {
-            await _liveWaveformGate.WaitAsync(ct).ConfigureAwait(true);
-            entered = true;
-
-            if (ct.IsCancellationRequested || _disposed || !IsLiveSession || _liveSession.PartPath is null)
-            {
-                return;
-            }
-
-            // 提取终点对齐到 0.5s 桶网格：每段返回的峰值数严格等于时间轴桶数，
-            // 直接首尾拼接才不会出现亚 0.5s 的相位漂移。
-            if (!_liveSession.TryTakeWaveformWindow(out var window))
-            {
-                return;
-            }
-
-            var from = _liveSession.PeaksExtractedUntil;
-            var to = window.To;
-            var peaks = await _liveWaveforms
-                .ExtractPeaksAsync(_liveSession.PartPath, from, to, LiveWaveformLogic.PeaksPerSecond, ct)
-                .ConfigureAwait(true);
-            if (ct.IsCancellationRequested || _disposed || !IsLiveSession)
-            {
-                return;
-            }
-
-            _liveSession.AppendPeaks(peaks, window.ExpectedCount);
-            _liveSession.MarkPeaksExtracted(to);
-            RebuildLiveWaveformData();
-            RaiseTimelineChanged();
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (InvalidOperationException)
-        {
-            // 分片暂无可解码音频（录制刚开始 / 无音轨）或窗口销毁时信号量已释放：
-            // 按“本次无数据”降级，等下次同步再试。
-        }
-        catch (FileNotFoundException)
-        {
-        }
-        catch (Exception ex)
-        {
-            StatusText = ClipStudioStatusText.LiveWaveformFailed(ex.Message);
-        }
-        finally
-        {
-            if (entered)
-            {
-                _liveWaveformGate.Release();
-            }
-
-            if (!ct.IsCancellationRequested)
-            {
-                IsWaveformLoading = false;
-            }
-        }
-    }
-
     /// <summary>按实时已录时长重建固定 0.5s 分辨率的波形数据（音频峰值 + 弹幕密度）。</summary>
     private void RebuildLiveWaveformData()
     {
@@ -949,106 +830,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
     /// <summary>手动同步（按钮 / F5）：进度、弹幕、高能、波形全量增量刷新，并重载播放器尾部数据。</summary>
     [RelayCommand(CanExecute = nameof(CanSyncLiveProgress))]
-    private async Task SyncLiveProgressAsync()
-    {
-        if (!IsLiveSession || IsSyncingLive)
-        {
-            return;
-        }
-
-        IsSyncingLive = true;
-        try
-        {
-            await SyncLiveProgressCoreAsync(includeAudioPeaks: true, requestPlayerReload: true).ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            StatusText = ClipStudioStatusText.LiveSyncFailed(ex.Message);
-        }
-        finally
-        {
-            IsSyncingLive = false;
-        }
-    }
-
-    /// <summary>10 秒自动同步：只刷新进度/弹幕/高能/密度，不重载播放器、不打断当前播放。</summary>
-    private async Task AutoSyncLiveAsync()
-    {
-        if (!IsLiveSession || IsSyncingLive || !IsAutoSyncEnabled)
-        {
-            return;
-        }
-
-        IsSyncingLive = true;
-        try
-        {
-            await SyncLiveProgressCoreAsync(includeAudioPeaks: false, requestPlayerReload: false).ConfigureAwait(true);
-        }
-        catch (Exception ex)
-        {
-            StatusText = ClipStudioStatusText.AutoSyncFailed(ex.Message);
-        }
-        finally
-        {
-            IsSyncingLive = false;
-        }
-    }
-
-    private async Task SyncLiveProgressCoreAsync(bool includeAudioPeaks, bool requestPlayerReload)
-    {
-        if (!IsLiveSession || _currentSession is null)
-        {
-            return;
-        }
-
-        if (!_liveRecordings.TryGetLiveRecording(_liveSession.Info!.SessionId, out var latest))
-        {
-            // 同步时发现录制已结束：直接切离线模式。
-            await OnLiveSessionCompletedAsync(_currentSession).ConfigureAwait(true);
-            return;
-        }
-
-        // 录制已进入后续分片：live 源仍是 part001，而时间轴 0 点是 part001 起点，
-        // 继续同步会让画面/波形与时间轴错位；直接停止边录边剪并提示等录制结束。
-        if (latest.PartNumber > 1)
-        {
-            ExitLiveMode();
-            RaiseTimelineChanged();
-            StatusText = ClipStudioStatusText.LiveSyncStoppedBySegment(latest.PartNumber);
-            return;
-        }
-
-        UpdateLiveClipProgress(latest);
-        Duration = LiveRecordedDuration;
-
-        // 播放头不能停在安全区之外（导出/seek 都以安全截止为上限）。
-        var maxPosition = SafeClipDuration > TimeSpan.Zero ? SafeClipDuration : LiveRecordedDuration;
-        if (Position > maxPosition)
-        {
-            Position = maxPosition;
-        }
-
-        await RefreshLiveDanmakuAsync(CancellationToken.None).ConfigureAwait(true);
-
-        // 高能没有增量查询接口：每次全量拉最近 500 条重建，避免重复标记。
-        Highlights.Clear();
-        HighlightMarkers = Array.Empty<ClipHighlightMarker>();
-        await LoadHighlightsAsync(_currentSession, LiveRecordedDuration, CancellationToken.None).ConfigureAwait(true);
-
-        if (includeAudioPeaks)
-        {
-            await ExtractLiveWaveformAsync(CancellationToken.None).ConfigureAwait(true);
-        }
-
-        RebuildLiveWaveformData();
-        RaiseTimelineChanged();
-        if (requestPlayerReload)
-        {
-            LiveReloadRequested?.Invoke();
-        }
-
-        StatusText = ClipStudioStatusText.LiveSyncSucceeded(LiveRecordedDuration, SafeClipDuration);
-    }
+    private Task SyncLiveProgressAsync() => _liveSync.SyncManualAsync();
 
     /// <summary>录制结束：停止实时同步，并把当前分片无缝切换为最终文件 + 离线剪辑模式。</summary>
     public async Task OnLiveSessionCompletedAsync(RecordingSession session)
@@ -1058,7 +840,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             return;
         }
 
-        StopLiveSyncTimer();
+        _liveSync.StopAutoSync();
         var lastPosition = _position;
         var lastIn = _inPoint;
         var lastOut = _outPoint;
@@ -1121,47 +903,6 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
         _ = OnLiveSessionCompletedAsync(session);
     }
-
-    private void StartLiveSyncTimer()
-    {
-        if (_liveSyncTimer is null)
-        {
-            try
-            {
-                var timer = new DispatcherTimer { Interval = LiveSyncInterval };
-                timer.Tick += OnLiveSyncTimerTick;
-                _liveSyncTimer = timer;
-            }
-            catch (Exception)
-            {
-                // 单元测试 / 无 Avalonia 平台线程时无法创建 UI 定时器，跳过自动同步。
-                return;
-            }
-        }
-
-        try
-        {
-            _liveSyncTimer.Start();
-        }
-        catch (Exception)
-        {
-            // 同上，忽略。
-        }
-    }
-
-    private void StopLiveSyncTimer()
-    {
-        try
-        {
-            _liveSyncTimer?.Stop();
-        }
-        catch (Exception)
-        {
-            // 释放路径忽略。
-        }
-    }
-
-    private void OnLiveSyncTimerTick(object? sender, EventArgs e) => _ = AutoSyncLiveAsync();
 
     private async Task LoadHighlightsAsync(RecordingSession session, TimeSpan duration, CancellationToken ct)
     {
@@ -1520,7 +1261,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         }
 
         _disposed = true;
-        StopLiveSyncTimer();
+        _liveSync.StopAutoSync();
         try
         {
             _liveRecordings.SessionCompleted -= OnLiveRecordingSessionCompleted;
@@ -1543,11 +1284,106 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         _waveformCts?.Dispose();
         _loadCts = null;
         _waveformCts = null;
+        _liveSync.Dispose();
         Asr.Dispose();
         Export.Dispose();
         Highlights.Clear();
         Sessions.Clear();
     }
+    /// <summary>把同步循环需要的 UI / 数据操作显式暴露给 <see cref="LiveSessionCoordinator"/>。</summary>
+    private sealed class LiveSessionSyncHost : ILiveSessionSyncHost
+    {
+        private readonly ClipStudioViewModel _owner;
+
+        public LiveSessionSyncHost(ClipStudioViewModel owner) => _owner = owner;
+
+        public bool IsDisposed => _owner._disposed;
+
+        public bool IsAutoSyncEnabled => _owner.IsAutoSyncEnabled;
+
+        public RecordingSession? CurrentSession => _owner._currentSession;
+
+        public string? DanmakuPath => _owner._currentDanmakuPath;
+
+        public TimeSpan LiveRecordedDuration => _owner.LiveRecordedDuration;
+
+        public TimeSpan SafeClipDuration => _owner.SafeClipDuration;
+
+        public void ApplyProgress(LiveRecordingInfo latest)
+        {
+            _owner.UpdateLiveClipProgress(latest);
+            _owner.Duration = _owner.LiveRecordedDuration;
+
+            // 播放头不能停在安全区之外（导出/seek 都以安全截止为上限）。
+            var maxPosition = _owner.SafeClipDuration > TimeSpan.Zero
+                ? _owner.SafeClipDuration
+                : _owner.LiveRecordedDuration;
+            if (_owner.Position > maxPosition)
+            {
+                _owner.Position = maxPosition;
+            }
+        }
+
+        public void ApplyDanmaku(IReadOnlyList<RecordedDanmakuItem> items)
+        {
+            var merged = new List<RecordedDanmakuItem>(_owner.DanmakuItemCount + items.Count);
+            if (_owner._danmakuItems is not null)
+            {
+                merged.AddRange(_owner._danmakuItems);
+            }
+
+            merged.AddRange(items);
+            _owner._danmakuItems = merged;
+            _owner._cursor?.Append(items);
+            _owner.OnPropertyChanged(nameof(HasDanmaku));
+            _owner.OnPropertyChanged(nameof(DanmakuInfoText));
+            _owner.OnPropertyChanged(nameof(DanmakuItemCount));
+        }
+
+        public void ApplyWaveform() => _owner.RebuildLiveWaveformData();
+
+        public void SetWaveformLoading(bool loading) => _owner.IsWaveformLoading = loading;
+
+        public async Task ReloadHighlightsAsync(TimeSpan duration, CancellationToken ct)
+        {
+            if (_owner._currentSession is not { } session)
+            {
+                return;
+            }
+
+            _owner.Highlights.Clear();
+            _owner.HighlightMarkers = Array.Empty<ClipHighlightMarker>();
+            await _owner.LoadHighlightsAsync(session, duration, ct).ConfigureAwait(true);
+        }
+
+        public void RequestPlayerReload() => _owner.LiveReloadRequested?.Invoke();
+
+        public void RaiseTimelineChanged() => _owner.RaiseTimelineChanged();
+
+        public void SetStatus(string text) => _owner.StatusText = text;
+
+        public void SetSyncing(bool syncing) => _owner.OnLiveSyncingChanged(syncing);
+
+        public void StopForSegmentedRecording(int partNumber)
+        {
+            _owner.ExitLiveMode();
+            _owner.RaiseTimelineChanged();
+            _owner.StatusText = ClipStudioStatusText.LiveSyncStoppedBySegment(partNumber);
+        }
+
+        public Task HandleRecordingCompletedAsync()
+            => _owner._currentSession is { } session
+                ? _owner.OnLiveSessionCompletedAsync(session)
+                : Task.CompletedTask;
+    }
+
+    /// <summary>同步开始/结束通知：刷新命令可用性与「同步中」指示。</summary>
+    private void OnLiveSyncingChanged(bool syncing)
+    {
+        OnPropertyChanged(nameof(IsSyncingLive));
+        SyncLiveProgressCommand.NotifyCanExecuteChanged();
+    }
+
 }
 
 /// <summary>倍速下拉项。</summary>

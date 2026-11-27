@@ -9,7 +9,7 @@ namespace LiveMonitor.Desktop.ViewModels;
 /// 保存当前正在写入的分片、实时进度、安全可剪截止与增量弹幕/波形游标；
 /// 安全边界复用 <see cref="LiveClipSafety"/>，状态文案复用 <see cref="ClipStudioPresentationLogic"/>，
 /// 波形换算复用 <see cref="LiveWaveformLogic"/>。
-/// 打开/同步/结束的编排（定时器、播放器重载、UI 通知）由 <see cref="ClipStudioViewModel"/> 负责。
+/// 打开/结束的编排由 <see cref="ClipStudioViewModel"/> 负责，同步循环（定时器、增量弹幕/波形、播放器重载）由 <see cref="LiveSessionCoordinator"/> 负责。
 /// </summary>
 internal sealed class LiveClipSession
 {
