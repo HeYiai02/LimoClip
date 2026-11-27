@@ -401,17 +401,19 @@
                                 </DataTemplate>
                             </ComboBox.ItemTemplate>
                         </ComboBox>
-                        <!-- 本地预览播放器当前固定 100% 音量，无独立音量属性：此处仅作状态提示，不做假交互。 -->
-                        <Border Classes="chip" Padding="7,4"
-                                ToolTip.Tip="本地预览固定音量 100%（剪辑预览不单独调节）">
-                            <StackPanel Orientation="Horizontal" Spacing="4">
-                                <PathIcon Width="11" Height="11" VerticalAlignment="Center"
-                                          Foreground="{DynamicResource BrushTextMuted}"
-                                          Data="M4 9v6h4l5 4V5L8 9H4z" />
-                                <TextBlock Text="100" Classes="mono" FontSize="9.5"
-                                           Foreground="{DynamicResource BrushTextMuted}" />
-                            </StackPanel>
-                        </Border>
+                        <!-- 剪辑预览音量：静音开关 + 0~100 滑杆 + 数值，独立于直播窗格的全局音量。 -->
+                        <Button x:Name="ClipMuteButton" Classes="ghost-btn" Width="28" Height="28"
+                                Padding="0" Click="OnClipMuteClick" ToolTip.Tip="静音 / 开声">
+                            <TextBlock x:Name="ClipMuteIcon" FontFamily="Segoe Fluent Icons" FontSize="12"
+                                       Foreground="{DynamicResource BrushTextSecondary}" />
+                        </Button>
+                        <Slider x:Name="ClipVolumeSlider" Width="88" Minimum="0" Maximum="100"
+                                Value="100" VerticalAlignment="Center"
+                                ValueChanged="OnClipVolumeChanged"
+                                ToolTip.Tip="剪辑预览音量（独立于直播窗格）" />
+                        <TextBlock x:Name="ClipVolumeText" Classes="mono" FontSize="9.5" Text="100"
+                                   MinWidth="22" TextAlignment="Right" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource BrushTextMuted}" />
                         <CheckBox Classes="studio-check" Content="弹幕回放" Margin="2,0,0,0"
                                   IsChecked="{Binding DanmakuPlaybackEnabled}" />
                     </StackPanel>

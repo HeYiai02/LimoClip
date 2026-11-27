@@ -56,6 +56,8 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
     private TimeSpan _duration;
     private TimeSpan _position;
     private double _speed = 1.0;
+    private int _volume = 100;
+    private bool _muted;
     private ClipPlayerState _state = ClipPlayerState.Empty;
     private bool _paused = true;
     private bool _completionRaised;
@@ -98,6 +100,12 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
     public TimeSpan Duration => _duration;
 
     public double Speed => _speed;
+
+    /// <summary>剪辑预览音量（0~100）；与直播窗格的全局音量互不影响。</summary>
+    public int Volume => _volume;
+
+    /// <summary>剪辑预览当前是否静音。</summary>
+    public bool IsMuted => _muted;
 
     /// <summary>当前是否以“边录边剪”模式加载（分片仍在写入）。</summary>
     public bool IsLive => _isLive;
@@ -493,6 +501,50 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
         DanmakuLayer.PlaybackRate = _speed;
     }
 
+    /// <summary>设置剪辑预览音量（0~100），写 mpv volume；对之后重载的文件同样生效。</summary>
+    public void SetVolume(int volume)
+    {
+        _volume = PlayerChromeLogic.ClampVolume(volume);
+        try
+        {
+            _context?.SetPropertyLong("volume", _volume);
+        }
+        catch
+        {
+            // mpv 已释放时忽略；EnsureContext 重建时会按 _volume 初始化。
+        }
+    }
+
+    /// <summary>静音/开声：只切 mpv mute，保留当前音量。</summary>
+    public void SetMute(bool muted)
+    {
+        _muted = muted;
+        if (!muted)
+        {
+            try
+            {
+                // 与直播窗格一致：首次开声时保证音轨是启用状态。
+                _context?.SetPropertyString("aid", "auto");
+            }
+            catch
+            {
+                // mpv 已释放时忽略。
+            }
+        }
+
+        try
+        {
+            _context?.SetPropertyFlag("mute", _muted);
+        }
+        catch
+        {
+            // mpv 已释放时忽略。
+        }
+    }
+
+    /// <summary>在静音/开声之间切换。</summary>
+    public void ToggleMute() => SetMute(!_muted);
+
     /// <summary>打开/关闭弹幕回放渲染。</summary>
     public void SetDanmakuEnabled(bool enabled)
     {
@@ -566,10 +618,10 @@ public partial class LocalClipPlayerView : Avalonia.Controls.UserControl, IDispo
             context.SetOptionString("keep-open", "yes");
             context.SetOptionString("pause", "yes");
 
-            // 本地预览必须出声；音量由剪辑台统一控制，不受直播全局静音影响。
+            // 本地预览必须出声：音量与静音跟随剪辑台播控条，独立于直播窗格的全局音量。
             context.SetOptionString("aid", "auto");
-            context.SetOptionString("mute", "no");
-            context.SetOptionString("volume", "100");
+            context.SetOptionString("mute", _muted ? "yes" : "no");
+            context.SetOptionString("volume", _volume.ToString(CultureInfo.InvariantCulture));
             context.SetOptionString("audio-exclusive", "no");
             context.SetOptionString("audio-stream-silence", "yes");
 
