@@ -30,7 +30,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | WebView 登录 | WebView2（临时用户目录，登录后采集 Cookie） |
 | 平台解析 | 各家 HTTP API + Jint（斗鱼签名、抖音 sign.js）；yt-dlp 作为 YouTube/Twitch 兜底 |
 | 插件签名 | Ed25519（BouncyCastle）+ SHA256 清单校验 |
-| 测试 | xUnit（6 个测试工程，当前共 3177 个用例） |
+| 测试 | xUnit（6 个测试工程，当前共 3186 个用例） |
 
 ### 平台支持矩阵
 
@@ -463,7 +463,7 @@ Program.Main
 
 - `MainWindow` 四态：**监控工作区**（默认）、**录制中心**（全屏覆盖层）、**剪辑台**（全屏覆盖层）、**设置窗**（独立窗口）；
 - `ApplyShellLayout()` 统一计算显示状态：`overlay`（录制/剪辑）、`focused`（单窗格全屏）、`fullscreenShell`（桌面级全屏）、侧栏可见性；据此设置顶栏/侧栏/状态栏可见性与 `RootGrid` 行高列宽；
-- **沉浸模式**：焦点模式或桌面全屏下，鼠标空闲 2.5s 自动隐藏各播放器底部控制条、隐藏顶部提示；鼠标/按键活动立即恢复（`_immersiveIdleTimer` + 逐窗格 `SetChromeVisible`）。逐窗格遍历同时覆盖 Dock 与自由画布两个宿主（`Dock` + `FreeformCanvas` 的视觉子树），否则自由布局下控制条不会隐藏；同时把工作区四周 6px 留白置 0（`WorkspaceHost.Padding`），让画面真正铺满整屏；
+- **沉浸模式**：焦点模式或桌面全屏下，鼠标空闲 2.5s 自动隐藏各播放器底部控制条、隐藏顶部提示；鼠标/按键活动立即恢复（`_immersiveIdleTimer` + 逐窗格 `SetChromeVisible`）。逐窗格遍历同时覆盖 Dock 与自由画布两个宿主（`Dock` + `FreeformCanvas` 的视觉子树），否则自由布局下控制条不会隐藏；焦点模式的全屏浮层播放器不在上述两个视觉子树内，`SetPlayerControlBarsVisible` 额外纳入 `ViewModel.FocusPlayer`，并在浮层创建（`FocusPlayer` 属性变更）时按当前空闲状态初始化 chrome，避免全屏后控制条常驻；同时把工作区四周 6px 留白置 0（`WorkspaceHost.Padding`），让画面真正铺满整屏；
 - 播放器底栏只保留画质与实测 fps（如 `1080P · 60fps`），主播名/编号统一由窗格标题栏展示，避免同一信息重复出现；
 - **桌面级全屏**：F11 或顶栏「桌面全屏」按钮；记录进入前的 `WindowState`，进入 `WindowState.FullScreen` 并隐藏外壳，顶部提示仅在鼠标移到屏幕顶部（Y≤90）时出现；Esc 退出（自带 400ms 去抖避免重复触发）；
 - 侧栏：房间库搜索、分组药丸（`WrapPanel` 自动换行 + `ScrollViewer` 限高）、房间条目操作（编辑/删除/双击加入工作区）。
@@ -496,7 +496,7 @@ Program.Main
   - 焦点模式：双击窗格进入单窗格全屏（`IsFocused` + 静音策略 + 恢复原布局）、Esc 退出；
   - 锚点/未开播文字与状态同步：`SetDanmakuEnabled` 控制清流弹幕按钮显隐；
   - 底部控制条：音量/静音、弹幕开关、紧凑模式，以及 V0.7 新增的「暂停/继续」（`TogglePause`，同步 mpv `pause` 属性并切换 ⏸/▶ 图标）与「刷新播放」（`RequestRefresh` → `RefreshRequested` → `WorkspacePlayerManager.RefreshTileAsync`，清空退避/离线计时器后立即重新解析地址并起播）；刷新按钮图标使用 `Icons.axaml` 的 `IconRefresh` PathIcon（矢量绘制，避免字体码点被裁切）。
-- 播放器句柄创建/复用/销毁归属：上层只依赖 `IWorkspacePlayer` 契约（通过 `View` 取回挂载控件），`WorkspacePlayerManager` 用可注入工厂（默认 `static () => new MpvPlayerView()`）独占创建句柄；`EnsurePlayer` 按窗格复用或创建，`TransferPlayer` 让新句柄经 `IWorkspacePlayer.TryAdoptSessionFrom` 接管旧 mpv 会话（具体类型校验收敛在实现内，迁移失败时释放新句柄并保持旧窗格不变）；销毁统一走 `RemovePlayer`（停止轮询/重试 → 清空 `PlayerView` → Dispose），由 `MainWindowViewModel` 在窗格移除、方案差集销毁、拖拽换位与 `DisposePlayers` 中调用；`Stop` 只停止播放与跟踪（自由画布切换等仍需复用句柄的场景），`Dispose` 兜底释放仍被跟踪的句柄（幂等）。可回放 seek（进度条/seek 轮询计时器）是播放器视图内部 chrome，不纳入契约；其探测值换算（可回放判定）、滑块增量阈值、拖动防抖后的 seek 目标格式与时间文本已抽到 `Player/ReplaySeekLogic`，由 `Player/ReplaySeekLogicTests` 覆盖，视图只保留计时器与控件写回（V0.7.5）。
+- 播放器句柄创建/复用/销毁归属：上层只依赖 `IWorkspacePlayer` 契约（通过 `View` 取回挂载控件），`WorkspacePlayerManager` 用可注入工厂（默认 `static () => new MpvPlayerView()`）独占创建句柄；`EnsurePlayer` 按窗格复用或创建，`TransferPlayer` 让新句柄经 `IWorkspacePlayer.TryAdoptSessionFrom` 接管旧 mpv 会话（具体类型校验收敛在实现内，迁移失败时释放新句柄并保持旧窗格不变）；销毁统一走 `RemovePlayer`（停止轮询/重试 → 清空 `PlayerView` → Dispose），由 `MainWindowViewModel` 在窗格移除、方案差集销毁、拖拽换位与 `DisposePlayers` 中调用；`Stop` 只停止播放与跟踪（自由画布切换等仍需复用句柄的场景），`Dispose` 兜底释放仍被跟踪的句柄（幂等）。可回放 seek（进度条/seek 轮询计时器）是播放器视图内部 chrome，不纳入契约；其探测值换算（可回放判定）、滑块增量阈值、拖动防抖后的 seek 目标格式与时间文本已抽到 `Player/ReplaySeekLogic`，由 `Player/ReplaySeekLogicTests` 覆盖，视图只保留计时器与控件写回（V0.7.5）。同一逻辑用 duration 连续增长识别直播源：直播进度条固定在最右端避免探测回写抖动（PotPlayer 行为），向左拖动回看后跟随播放位置，追回直播边缘 ±5s 内重新固定；VOD 行为不变，进度条提示文案按直播/回放切换。
 - `QualityPolicy`：按 Height/Fps 降序；大窗/焦点取最高；紧凑模式上限 480p；普通窗口优先 ≤720p，取第一个满足者。
 - `MpvPlayerView`（libmpv 封装）：
   - 初始化选项：`hwdec=auto-safe`、`vo=libmpv`、`gpu-api=opengl`、`cache=yes`、`demuxer-max-bytes`（按分辨率 3M/4M/8M）、`network-timeout=10`、`audio-buffer=0.8`、`audio-stream-silence=yes`、关闭 OSC/默认快捷键（键位由应用处理）；
@@ -604,7 +604,7 @@ dotnet build LiveMonitor.sln --no-restore
 - 工程目标框架：`Data`、`Media`、`Desktop` 为 `net8.0-windows`，其余类库为 `net8.0`；测试工程对应同目标框架（`Data`/`Media`/`Desktop` 测试为 `net8.0-windows`，`Platforms`/`Danmaku` 测试为 `net8.0`）。
 - 需要 `tools/` 下的 ffmpeg/mpv 才能运行应用（`scripts/fetch-tools.ps1` 自动下载并校验）。
 
-### 13.2 测试（当前 3177 个用例）
+### 13.2 测试（当前 3186 个用例）
 
 | 测试工程 | 覆盖范围 | 用例数 |
 | --- | --- | --- |
@@ -612,7 +612,7 @@ dotnet build LiveMonitor.sln --no-restore
 | `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退、自定义清流 Provider、斗鱼流接缝、抖音帧接缝与断线通知、弹幕重连退避、B 站连接解析（`BilibiliConnectionParsing`）、B 站房间号/画质/播放地址解析（`BilibiliProviderParsing`）、Twitch 频道与拉流解析（`TwitchProviderParsing`）、虎牙房间号/线路/档位解析（`HuyaProviderParsing`）、虎牙接口响应与房间页解析（`HuyaApiClientParsing`）、斗鱼接口响应解析（`DouyuApiParsing`）、插件版本比较与版本解析（`PluginVersionComparer`/`PluginVersionInfo`） | 887 |
 | `tests/LiveMonitor.Danmaku.Tests` | 过滤器、高能检测、会话管理、重连/释放竞态、断线退避策略（`DanmakuReconnectPolicy`） | 125 |
 | `tests/LiveMonitor.Media.Tests` | 录制状态机与并发收尾、轮询器与会话工作器、分段合并、剪辑导出、波形、增量波形/增量弹幕读取、ASR 响应解析与按句拆分（`AsrResponseParser`）、FFmpeg 参数协议分支（取消路径覆盖预取消与首帧进度回调取消） | 261 |
-| `tests/LiveMonitor.Desktop.Tests` | ViewModel（主窗口拆分/房间目录/布局方案/状态栏/高亮/录制中心/剪辑台与 ASR/导出子视图模型/设置页 ASR/组件更新/通用与弹幕）、Dock/自由画布布局、时间轴几何（`ClipTimelineGeometry`）与缩放视口/拖拽钳制（`ClipTimelineViewLogic`）、播放器管理器与 `IWorkspacePlayer`、回放 seek 探测/防抖逻辑（`ReplaySeekLogic`）、剪辑预览位置推进与安全上界（`ClipPlaybackPositionLogic`）、剪辑预览播放状态机与守卫（`ClipPlaybackStateLogic`）、剪辑台展示层纯逻辑（`ClipStudioPresentationLogic`）、音量表解析与平滑（`AudioMeterLogic`）、mpv 流选项映射与请求头清理（`StreamOptionMapper`）、AppServices 释放、登录配置、播放状态文本、录制目标排序、自由布局命中与宿主切换、自由画布交互几何（`FreeformInteractionLogic`）、录制中心历史子视图模型（`RecordingHistoryViewModel`）、弹幕渲染层纯逻辑（`DanmakuOverlayLogic`）、窗格控制条 chrome 规则（`PlayerChromeLogic`）、健康采样规则（`PlayerHealthSampling`）、录制目标行展示规则（`RecordingTargetDisplayLogic`）、历史录像行展示规则（`RecordingHistoryDisplayLogic`）、播放器丢帧降档守护（`DropGuardPolicy`）、状态栏 GPU 指标解析与展示（`GpuMetricsLogic`）、边录边剪增量波形纯逻辑（`LiveWaveformLogic`）、剪辑台选区/步进/高能窗口纯规则（`ClipSelectionLogic`）、剪辑台列表行展示规则（`ClipListDisplayLogic`）、导出任务行展示规则（`ClipExportTaskDisplayLogic`）、录制格式化文案（`RecordingUiFormat`）、自由画布磁吸引擎（`FreeformSnapEngine`）、弹幕表情缓存键与重试规则（`DanmakuEmoteCacheLogic`）、录制中心摘要与目录归一化规则（`RecordingCenterDisplayLogic`）、剪辑导出文件名与时间码规则（`ClipExportNamingLogic`）、弹幕渲染帧节拍与停滞判定（`DanmakuRenderTiming`）、播放器 CA 与音量表路径解析（`PlayerPathResolver`）、时间码格式化统一入口（`TimeCodeFormat`）、边录边剪会话状态（`LiveClipSession`）、安全剪辑边界（`LiveClipSafety`）、自由画布预设边缘（`FreeformLayoutPresets`）、主窗口状态栏文案（`MainWindowStatusText`）、平台登录配置表（`PlatformLoginProfiles`）、录制中心与历史录像状态提示文案（`RecordingCenterStatusText`）、录制目标行回报文案（`RecordingTargetStatusText`）、语音识别面板文案（`AsrStatusText`）、窗格状态与重连提示文案（`RoomStatusText`）、剪辑导出面板状态文案（`ClipExportStatusText`）、语音识别设置分区文案（`AsrSettingsStatusText`）、通用与弹幕设置分区文案（`GeneralAndDanmakuSettingsStatusText`）、组件与更新分区文案（`PluginAndToolUpdateStatusText`）、设置页宿主导航/账号状态栏文案（`SettingsWindowStatusText`）、主窗口宿主对话框与状态栏文案（`MainWindowStatusText` 扩展）、平台徽章与名称唯一来源（`PlatformBadgeFormat`）、播放器表面提示文案（`RoomStatusText` 扩展与 `ClipPreviewStatusText`）、主库列表状态（`RoomListStatusText`）、主库校验文案（`RoomCatalogStatusText`）、语音识别预设目录（`AsrPresetCatalog`）与连接测试文案（`AsrConnectionStatusText`） | 1866 |
+| `tests/LiveMonitor.Desktop.Tests` | ViewModel（主窗口拆分/房间目录/布局方案/状态栏/高亮/录制中心/剪辑台与 ASR/导出子视图模型/设置页 ASR/组件更新/通用与弹幕）、Dock/自由画布布局、时间轴几何（`ClipTimelineGeometry`）与缩放视口/拖拽钳制（`ClipTimelineViewLogic`）、播放器管理器与 `IWorkspacePlayer`、回放 seek 探测/防抖逻辑（`ReplaySeekLogic`）、剪辑预览位置推进与安全上界（`ClipPlaybackPositionLogic`）、剪辑预览播放状态机与守卫（`ClipPlaybackStateLogic`）、剪辑台展示层纯逻辑（`ClipStudioPresentationLogic`）、音量表解析与平滑（`AudioMeterLogic`）、mpv 流选项映射与请求头清理（`StreamOptionMapper`）、AppServices 释放、登录配置、播放状态文本、录制目标排序、自由布局命中与宿主切换、自由画布交互几何（`FreeformInteractionLogic`）、录制中心历史子视图模型（`RecordingHistoryViewModel`）、弹幕渲染层纯逻辑（`DanmakuOverlayLogic`）、窗格控制条 chrome 规则（`PlayerChromeLogic`）、健康采样规则（`PlayerHealthSampling`）、录制目标行展示规则（`RecordingTargetDisplayLogic`）、历史录像行展示规则（`RecordingHistoryDisplayLogic`）、播放器丢帧降档守护（`DropGuardPolicy`）、状态栏 GPU 指标解析与展示（`GpuMetricsLogic`）、边录边剪增量波形纯逻辑（`LiveWaveformLogic`）、剪辑台选区/步进/高能窗口纯规则（`ClipSelectionLogic`）、剪辑台列表行展示规则（`ClipListDisplayLogic`）、导出任务行展示规则（`ClipExportTaskDisplayLogic`）、录制格式化文案（`RecordingUiFormat`）、自由画布磁吸引擎（`FreeformSnapEngine`）、弹幕表情缓存键与重试规则（`DanmakuEmoteCacheLogic`）、录制中心摘要与目录归一化规则（`RecordingCenterDisplayLogic`）、剪辑导出文件名与时间码规则（`ClipExportNamingLogic`）、弹幕渲染帧节拍与停滞判定（`DanmakuRenderTiming`）、播放器 CA 与音量表路径解析（`PlayerPathResolver`）、时间码格式化统一入口（`TimeCodeFormat`）、边录边剪会话状态（`LiveClipSession`）、安全剪辑边界（`LiveClipSafety`）、自由画布预设边缘（`FreeformLayoutPresets`）、主窗口状态栏文案（`MainWindowStatusText`）、平台登录配置表（`PlatformLoginProfiles`）、录制中心与历史录像状态提示文案（`RecordingCenterStatusText`）、录制目标行回报文案（`RecordingTargetStatusText`）、语音识别面板文案（`AsrStatusText`）、窗格状态与重连提示文案（`RoomStatusText`）、剪辑导出面板状态文案（`ClipExportStatusText`）、语音识别设置分区文案（`AsrSettingsStatusText`）、通用与弹幕设置分区文案（`GeneralAndDanmakuSettingsStatusText`）、组件与更新分区文案（`PluginAndToolUpdateStatusText`）、设置页宿主导航/账号状态栏文案（`SettingsWindowStatusText`）、主窗口宿主对话框与状态栏文案（`MainWindowStatusText` 扩展）、平台徽章与名称唯一来源（`PlatformBadgeFormat`）、播放器表面提示文案（`RoomStatusText` 扩展与 `ClipPreviewStatusText`）、主库列表状态（`RoomListStatusText`）、主库校验文案（`RoomCatalogStatusText`）、语音识别预设目录（`AsrPresetCatalog`）与连接测试文案（`AsrConnectionStatusText`） | 1875 |
 
 合计 **3061** 个用例，五套全部通过（0 失败 0 跳过）。
 
