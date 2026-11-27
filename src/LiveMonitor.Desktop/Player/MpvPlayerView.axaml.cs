@@ -68,6 +68,12 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
     private readonly ReplaySeekLogic _seekLogic = new();
     private int _suppressSeekChange;
 
+    /// <summary>回放源进度条提示：拖动会 seek。</summary>
+    private const string ReplaySeekTip = "拖动回放（仅对支持回放的源生效）";
+
+    /// <summary>直播源进度条提示：进度条固定在最新位置，拖动可回看。</summary>
+    private const string LiveSeekTip = "正在直播：进度条停留在最新位置，向左拖动可回看";
+
     public MpvPlayerView()
     {
         InitializeComponent();
@@ -1143,6 +1149,18 @@ public partial class MpvPlayerView : Avalonia.Controls.UserControl, IWorkspacePl
         if (update.TimeText is { } text)
         {
             SeekTimeText.Text = text;
+        }
+
+        UpdateSeekTip();
+    }
+
+    /// <summary>直播与回放两种进度条语义的提示文案，只在真正变化时写一次。</summary>
+    private void UpdateSeekTip()
+    {
+        string tip = _seekLogic.FollowLiveEdge ? LiveSeekTip : ReplaySeekTip;
+        if (!string.Equals(Avalonia.Controls.ToolTip.GetTip(SeekSlider) as string, tip, StringComparison.Ordinal))
+        {
+            Avalonia.Controls.ToolTip.SetTip(SeekSlider, tip);
         }
     }
 

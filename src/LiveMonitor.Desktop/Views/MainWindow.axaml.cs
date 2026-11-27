@@ -39,6 +39,9 @@ public partial class MainWindow : Window
     private DateTime _lastRoomClickAt;
     private readonly DispatcherTimer _immersiveIdleTimer;
     private bool _isImmersiveActive;
+
+    /// <summary>沉浸模式下指针是否处于空闲（控制条已隐藏），新建的浮层播放器据此初始化。</summary>
+    private bool _isImmersiveIdle;
     private DateTime _lastFullscreenToggleAt;
     private IRootDock? _savedDockLayout;
     private RoomListItemViewModel? _roomDragCandidate;
@@ -297,6 +300,15 @@ public partial class MainWindow : Window
                 {
                     RefreshGroupPills();
                 }
+                else if (args.PropertyName == nameof(MainWindowViewModel.FocusPlayer))
+                {
+                    // 浮层播放器在 IsFocused 变更之后才创建，视觉树遍历赶不上它；
+                    // 创建时按当前空闲状态初始化控制条，否则全屏下控制条会一直挂着。
+                    if (_isImmersiveActive)
+                    {
+                        _viewModel.FocusPlayer?.SetChromeVisible(!_isImmersiveIdle);
+                    }
+                }
             };
             await _viewModel.InitializeAsync();
             RefreshGroupPills();
@@ -426,6 +438,7 @@ public partial class MainWindow : Window
         }
         else
         {
+            _isImmersiveIdle = false;
             _immersiveIdleTimer.Stop();
             Classes.Set("immersive-idle", false);
             SetPlayerControlBarsVisible(true);
@@ -452,6 +465,7 @@ public partial class MainWindow : Window
 
     private void ShowImmersiveControls()
     {
+        _isImmersiveIdle = false;
         Classes.Set("immersive-idle", false);
         SetPlayerControlBarsVisible(true);
         if (_isDesktopFullscreen)
@@ -462,6 +476,7 @@ public partial class MainWindow : Window
 
     private void HideImmersiveControls()
     {
+        _isImmersiveIdle = true;
         Classes.Set("immersive-idle", true);
         SetPlayerControlBarsVisible(false);
         DesktopFullscreenHint.IsVisible = false;
@@ -476,7 +491,16 @@ public partial class MainWindow : Window
         // 平铺模式窗格在 Dock 视觉树里，自由布局模式窗格在 FreeformCanvas 里，两个宿主都要处理。
         var players = Dock.GetVisualDescendants()
             .OfType<Player.MpvPlayerView>()
-            .Concat(FreeformCanvas.GetVisualDescendants().OfType<Player.MpvPlayerView>());
+            .Concat(FreeformCanvas.GetVisualDescendants().OfType<Player.MpvPlayerView>())
+            .ToList();
+
+        // 焦点模式的全屏浮层播放器挂在 ContentControl 内容上，不属于上面两个宿主，需要单独补上，
+        // 否则沉浸空闲后它收不到隐藏通知，全屏观看时控制条会一直停在画面底部。
+        if (_viewModel?.FocusPlayer is { } focusPlayer && !players.Contains(focusPlayer))
+        {
+            players.Add(focusPlayer);
+        }
+
         foreach (var player in players)
         {
             player.SetChromeVisible(visible);

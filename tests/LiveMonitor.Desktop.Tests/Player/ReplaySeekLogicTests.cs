@@ -163,4 +163,140 @@ public sealed class ReplaySeekLogicTests
     {
         Assert.Equal(expected, ReplaySeekLogic.FormatClock(seconds));
     }
+
+    [Fact]
+    public void Update_VodKeepsFollowingPositionAndIsNotLive()
+    {
+        var logic = new ReplaySeekLogic();
+
+        logic.Update("yes", 120d, 0d, 0d, 0d);
+        var update = logic.Update("yes", 120d, 30d, 120d, 0d);
+
+        Assert.False(logic.IsLive);
+        Assert.False(logic.FollowLiveEdge);
+        Assert.Equal(30d, update.Value);
+        Assert.Equal("00:30 / 02:00", update.TimeText);
+    }
+
+    [Fact]
+    public void Update_LiveSourcePinsSliderToLatestEdge()
+    {
+        var logic = new ReplaySeekLogic();
+
+        logic.Update("yes", 600d, 0d, 0d, 0d);
+        logic.Update("yes", 601d, 1d, 600d, 600d);
+        var update = logic.Update("yes", 602d, 1.5d, 600d, 601d);
+
+        Assert.True(logic.IsLive);
+        Assert.True(logic.FollowLiveEdge);
+        Assert.Equal(602d, update.Value);
+        Assert.Equal("10:02 / 10:02", update.TimeText);
+    }
+
+    [Fact]
+    public void Update_SingleDurationGrowth_DoesNotFlagLiveYet()
+    {
+        var logic = new ReplaySeekLogic();
+
+        logic.Update("yes", 600d, 0d, 0d, 0d);
+        var update = logic.Update("yes", 601d, 1d, 600d, 0d);
+
+        Assert.False(logic.IsLive);
+        Assert.False(logic.FollowLiveEdge);
+        Assert.Equal(1d, update.Value);
+    }
+
+    [Fact]
+    public void TryTakePendingTarget_BacktrackingFromLiveEdge_StopsFollowingEdge()
+    {
+        var logic = new ReplaySeekLogic();
+        logic.Update("yes", 600d, 0d, 0d, 0d);
+        logic.Update("yes", 601d, 1d, 600d, 600d);
+        logic.Update("yes", 602d, 2d, 600d, 601d);
+
+        logic.BeginDrag(100d);
+        Assert.True(logic.TryTakePendingTarget(out var target));
+
+        Assert.Equal("100", target);
+        Assert.True(logic.IsLive);
+        Assert.False(logic.FollowLiveEdge);
+    }
+
+    [Fact]
+    public void TryTakePendingTarget_DraggingNearLiveEdge_KeepsFollowingEdge()
+    {
+        var logic = new ReplaySeekLogic();
+        logic.Update("yes", 600d, 0d, 0d, 0d);
+        logic.Update("yes", 601d, 1d, 600d, 600d);
+        logic.Update("yes", 602d, 2d, 600d, 601d);
+
+        logic.BeginDrag(600d);
+        Assert.True(logic.TryTakePendingTarget(out _));
+
+        Assert.True(logic.FollowLiveEdge);
+    }
+
+    [Fact]
+    public void Update_BacktrackingLiveSource_FollowsPositionInsteadOfPinning()
+    {
+        var logic = new ReplaySeekLogic();
+        logic.Update("yes", 600d, 0d, 0d, 0d);
+        logic.Update("yes", 601d, 1d, 600d, 600d);
+        logic.Update("yes", 602d, 2d, 600d, 601d);
+        logic.BeginDrag(100d);
+        logic.TryTakePendingTarget(out _);
+
+        var update = logic.Update("yes", 602d, 100d, 602d, 602d);
+
+        Assert.False(logic.FollowLiveEdge);
+        Assert.Equal(100d, update.Value);
+        Assert.Equal("01:40 / 10:02", update.TimeText);
+    }
+
+    [Fact]
+    public void Update_ReachingLiveEdgeAgain_RepinsSlider()
+    {
+        var logic = new ReplaySeekLogic();
+        logic.Update("yes", 600d, 0d, 0d, 0d);
+        logic.Update("yes", 601d, 1d, 600d, 600d);
+        logic.Update("yes", 602d, 2d, 600d, 601d);
+        logic.BeginDrag(100d);
+        logic.TryTakePendingTarget(out _);
+        logic.Update("yes", 602d, 100d, 602d, 602d);
+
+        var update = logic.Update("yes", 602d, 600d, 602d, 100d);
+
+        Assert.True(logic.FollowLiveEdge);
+        Assert.Equal(602d, update.Value);
+        Assert.Equal("10:02 / 10:02", update.TimeText);
+    }
+
+    [Fact]
+    public void Reset_ClearsLiveDetection()
+    {
+        var logic = new ReplaySeekLogic();
+        logic.Update("yes", 600d, 0d, 0d, 0d);
+        logic.Update("yes", 601d, 1d, 600d, 600d);
+        logic.Update("yes", 602d, 2d, 600d, 601d);
+        Assert.True(logic.IsLive);
+
+        logic.Reset();
+
+        Assert.False(logic.IsAvailable);
+        Assert.False(logic.IsLive);
+        Assert.False(logic.FollowLiveEdge);
+        Assert.Equal(0d, logic.Duration);
+    }
+
+    [Fact]
+    public void DurationRetreat_ClearsGrowthEvidence()
+    {
+        var logic = new ReplaySeekLogic();
+        logic.Update("yes", 600d, 0d, 0d, 0d);
+        logic.Update("yes", 601d, 1d, 600d, 600d);
+        logic.Update("yes", 590d, 0d, 601d, 601d);
+        logic.Update("yes", 591d, 1d, 590d, 590d);
+
+        Assert.False(logic.IsLive);
+    }
 }
