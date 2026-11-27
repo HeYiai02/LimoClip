@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.VisualTree;
@@ -29,6 +30,8 @@ public partial class ClipStudioView : Avalonia.Controls.UserControl
         Player.StateChanged += OnPlayerStateChanged;
         Player.PlaybackCompleted += OnPlayerCompleted;
         Player.PlaybackFailed += OnPlayerFailed;
+
+        UpdateClipVolumeVisual();
 
         DetachedFromVisualTree += OnDetachedFromVisualTree;
 
@@ -193,6 +196,27 @@ public partial class ClipStudioView : Avalonia.Controls.UserControl
     private void OnSeekRequested(TimeSpan position) => Player.Seek(position);
 
     private void OnSpeedChangeRequested(double speed) => Player.SetSpeed(speed);
+
+    /// <summary>剪辑预览音量滑杆：直接写本地播放器 mpv volume，不经过 ViewModel。</summary>
+    private void OnClipVolumeChanged(object? sender, RangeBaseValueChangedEventArgs e)
+    {
+        Player.SetVolume((int)Math.Round(e.NewValue));
+        UpdateClipVolumeVisual();
+    }
+
+    /// <summary>静音/开声按钮：只切 mute，保留滑杆音量。</summary>
+    private void OnClipMuteClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        Player.ToggleMute();
+        UpdateClipVolumeVisual();
+    }
+
+    private void UpdateClipVolumeVisual()
+    {
+        ClipVolumeText.Text = Player.Volume.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        ClipMuteIcon.Text = PlayerChromeLogic.MuteIcon(Player.IsMuted || Player.Volume == 0);
+        Avalonia.Controls.ToolTip.SetTip(ClipMuteButton, PlayerChromeLogic.MuteTip(Player.IsMuted));
+    }
 
     private void OnDanmakuEnabledChanged(bool enabled)
     {
