@@ -265,6 +265,7 @@ public partial class MainWindow : Window
             _viewModel.WorkspaceTilesChanged += (_, _) => SyncFreeformTiles();
             _viewModel.LayoutStructureChanged += (_, _) => RefreshWorkspaceHost();
             _viewModel.LeaveFreeformHostAsync = LeaveFreeformHostAsync;
+            _viewModel.PrepareFreeformHostAsync = PrepareFreeformHostAsync;
             FreeformCanvas.RoomDropped += OnFreeformRoomDropped;
             _viewModel.FreeformApplyRequested += (_, document) =>
             {
@@ -585,8 +586,10 @@ public partial class MainWindow : Window
     /// <summary>把当前工作区窗格同步给自由画布（窗格增减/房间变化时调用）。</summary>
     private void SyncFreeformTiles()
     {
-        if (_viewModel is null)
+        if (_viewModel is null || !_viewModel.IsFreeformMode)
         {
+            // 平铺模式下画布必须保持空：否则画布会持有与 Dock 同一批窗格控件，切到自由方案时
+            // 同一个 MpvPlayerView 会被两个 ContentPresenter 争用，布局测量时抛 already has a visual parent 并闪退。
             return;
         }
 
@@ -696,6 +699,36 @@ public partial class MainWindow : Window
         {
             _viewModel.SetStatus(MainWindowStatusText.FreeformLayoutToggleFailed(ex.Message));
         }
+    }
+
+    /// <summary>
+    /// 方案加载要直接进入自由布局时，先把宿主从 Dock 切到画布：
+    /// 拆掉 Dock 树并等旧窗格视图释放，再解绑播放器、清空并显示画布。
+    /// ViewModel 在 <see cref="MainWindowViewModel.LoadProfileAsync"/> 里翻转模式前通过回调等待这里完成，
+    /// 否则画布一显现就会把仍挂在 Dock 上的 MpvPlayerView 再挂一次，布局测量时闪退。
+    /// </summary>
+    private async Task PrepareFreeformHostAsync()
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        // 平铺阶段画布按约定不持有窗格；这里再清一次，避免旧版本同步逻辑留下的子项在套模板时争用播放器。
+        FreeformCanvas.SetTiles(Array.Empty<RoomTileViewModel>());
+        FreeformCanvas.UpdateLayout();
+
+        if (!_viewModel.IsFreeformMode)
+        {
+            _savedDockLayout = _viewModel.Layout;
+            Dock.Layout = null;
+            Dock.IsVisible = false;
+            Dock.UpdateLayout();
+            await Task.Delay(120);
+        }
+
+        _viewModel.DetachWorkspacePlayers();
+        FreeformCanvas.IsVisible = true;
     }
 
     /// <summary>

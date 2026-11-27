@@ -459,6 +459,14 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     public Func<Task>? LeaveFreeformHostAsync { get; set; }
 
     /// <summary>
+    /// 由视图注入：切换方案直接进入自由布局前，先把宿主从 Dock 切到画布
+    /// （保存 Dock 布局、拆树、等旧窗格视图释放、解绑播放器、清空并显示画布）。
+    /// 方案加载在 ViewModel 内翻转模式，无法直接操作视图；不先切宿主会让同一个 MpvPlayerView
+    /// 被 Dock 与画布两个 ContentPresenter 争用，下一次布局测量抛 already has a visual parent 并闪退。
+    /// </summary>
+    public Func<Task>? PrepareFreeformHostAsync { get; set; }
+
+    /// <summary>
     /// 平铺布局命令（一键自适应/主副屏/恢复比例/切换平铺方案）执行前调用：
     /// 若当前在自由画布中，先让视图把宿主切回 Dock，再翻转模式。否则销毁仍挂在可见画布上的
     /// MpvPlayerView 会让原生渲染控件与视觉树不一致，导致闪退；而只改模式又会让新布局落在隐藏的 Dock 上，看起来没有效果。
@@ -1964,8 +1972,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             await ExitFreeformForTiledLayoutAsync().ConfigureAwait(true);
         }
 
-        IsFreeformMode = freeformDocument is not null;
-        _freeformDocument = freeformDocument;
         var previousLayout = Layout;
         var previousTiles = WorkspaceDockBuilder.EnumerateTiles(previousLayout)
             .Where(tile => tile.HasRoom)
@@ -2037,10 +2043,25 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             .Where(tile => tile.HasRoom)
             .ToList();
 
+        var reusePanes = previousLayout is not null && WorkspaceLayoutCoordinator.HasSamePaneIds(previousLayout, layout);
+        var enteringFreeform = freeformDocument is not null && !IsFreeformMode;
+        // 目标是自由布局且宿主结构会变化（从平铺进入，或自由方案重建）时，必须先让视图切宿主：
+        // 否则翻转模式后画布立刻显现，同一个 MpvPlayerView 会被 Dock 与画布两个 ContentPresenter 争用而闪退。
+        var rebuildingFreeform = freeformDocument is not null && IsFreeformMode && !reusePanes;
+        if ((enteringFreeform || rebuildingFreeform) && PrepareFreeformHostAsync is { } prepareHost)
+        {
+            await prepareHost().ConfigureAwait(true);
+        }
+
+        IsFreeformMode = freeformDocument is not null;
+        _freeformDocument = freeformDocument;
+
         // 两个方案的窗格集合一致时，不替换 Dock 树，直接复用原窗格和 PlayerView。
         // 这是切换方案最常见的情况，也是零黑屏的关键：控件不移动，底层 MpvContext 不断流。
-        if (previousLayout is not null && WorkspaceLayoutCoordinator.HasSamePaneIds(previousLayout, layout))
+        if (previousLayout is not null && reusePanes)
         {
+            // 从平铺进入自由布局时宿主已切换、播放器已解绑，必须等画布挂好窗格后再统一起播。
+            var startPlayersImmediately = !enteringFreeform;
             var slotsByPane = profile.Slots.ToDictionary(slot => slot.PaneId);
             foreach (var oldTile in WorkspaceDockBuilder.EnumerateTiles(previousLayout))
             {
@@ -2049,7 +2070,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
                 oldTile.IsDanmakuVisible = slot?.DefaultDanmakuVisible ?? false;
                 if (oldTile.LiveRoomId == (room?.Id ?? Guid.Empty))
                 {
-                    if (oldTile.PlayerView is null && oldTile.HasRoom)
+                    if (startPlayersImmediately && oldTile.PlayerView is null && oldTile.HasRoom)
                     {
                         // 宿主刚从自由画布切回 Dock：旧控件已在画布侧解绑，必须重新挂载播放器。
                         _ = _players.StartAsync(oldTile);
@@ -2067,7 +2088,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
                 }
 
                 oldTile.Assign(room);
-                _ = _players.StartAsync(oldTile);
+                if (startPlayersImmediately)
+                {
+                    _ = _players.StartAsync(oldTile);
+                }
             }
 
             LayoutProfiles.NotifyProfileLoaded(profile);
@@ -2075,6 +2099,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             SetHeroLayout(WorkspaceDockBuilder.ContainsDockId(previousLayout, "workspace-hero"));
             if (freeformDocument is not null)
             {
+                if (enteringFreeform)
+                {
+                    // 画布此前为空：先按当前窗格建子项，再套自由布局文档。
+                    NotifyWorkspaceTilesChanged();
+                }
+
                 FreeformApplyRequested?.Invoke(this, freeformDocument);
             }
 
@@ -2085,6 +2115,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             LayoutProfiles.MarkClean();
             StatusText = LayoutLoadStatusLogic.InPlace(profile.Name, freeformDocument is not null);
             SyncDanmakuSubscriptions();
+            if (enteringFreeform)
+            {
+                // 画布刚显现，等一轮布局让窗格视图套上模板后再起播，避免播放器控件还没挂到视觉树。
+                await Task.Delay(120).ConfigureAwait(true);
+                await StartWorkspacePlayersAsync().ConfigureAwait(true);
+            }
+
             return;
         }
 
@@ -2140,6 +2177,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             diff.Added.Count);
 
         await Task.Yield();
+        if (enteringFreeform || rebuildingFreeform)
+        {
+            // 画布刚显现/重建，等一轮布局让窗格视图套上模板后再创建播放器。
+            await Task.Delay(120).ConfigureAwait(true);
+        }
+
         foreach (var tile in newTiles.Where(tile => tile.PlayerView is null))
         {
             await _players.StartAsync(tile).ConfigureAwait(true);
