@@ -94,7 +94,8 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             new DanmakuJsonlReaderAdapter(),
             new DispatcherLiveSessionTimer(),
             new LiveSessionSyncHost(this),
-            new LiveSessionOpenHost(this));
+            new LiveSessionOpenHost(this),
+            new LiveSessionCompletionHost(this));
         Export = new ClipExportViewModel(this, settings);
         Asr = new ClipAsrViewModel(asr ?? throw new ArgumentNullException(nameof(asr)), this);
         _liveRecordings.SessionCompleted += OnLiveRecordingSessionCompleted;
@@ -715,60 +716,8 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     [RelayCommand(CanExecute = nameof(CanSyncLiveProgress))]
     private Task SyncLiveProgressAsync() => _liveSync.SyncManualAsync();
 
-    /// <summary>录制结束：停止实时同步，并把当前分片无缝切换为最终文件 + 离线剪辑模式。</summary>
-    public async Task OnLiveSessionCompletedAsync(RecordingSession session)
-    {
-        if (session is null || _disposed || !IsLiveSession || _currentSession?.Id != session.Id)
-        {
-            return;
-        }
-
-        _liveSync.StopAutoSync();
-        var lastPosition = _position;
-        var lastIn = _inPoint;
-        var lastOut = _outPoint;
-        ExitLiveMode();
-
-        try
-        {
-            var latest = await _sessions.GetByIdAsync(session.Id).ConfigureAwait(true);
-            if (latest is null || string.IsNullOrWhiteSpace(latest.VideoFilePath) || !File.Exists(latest.VideoFilePath))
-            {
-                StatusText = ClipStudioStatusText.LiveCompletedWithoutFile(latest?.ErrorMessage);
-                return;
-            }
-
-            var danmakuPath = !string.IsNullOrWhiteSpace(latest.DanmakuFilePath)
-                              && File.Exists(latest.DanmakuFilePath)
-                ? latest.DanmakuFilePath
-                : null;
-            await OpenVideoCoreAsync(latest.VideoFilePath, danmakuPath, latest).ConfigureAwait(true);
-            if (_disposed)
-            {
-                return;
-            }
-
-            // 录制已结束：刷新列表，让该场次从「🔴 录制中」切换为普通历史项。
-            await RefreshSessionsAsync().ConfigureAwait(true);
-            if (_disposed)
-            {
-                return;
-            }
-
-            if (lastOut > TimeSpan.Zero && lastOut > lastIn + ClipSelectionLogic.MinSelection)
-            {
-                UpdateSelection(lastIn, lastOut);
-            }
-
-            SeekTo(lastPosition);
-            RaiseTimelineChanged();
-            StatusText = ClipStudioStatusText.LiveCompleted;
-        }
-        catch (Exception ex)
-        {
-            StatusText = ClipStudioStatusText.LiveSwitchToOfflineFailed(ex.Message);
-        }
-    }
+    /// <summary>录制结束：由 <see cref="LiveSessionCoordinator"/> 编排切离线，本类只提供 UI 副作用。</summary>
+    public Task OnLiveSessionCompletedAsync(RecordingSession session) => _liveSync.CompleteAsync(session);
 
     private void OnLiveRecordingSessionCompleted(RecordingSession session)
     {
@@ -1349,6 +1298,42 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             _owner.StatusText = ClipStudioStatusText.LiveOpened;
             _owner.Export.NotifyAvailabilityChanged();
         }
+    }
+
+    /// <summary>把「录制结束切离线」需要的 UI / 数据操作暴露给 <see cref="LiveSessionCoordinator"/>。</summary>
+    private sealed class LiveSessionCompletionHost : ILiveSessionCompletionHost
+    {
+        private readonly ClipStudioViewModel _owner;
+
+        public LiveSessionCompletionHost(ClipStudioViewModel owner) => _owner = owner;
+
+        public bool IsDisposed => _owner._disposed;
+
+        public Guid? CurrentSessionId => _owner._currentSession?.Id;
+
+        public TimeSpan LastPosition => _owner._position;
+
+        public TimeSpan LastInPoint => _owner._inPoint;
+
+        public TimeSpan LastOutPoint => _owner._outPoint;
+
+        public void ExitLiveMode() => _owner.ExitLiveMode();
+
+        public Task<RecordingSession?> LoadSessionAsync(CancellationToken ct)
+            => _owner._sessions.GetByIdAsync(_owner._currentSession!.Id, ct);
+
+        public Task OpenOfflineAsync(string videoPath, string? danmakuPath, RecordingSession session, CancellationToken ct)
+            => _owner.OpenVideoCoreAsync(videoPath, danmakuPath, session);
+
+        public Task RefreshSessionsAsync(CancellationToken ct) => _owner.RefreshSessionsAsync(ct);
+
+        public void RestoreSelection(TimeSpan inPoint, TimeSpan outPoint) => _owner.UpdateSelection(inPoint, outPoint);
+
+        public void SeekTo(TimeSpan position) => _owner.SeekTo(position);
+
+        public void RaiseTimelineChanged() => _owner.RaiseTimelineChanged();
+
+        public void SetStatus(string text) => _owner.StatusText = text;
     }
 
 }
