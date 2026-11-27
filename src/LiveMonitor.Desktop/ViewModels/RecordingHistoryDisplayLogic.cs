@@ -18,6 +18,8 @@ internal static class RecordingHistoryDisplayLogic
 
     public const string ClipMissingTip = "录像文件不存在，无法进入剪辑台";
 
+    public const string RetryMergeTip = "按 .partNNN 分片重新合并一次（合并失败的录像可尝试恢复）";
+
     public const string ClipReadyTip = "进入剪辑台，预览/裁剪并导出 MP4";
 
     /// <summary>房间快照名为空时回退到「房间 {RoomId}」（RoomId 为平台侧字符串）。</summary>
@@ -31,6 +33,10 @@ internal static class RecordingHistoryDisplayLogic
             or RecordingStatus.Stopping;
 
     public static bool CanDelete(RecordingStatus status) => !IsActive(status);
+
+    /// <summary>已结束且带错误信息的会话（合并失败/崩溃恢复）可以按分片重试合并。</summary>
+    public static bool CanRetryMerge(RecordingStatus status, string? errorMessage)
+        => !IsActive(status) && !string.IsNullOrWhiteSpace(errorMessage);
 
     public static string DeleteTip(RecordingStatus status)
         => IsActive(status) ? DeleteActiveTip : DeleteReadyTip;

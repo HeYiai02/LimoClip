@@ -448,6 +448,11 @@
                                                                 IsEnabled="{Binding CanClip}"
                                                                 ToolTip.Tip="{Binding ClipTip}"
                                                                 Command="{Binding ClipCommand}" />
+                                                        <Button Classes="ghost-btn" Content="重试合并"
+                                                                Padding="6,3" FontSize="11"
+                                                                IsVisible="{Binding CanRetryMerge}"
+                                                                ToolTip.Tip="{Binding RetryMergeTip}"
+                                                                Command="{Binding RetryMergeCommand}" />
                                                         <Button Classes="ghost-btn" Content="打开文件夹"
                                                                 Padding="6,3" FontSize="11"
                                                                 Command="{Binding OpenFolderCommand}"

@@ -130,6 +130,20 @@ public sealed class RecordingCenterStatusTextTests
         => Assert.Equal("打开剪辑台失败：boom", RecordingCenterStatusText.OpenClipStudioFailed("boom"));
 
     [Fact]
+    public void HistoryRetryMergeSucceeded_without_warning_keeps_room_title()
+        => Assert.Equal("已重试合并：测试主播", RecordingCenterStatusText.HistoryRetryMergeSucceeded("测试主播", null));
+
+    [Fact]
+    public void HistoryRetryMergeSucceeded_appends_warning()
+        => Assert.Equal("已重试合并：测试主播（末尾 1 个分片无法合并）",
+            RecordingCenterStatusText.HistoryRetryMergeSucceeded("测试主播", "末尾 1 个分片无法合并"));
+
+    [Fact]
+    public void HistoryRetryMergeFailed_includes_reason()
+        => Assert.Equal("重试合并失败：没有找到可合并的录制分片（.partNNN）。",
+            RecordingCenterStatusText.HistoryRetryMergeFailed("没有找到可合并的录制分片（.partNNN）。"));
+
+    [Fact]
     public void LiveClipJustEnded_keeps_original_copy()
         => Assert.Equal("该录制刚刚结束，正在刷新录制列表…", RecordingCenterStatusText.LiveClipJustEnded());
 }

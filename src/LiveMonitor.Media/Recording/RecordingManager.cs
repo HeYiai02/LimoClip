@@ -1,3 +1,4 @@
+using System.Globalization;
 using LiveMonitor.Core;
 using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Enums;
@@ -959,6 +960,139 @@ public sealed class RecordingManager
         }
 
         _log($"崩溃恢复：已把 {unfinished.Count} 个未收尾的录制会话标记为 Failed。");
+    }
+
+    /// <summary>
+    /// 合并失败或程序崩溃后，按会话的 <c>{name}.partNNN</c> 分片重新合并并回写会话。
+    /// 只处理已结束的会话；降级或跳过说明写入 <see cref="RecordingSession.ErrorMessage"/>。
+    /// </summary>
+    public async Task<SegmentMergeResult> RetryMergeAsync(Guid sessionId, CancellationToken ct = default)
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return new SegmentMergeResult(false, 0, "录制引擎已释放。", TimeSpan.Zero);
+        }
+
+        RecordingSession? session;
+        try
+        {
+            session = await _sessions.GetByIdAsync(sessionId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return new SegmentMergeResult(false, 0, $"读取录制会话失败：{ex.Message}", TimeSpan.Zero);
+        }
+
+        if (session is null)
+        {
+            return new SegmentMergeResult(false, 0, "录制会话不存在。", TimeSpan.Zero);
+        }
+
+        if (session.Status is RecordingStatus.Starting or RecordingStatus.Recording or RecordingStatus.Stopping)
+        {
+            return new SegmentMergeResult(false, 0, "该录制仍在进行中，请先停止录制再重试合并。", TimeSpan.Zero);
+        }
+
+        if (string.IsNullOrWhiteSpace(session.VideoFilePath))
+        {
+            return new SegmentMergeResult(false, 0, "会话没有录像文件路径。", TimeSpan.Zero);
+        }
+
+        var directory = Path.GetDirectoryName(session.VideoFilePath);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return new SegmentMergeResult(false, 0, "录制目录不存在，分片可能已被移动或删除。", TimeSpan.Zero);
+        }
+
+        List<RecordedSegment> parts;
+        try
+        {
+            parts = FindRecordedParts(session.VideoFilePath, directory);
+        }
+        catch (Exception ex)
+        {
+            return new SegmentMergeResult(false, 0, $"枚举录制分片失败：{ex.Message}", TimeSpan.Zero);
+        }
+
+        if (parts.Count == 0)
+        {
+            return new SegmentMergeResult(false, 0, "没有找到可合并的录制分片（.partNNN）。", TimeSpan.Zero);
+        }
+
+        ISegmentMerger merger;
+        try
+        {
+            merger = _workerContext.SegmentMerger ?? new FfmpegSegmentMerger(FfmpegLocator.Locate(), _log);
+        }
+        catch (Exception ex)
+        {
+            return new SegmentMergeResult(false, 0, $"未找到可用于合并分片的 ffmpeg：{ex.Message}", TimeSpan.Zero);
+        }
+
+        SegmentMergeResult result;
+        try
+        {
+            result = await merger.MergeAsync(session.VideoFilePath, parts, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            result = new SegmentMergeResult(false, 0, $"合并分片异常：{ex.Message}", TimeSpan.Zero);
+        }
+
+        if (result.Merged)
+        {
+            session.Status = RecordingStatus.Completed;
+            session.DurationSeconds = result.Duration.TotalSeconds;
+            session.FileSizeBytes = result.FileSizeBytes;
+            session.ErrorMessage = result.Warning;
+        }
+        else
+        {
+            session.ErrorMessage = $"重试合并失败：{result.ErrorMessage}（{parts.Count} 个分片已保留在录制目录）";
+        }
+
+        await SafeUpdateSessionAsync(session, "回写重试合并结果").ConfigureAwait(false);
+
+        _log(result.Merged
+            ? $"重试合并成功（{session.RoomDisplayName}）：{parts.Count} 个分片 → {result.FileSizeBytes / 1024d / 1024d:0.0} MB"
+            : $"重试合并失败（{session.RoomDisplayName}）：{result.ErrorMessage}");
+
+        return result;
+    }
+
+    /// <summary>按 <c>{name}.partNNN</c> 枚举同一会话的分片并按编号升序排列。</summary>
+    internal static List<RecordedSegment> FindRecordedParts(string videoFilePath, string directory)
+    {
+        var name = Path.GetFileNameWithoutExtension(videoFilePath);
+        var prefix = name + ".part";
+        var parts = new List<(int Number, string Path)>();
+        foreach (var path in Directory.EnumerateFiles(directory, $"{name}.part*"))
+        {
+            var fileName = Path.GetFileNameWithoutExtension(path);
+            if (!fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!int.TryParse(fileName[prefix.Length..], NumberStyles.Integer, CultureInfo.InvariantCulture, out var partNumber)
+                || partNumber <= 0)
+            {
+                continue;
+            }
+
+            parts.Add((partNumber, path));
+        }
+
+        parts.Sort((left, right) => left.Number.CompareTo(right.Number));
+        return parts.Select(part => new RecordedSegment(part.Path, TimeSpan.Zero, null)).ToList();
     }
 
     private async Task<string> ResolveOutputDirectoryAsync(RecordingTarget? target, CancellationToken ct)

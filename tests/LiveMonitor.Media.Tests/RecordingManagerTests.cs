@@ -1291,6 +1291,127 @@ public sealed class RecordingManagerTests
         }
     }
 
+    [Fact]
+    public async Task RetryMergeAsync_MergesPartsAndMarksSessionCompleted()
+    {
+        await using var harness = new RecordingManagerHarness();
+        var videoPath = Path.Combine(harness.OutputDirectory, "2026-11-28 10-00-00-a.mkv");
+        var part1 = Path.Combine(harness.OutputDirectory, "2026-11-28 10-00-00-a.part001.mkv");
+        var part2 = Path.Combine(harness.OutputDirectory, "2026-11-28 10-00-00-a.part002.mkv");
+        await File.WriteAllBytesAsync(part1, new byte[4]);
+        await File.WriteAllBytesAsync(part2, new byte[6]);
+        var session = new RecordingSession
+        {
+            Id = Guid.NewGuid(),
+            Platform = PlatformType.Bilibili,
+            RoomId = "room-a",
+            RoomDisplayName = "测试主播",
+            Status = RecordingStatus.Failed,
+            VideoFilePath = videoPath,
+            StartedAt = harness.Clock.Now.UtcDateTime.AddMinutes(-10),
+            ErrorMessage = "程序异常退出，录制未正常收尾，文件可能不完整。",
+        };
+        harness.Sessions.Seed(session);
+        harness.SegmentMerger.Result = new SegmentMergeResult(true, 10, null, TimeSpan.FromSeconds(12), "已跳过 1 个不可用分片");
+
+        var result = await harness.Manager.RetryMergeAsync(session.Id).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.True(result.Merged);
+        var batch = Assert.Single(harness.SegmentMerger.Batches);
+        Assert.Equal(new[] { part1, part2 }, batch.Select(segment => segment.Path));
+        var saved = await harness.Sessions.GetByIdAsync(session.Id);
+        Assert.NotNull(saved);
+        Assert.Equal(RecordingStatus.Completed, saved!.Status);
+        Assert.Equal(10, saved.FileSizeBytes);
+        Assert.Equal(12, saved.DurationSeconds);
+        Assert.Equal("已跳过 1 个不可用分片", saved.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task RetryMergeAsync_WhenNoParts_ReportsFailureAndKeepsSession()
+    {
+        await using var harness = new RecordingManagerHarness();
+        var videoPath = Path.Combine(harness.OutputDirectory, "2026-11-28 11-00-00-b.mkv");
+        var session = new RecordingSession
+        {
+            Id = Guid.NewGuid(),
+            Platform = PlatformType.Bilibili,
+            RoomId = "room-b",
+            RoomDisplayName = "无分片主播",
+            Status = RecordingStatus.Failed,
+            VideoFilePath = videoPath,
+            StartedAt = harness.Clock.Now.UtcDateTime.AddMinutes(-5),
+        };
+        harness.Sessions.Seed(session);
+
+        var result = await harness.Manager.RetryMergeAsync(session.Id).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.False(result.Merged);
+        Assert.Contains("没有找到可合并的录制分片", result.ErrorMessage);
+        Assert.Empty(harness.SegmentMerger.Batches);
+        var saved = await harness.Sessions.GetByIdAsync(session.Id);
+        Assert.NotNull(saved);
+        Assert.Equal(RecordingStatus.Failed, saved!.Status);
+        // 预检阶段失败（没有分片）不改会话备注：重试失败提示只出现在录制中心状态栏。
+        Assert.Null(saved.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task RetryMergeAsync_WhenSessionIsActive_RejectsWithoutMerging()
+    {
+        await using var harness = new RecordingManagerHarness();
+        var videoPath = Path.Combine(harness.OutputDirectory, "2026-11-28 12-00-00-c.mkv");
+        var part1 = Path.Combine(harness.OutputDirectory, "2026-11-28 12-00-00-c.part001.mkv");
+        await File.WriteAllBytesAsync(part1, new byte[4]);
+        var session = new RecordingSession
+        {
+            Id = Guid.NewGuid(),
+            Platform = PlatformType.Bilibili,
+            RoomId = "room-c",
+            RoomDisplayName = "录制中主播",
+            Status = RecordingStatus.Recording,
+            VideoFilePath = videoPath,
+            StartedAt = harness.Clock.Now.UtcDateTime,
+        };
+        harness.Sessions.Seed(session);
+
+        var result = await harness.Manager.RetryMergeAsync(session.Id).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.False(result.Merged);
+        Assert.Contains("该录制仍在进行中", result.ErrorMessage);
+        Assert.Empty(harness.SegmentMerger.Batches);
+    }
+
+    [Fact]
+    public async Task RetryMergeAsync_WhenMergerThrows_ReportsFailureAndKeepsParts()
+    {
+        await using var harness = new RecordingManagerHarness();
+        var videoPath = Path.Combine(harness.OutputDirectory, "2026-11-28 13-00-00-d.mkv");
+        var part1 = Path.Combine(harness.OutputDirectory, "2026-11-28 13-00-00-d.part001.mkv");
+        await File.WriteAllBytesAsync(part1, new byte[4]);
+        var session = new RecordingSession
+        {
+            Id = Guid.NewGuid(),
+            Platform = PlatformType.Bilibili,
+            RoomId = "room-d",
+            RoomDisplayName = "异常主播",
+            Status = RecordingStatus.Failed,
+            VideoFilePath = videoPath,
+            StartedAt = harness.Clock.Now.UtcDateTime.AddMinutes(-3),
+        };
+        harness.Sessions.Seed(session);
+        harness.SegmentMerger.Exception = new IOException("磁盘被占用");
+
+        var result = await harness.Manager.RetryMergeAsync(session.Id).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.False(result.Merged);
+        Assert.Contains("合并分片异常", result.ErrorMessage);
+        Assert.True(File.Exists(part1));
+        var saved = await harness.Sessions.GetByIdAsync(session.Id);
+        Assert.Equal(RecordingStatus.Failed, saved!.Status);
+        Assert.Contains("磁盘被占用", saved.ErrorMessage);
+    }
+
     private static RecordingSession SeedSession(
         RecordingManagerHarness harness,
         LiveRoom room,
