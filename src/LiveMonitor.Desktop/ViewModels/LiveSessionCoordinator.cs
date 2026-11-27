@@ -23,6 +23,7 @@ internal sealed class LiveSessionCoordinator : IDisposable
     private readonly ILiveSessionTimer _timer;
     private readonly ILiveSessionSyncHost _host;
     private readonly ILiveSessionOpenHost? _openHost;
+    private readonly ILiveSessionCompletionHost? _completionHost;
     private readonly SemaphoreSlim _waveformGate = new(1, 1);
 
     private bool _isSyncing;
@@ -35,7 +36,8 @@ internal sealed class LiveSessionCoordinator : IDisposable
         IIncrementalDanmakuReader danmakuReader,
         ILiveSessionTimer timer,
         ILiveSessionSyncHost host,
-        ILiveSessionOpenHost? openHost = null)
+        ILiveSessionOpenHost? openHost = null,
+        ILiveSessionCompletionHost? completionHost = null)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _recordings = recordings ?? throw new ArgumentNullException(nameof(recordings));
@@ -44,6 +46,7 @@ internal sealed class LiveSessionCoordinator : IDisposable
         _timer = timer ?? throw new ArgumentNullException(nameof(timer));
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _openHost = openHost;
+        _completionHost = completionHost;
     }
 
     /// <summary>是否正在执行同步（防手动/自动同步重入）。</summary>
@@ -155,6 +158,76 @@ internal sealed class LiveSessionCoordinator : IDisposable
             {
                 host.SetBusy(false);
             }
+        }
+    }
+
+    /// <summary>
+    /// 录制结束：停止自动同步、记录结束瞬间的位置与选区、切回离线模式，再把最终文件、弹幕、
+    /// 高光列表与场次列表刷新到位；缺文件与异常分别落到明确的失败文案。
+    /// </summary>
+    public async Task CompleteAsync(RecordingSession session, CancellationToken ct = default)
+    {
+        if (session is null || _disposed)
+        {
+            return;
+        }
+
+        var host = _completionHost ?? throw new InvalidOperationException("未配置 live 会话结束宿主。");
+        if (!_session.IsActive || host.CurrentSessionId != session.Id)
+        {
+            return;
+        }
+
+        StopAutoSync();
+        var lastPosition = host.LastPosition;
+        var lastIn = host.LastInPoint;
+        var lastOut = host.LastOutPoint;
+        host.ExitLiveMode();
+
+        try
+        {
+            var latest = await host.LoadSessionAsync(ct).ConfigureAwait(true);
+            if (latest is null || string.IsNullOrWhiteSpace(latest.VideoFilePath) || !File.Exists(latest.VideoFilePath))
+            {
+                host.SetStatus(ClipStudioStatusText.LiveCompletedWithoutFile(latest?.ErrorMessage));
+                return;
+            }
+
+            if (host.IsDisposed)
+            {
+                return;
+            }
+
+            var danmakuPath = ResolveDanmakuPath(latest.DanmakuFilePath);
+            await host.OpenOfflineAsync(latest.VideoFilePath, danmakuPath, latest, ct).ConfigureAwait(true);
+            if (host.IsDisposed)
+            {
+                return;
+            }
+
+            // 录制已结束：刷新列表，让该场次从「录制中」切换为普通历史项。
+            await host.RefreshSessionsAsync(ct).ConfigureAwait(true);
+            if (host.IsDisposed)
+            {
+                return;
+            }
+
+            if (lastOut > TimeSpan.Zero && lastOut > lastIn + ClipSelectionLogic.MinSelection)
+            {
+                host.RestoreSelection(lastIn, lastOut);
+            }
+
+            host.SeekTo(lastPosition);
+            host.RaiseTimelineChanged();
+            host.SetStatus(ClipStudioStatusText.LiveCompleted);
+        }
+        catch (OperationCanceledException)
+        {
+            // 视图模型释放或用户离开剪辑台：静默放弃切离线。
+        }
+        catch (Exception ex)
+        {
+            host.SetStatus(ClipStudioStatusText.LiveSwitchToOfflineFailed(ex.Message));
         }
     }
 
