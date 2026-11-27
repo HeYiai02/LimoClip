@@ -25,7 +25,13 @@ public sealed record RecordedSegment(
 /// <param name="FileSizeBytes">合并后文件字节数；合并失败时返回各分片字节数之和。</param>
 /// <param name="ErrorMessage">失败原因；成功时为 null。</param>
 /// <param name="Duration">合并后内容时长（已扣除被裁掉的重叠部分）；未知时为 <see cref="TimeSpan.Zero"/>。</param>
-public sealed record SegmentMergeResult(bool Merged, long FileSizeBytes, string? ErrorMessage, TimeSpan Duration);
+/// <param name="Warning">降级合并说明（跳过了 0 字节/损坏分片）；完全按原样合并成功时为 null。</param>
+public sealed record SegmentMergeResult(
+    bool Merged,
+    long FileSizeBytes,
+    string? ErrorMessage,
+    TimeSpan Duration,
+    string? Warning = null);
 
 /// <summary>
 /// 把同一场直播录制的多个 mkv 分片按录制顺序合并成一个文件。
@@ -118,6 +124,77 @@ public static class SegmentOverlapPlanner
     }
 }
 
+/// <summary>
+/// 合并前分片预检：剔除空白路径、文件缺失、0 字节或无法读取的分片，并给出可记录的降级说明。
+/// 只剔除确定没有可用内容的分片；损坏但非空的分片保留，交给合并失败后的「剔除末尾分片重试」处理。
+/// </summary>
+public static class SegmentPreflight
+{
+    public static (IReadOnlyList<RecordedSegment> Usable, IReadOnlyList<string> Skipped) Filter(
+        IReadOnlyList<RecordedSegment> segments)
+    {
+        ArgumentNullException.ThrowIfNull(segments);
+
+        var usable = new List<RecordedSegment>(segments.Count);
+        var skipped = new List<string>();
+        foreach (var segment in segments)
+        {
+            if (string.IsNullOrWhiteSpace(segment.Path))
+            {
+                skipped.Add("(空路径)");
+                continue;
+            }
+
+            long length;
+            try
+            {
+                var info = new FileInfo(segment.Path);
+                if (!info.Exists)
+                {
+                    skipped.Add($"{Path.GetFileName(segment.Path)}（缺失）");
+                    continue;
+                }
+
+                length = info.Length;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                skipped.Add($"{Path.GetFileName(segment.Path)}（读取失败）");
+                continue;
+            }
+
+            if (length <= 0)
+            {
+                skipped.Add($"{Path.GetFileName(segment.Path)}（0 字节）");
+                continue;
+            }
+
+            usable.Add(segment);
+        }
+
+        return (usable, skipped);
+    }
+}
+
+/// <summary>
+/// 合并失败的降级策略：只允许剔除末尾分片重试一次——末尾分片最可能是录制进程被杀时写坏的。
+/// </summary>
+public static class SegmentMergeRetryPolicy
+{
+    public const int MaxTailRetries = 1;
+
+    /// <summary>返回下一次尝试的分片列表；无法/不应再重试时返回 null。</summary>
+    public static IReadOnlyList<RecordedSegment>? NextAttempt(
+        IReadOnlyList<RecordedSegment> segments,
+        int tailRetries)
+    {
+        ArgumentNullException.ThrowIfNull(segments);
+        return tailRetries < MaxTailRetries && segments.Count > 1
+            ? segments.Take(segments.Count - 1).ToArray()
+            : null;
+    }
+}
+
 /// <summary>基于 ffmpeg concat demuxer 的默认实现：<c>-c copy</c> 无损拼接，不做重编码。</summary>
 public sealed class FfmpegSegmentMerger : ISegmentMerger
 {
@@ -139,18 +216,77 @@ public sealed class FfmpegSegmentMerger : ISegmentMerger
         ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
         ArgumentNullException.ThrowIfNull(segments);
 
-        var existing = segments
-            .Where(segment => !string.IsNullOrWhiteSpace(segment.Path) && File.Exists(segment.Path))
-            .ToList();
-        existing = await MeasureDurationsAsync(existing, ct).ConfigureAwait(false);
-        var totalSize = existing.Sum(segment => TryGetFileLength(segment.Path));
-        var contentDuration = SegmentOverlapPlanner.ComputeContentDuration(existing);
-        if (existing.Count == 0)
+        var (usable, preflightSkipped) = SegmentPreflight.Filter(segments);
+        var skipped = new List<string>(preflightSkipped);
+        if (usable.Count == 0)
         {
             return new SegmentMergeResult(false, 0, "没有可用的录制分片。", TimeSpan.Zero);
         }
 
-        if (existing.Count == 1)
+        // 非空但无法解封装的分片（例如进程被杀时写坏尾部）在这里剔除，避免 concat 静默产出残缺文件。
+        var (readable, unreadable) = await MeasureDurationsAsync(usable, ct).ConfigureAwait(false);
+        skipped.AddRange(unreadable.Select(name => $"{name}（无法解析）"));
+        if (readable.Count == 0)
+        {
+            var failedSize = usable.Sum(segment => TryGetFileLength(segment.Path));
+            _log?.Invoke($"录制分片均无法解析（{usable.Count} 段，分片已保留）：{string.Join("、", skipped)}");
+            return new SegmentMergeResult(false, failedSize, "分片均无法解析，已保留原文件。", TimeSpan.Zero);
+        }
+
+        var skipNote = skipped.Count > 0
+            ? $"已跳过 {skipped.Count} 个不可用分片（0 字节/缺失/不可读）：{string.Join("、", skipped)}"
+            : null;
+
+        IReadOnlyList<RecordedSegment> attempt = readable;
+        var tailRetried = false;
+        while (true)
+        {
+            // 降级重试后只剩一段时也必须走 concat 校验，不能直接 File.Move 一个可能损坏的分片。
+            var forceConcat = attempt.Count < readable.Count;
+            var result = await TryMergeCoreAsync(outputPath, attempt, ct, forceConcat).ConfigureAwait(false);
+            if (result.Merged)
+            {
+                var tailNote = attempt.Count < readable.Count
+                    ? $"末尾 {readable.Count - attempt.Count} 个分片无法合并，已降级保留前 {attempt.Count} 段"
+                    : null;
+                var warning = CombineNotes(skipNote, tailNote);
+                return warning is null ? result : result with { Warning = warning };
+            }
+
+            // 只允许剔除末尾一个分片重试一次：末尾分片最可能是进程被杀导致的不完整分片。
+            var next = SegmentMergeRetryPolicy.NextAttempt(attempt, tailRetried ? 1 : 0);
+            if (next is null)
+            {
+                return result;
+            }
+
+            tailRetried = true;
+            _log?.Invoke($"合并分片失败，剔除末尾分片后重试一次：{attempt[^1].Path}");
+            attempt = next;
+        }
+    }
+
+    private static string? CombineNotes(string? first, string? second)
+    {
+        if (string.IsNullOrWhiteSpace(first))
+        {
+            return string.IsNullOrWhiteSpace(second) ? null : second;
+        }
+
+        return string.IsNullOrWhiteSpace(second) ? first : first + "；" + second;
+    }
+
+    private async Task<SegmentMergeResult> TryMergeCoreAsync(
+        string outputPath,
+        IReadOnlyList<RecordedSegment> segments,
+        CancellationToken ct,
+        bool forceConcat)
+    {
+        var existing = segments.ToList();
+        var totalSize = existing.Sum(segment => TryGetFileLength(segment.Path));
+        var contentDuration = SegmentOverlapPlanner.ComputeContentDuration(existing);
+
+        if (existing.Count == 1 && !forceConcat)
         {
             return MergeSingle(existing[0], outputPath);
         }
@@ -234,25 +370,37 @@ public sealed class FfmpegSegmentMerger : ISegmentMerger
     /// 用 ffmpeg 快速统计每个分片的实际时长（只解封装、不转码）。录制期间进度回调可能滞后，
     /// 直接用文件时长计算重叠更准；测量失败则保留原时长，交给 planner 整段保留。
     /// </summary>
-    private async Task<List<RecordedSegment>> MeasureDurationsAsync(
-        List<RecordedSegment> segments,
+    private async Task<(List<RecordedSegment> Readable, List<string> Unreadable)> MeasureDurationsAsync(
+        IReadOnlyList<RecordedSegment> segments,
         CancellationToken ct)
     {
         if (segments.Count <= 1)
         {
-            return segments;
+            return (segments.ToList(), new List<string>());
         }
 
-        var measured = new List<RecordedSegment>(segments.Count);
+        var readable = new List<RecordedSegment>(segments.Count);
+        var unreadable = new List<string>();
         foreach (var segment in segments)
         {
             var duration = await TryMeasureDurationAsync(segment.Path, ct).ConfigureAwait(false);
-            measured.Add(duration is { } value && value > TimeSpan.Zero
-                ? segment with { Duration = value }
-                : segment);
+            if (duration is { } value && value > TimeSpan.Zero)
+            {
+                readable.Add(segment with { Duration = value });
+            }
+            else if (duration is null)
+            {
+                // 文件存在但 ffmpeg 无法解封装 → 视为损坏分片，合并前剔除。
+                unreadable.Add(Path.GetFileName(segment.Path));
+            }
+            else
+            {
+                // 时长测不出但与 ffmpeg 通信正常（例如刚起录的空流）：保留原时长交给 concat。
+                readable.Add(segment);
+            }
         }
 
-        return measured;
+        return (readable, unreadable);
     }
 
     private async Task<TimeSpan?> TryMeasureDurationAsync(string path, CancellationToken ct)
