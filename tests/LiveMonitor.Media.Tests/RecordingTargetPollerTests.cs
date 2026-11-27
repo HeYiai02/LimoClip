@@ -274,6 +274,40 @@ public sealed class RecordingTargetPollerTests
         }
     }
 
+    [Fact]
+    public async Task PollRoomOnceAsync_StartsOnlyTargetRoomWhenLive()
+    {
+        var context = new PollerTestContext();
+        var target = AddRoom(context, "1001");
+        var other = AddRoom(context, "1002", displayNumber: 2);
+        context.Targets.Set(target.Id, autoRecordEnabled: true);
+        context.Targets.Set(other.Id, autoRecordEnabled: true);
+        context.Provider.Status = LiveStatus(target);
+
+        await using var poller = context.CreatePoller();
+
+        await poller.PollRoomOnceAsync(target.Id).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(new[] { target.Id }, context.Host.StartedRoomIds);
+        Assert.Equal(1, context.Provider.StatusCalls);
+    }
+
+    [Fact]
+    public async Task PollRoomOnceAsync_DisabledTarget_DoesNothing()
+    {
+        var context = new PollerTestContext();
+        var room = AddRoom(context, "1001");
+        context.Targets.Set(room.Id, autoRecordEnabled: false);
+        context.Provider.Status = LiveStatus(room);
+
+        await using var poller = context.CreatePoller();
+
+        await poller.PollRoomOnceAsync(room.Id).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Empty(context.Host.StartedRoomIds);
+        Assert.Equal(0, context.Provider.StatusCalls);
+    }
+
     private static LiveRoom AddRoom(
         PollerTestContext context,
         string roomId,

@@ -18,6 +18,10 @@ internal static class RecordingTargetDisplayLogic
     public const string AutoRecordIdleStatusText = "待开播（自动录制）";
     public const string AutoRecordIdleStatusBrush = "#FBBF24";
 
+    /// <summary>刚启用自动录制、正在立即检查开播状态时的提示（检查完成前不再显示「待开播」）。</summary>
+    public const string AutoRecordCheckingStatusText = "已开启自动录制，正在检查开播状态…";
+    public const string AutoRecordCheckingStatusBrush = "#FBBF24";
+
     public const string IdleButtonText = "立即开录";
     public const string StopButtonText = "停止录制";
     public const string BusyButtonText = "处理中…";
@@ -50,6 +54,9 @@ internal static class RecordingTargetDisplayLogic
         => autoRecordEnabled
             ? (AutoRecordIdleStatusText, AutoRecordIdleStatusBrush)
             : (IdleStatusText, IdleStatusBrush);
+
+    public static (string Text, string Brush) AutoRecordCheckingStatus()
+        => (AutoRecordCheckingStatusText, AutoRecordCheckingStatusBrush);
 
     public static (string Text, string Brush) RecordingStatus()
         => (RecordingStatusText, RecordingStatusBrush);

@@ -214,11 +214,18 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
 
             if (!IsRecording)
             {
-                ApplyStatus(RecordingTargetDisplayLogic.IdleStatus(enabled));
+                ApplyStatus(enabled
+                    ? RecordingTargetDisplayLogic.AutoRecordCheckingStatus()
+                    : RecordingTargetDisplayLogic.IdleStatus(false));
             }
 
             _parent.ReportStatus(RecordingTargetStatusText.AutoRecordChanged(DisplayTitle, enabled));
             _parent.NotifyRecordingStateChanged();
+
+            if (enabled)
+            {
+                _ = PollLiveStatusNowAsync();
+            }
         }
         catch (Exception ex)
         {
@@ -233,6 +240,30 @@ public sealed partial class RecordingTargetItemViewModel : ObservableObject
             }
 
             _parent.ReportStatus(RecordingTargetStatusText.AutoRecordUpdateFailed(DisplayTitle, ex.Message));
+        }
+    }
+
+    /// <summary>启用自动录制后立即检查一次开播状态，避免要等下一轮定时轮询才起录。</summary>
+    private async Task PollLiveStatusNowAsync()
+    {
+        try
+        {
+            await _recordings.PollRoomNowAsync(Room.Id).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            _parent.ReportStatus(RecordingTargetStatusText.AutoRecordUpdateFailed(DisplayTitle, ex.Message));
+        }
+        finally
+        {
+            // 检查完成仍未起录（未开播/已被抑制）时回到「待开播」，避免一直停留在「正在检查」。
+            if (!_disposed && !IsRecording)
+            {
+                ApplyStatus(RecordingTargetDisplayLogic.IdleStatus(true));
+            }
         }
     }
 
