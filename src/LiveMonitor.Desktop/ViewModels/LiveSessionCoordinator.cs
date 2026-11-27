@@ -1,3 +1,4 @@
+using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Core.Models;
 using LiveMonitor.Desktop.Controls;
@@ -21,6 +22,7 @@ internal sealed class LiveSessionCoordinator : IDisposable
     private readonly IIncrementalDanmakuReader _danmakuReader;
     private readonly ILiveSessionTimer _timer;
     private readonly ILiveSessionSyncHost _host;
+    private readonly ILiveSessionOpenHost? _openHost;
     private readonly SemaphoreSlim _waveformGate = new(1, 1);
 
     private bool _isSyncing;
@@ -32,7 +34,8 @@ internal sealed class LiveSessionCoordinator : IDisposable
         ILiveWaveformExtractor waveforms,
         IIncrementalDanmakuReader danmakuReader,
         ILiveSessionTimer timer,
-        ILiveSessionSyncHost host)
+        ILiveSessionSyncHost host,
+        ILiveSessionOpenHost? openHost = null)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _recordings = recordings ?? throw new ArgumentNullException(nameof(recordings));
@@ -40,6 +43,7 @@ internal sealed class LiveSessionCoordinator : IDisposable
         _danmakuReader = danmakuReader ?? throw new ArgumentNullException(nameof(danmakuReader));
         _timer = timer ?? throw new ArgumentNullException(nameof(timer));
         _host = host ?? throw new ArgumentNullException(nameof(host));
+        _openHost = openHost;
     }
 
     /// <summary>是否正在执行同步（防手动/自动同步重入）。</summary>
@@ -58,6 +62,107 @@ internal sealed class LiveSessionCoordinator : IDisposable
 
     /// <summary>停止自动同步；退出 live 模式、录制结束与释放时调用。</summary>
     public void StopAutoSync() => _timer.Stop();
+
+    /// <summary>
+    /// 打开「录制中」的场次：分段拒绝、分片存在性、分片探测（失败按实时进度兜底）、
+    /// 进入 live 模式、弹幕/高亮点亮与打开收尾；每一步之后都检查是否已被更新的加载取代。
+    /// </summary>
+    public async Task OpenAsync(RecordingSession session, LiveRecordingInfo liveInfo)
+    {
+        var host = _openHost ?? throw new InvalidOperationException("未配置 live 会话打开宿主。");
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (liveInfo.PartNumber > 1)
+        {
+            host.SetStatus(ClipStudioStatusText.LiveSegmented(liveInfo.PartNumber));
+            return;
+        }
+
+        var handle = host.BeginLoad();
+        host.SetBusy(true);
+        host.SetStatus(ClipStudioStatusText.LiveOpening);
+        try
+        {
+            var partPath = liveInfo.PartFilePath;
+            if (string.IsNullOrWhiteSpace(partPath) || !File.Exists(partPath))
+            {
+                host.SetStatus(ClipStudioStatusText.LivePartMissing(partPath));
+                return;
+            }
+
+            var danmakuPath = ResolveDanmakuPath(session.DanmakuFilePath);
+            host.PrepareLiveSessionFields(session, partPath, danmakuPath);
+            host.SetLiveVideoTitle(ClipStudioPresentationLogic.BuildLiveVideoTitle(session));
+
+            // 录制中的分片时长通常是 N/A：探测失败是预期路径，用实时进度兜底。
+            VideoMetadata? metadata = null;
+            try
+            {
+                metadata = await host.ProbeVideoAsync(partPath, handle.Token).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch
+            {
+                // 分片尚未写完索引 / duration 为 N/A，忽略并按实时进度继续。
+            }
+
+            if (!host.IsLoadCurrent(handle))
+            {
+                return;
+            }
+
+            host.EnterLiveSession(session, liveInfo, partPath, metadata);
+            if (danmakuPath is not null)
+            {
+                await RefreshDanmakuAsync(handle.Token).ConfigureAwait(true);
+                if (!host.IsLoadCurrent(handle))
+                {
+                    return;
+                }
+            }
+
+            await host.LoadHighlightsAsync(session, _session.RecordedDuration, handle.Token)
+                .ConfigureAwait(true);
+            if (!host.IsLoadCurrent(handle))
+            {
+                return;
+            }
+
+            host.CompleteLiveOpen(partPath);
+            StartAutoSync();
+            _ = ExtractWaveformAsync(handle.WaveformToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // 切换场次时取消上一次加载，静默忽略。
+        }
+        catch (Exception ex)
+        {
+            if (host.IsLoadCurrent(handle))
+            {
+                host.SetStatus(ClipStudioStatusText.LiveOpenFailed(ex.Message));
+            }
+        }
+        finally
+        {
+            if (host.IsLoadCurrent(handle))
+            {
+                host.SetBusy(false);
+            }
+        }
+    }
+
+    /// <summary>弹幕文件存在才纳入边录边剪（录制刚开始时 jsonl 可能尚未创建）。</summary>
+    internal static string? ResolveDanmakuPath(string? danmakuFilePath) =>
+        !string.IsNullOrWhiteSpace(danmakuFilePath) && File.Exists(danmakuFilePath)
+            ? danmakuFilePath
+            : null;
 
     /// <summary>手动同步（按钮 / F5）：含波形提取，并在完成后重载播放器尾部数据。</summary>
     public async Task SyncManualAsync()

@@ -93,7 +93,8 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             _liveWaveforms,
             new DanmakuJsonlReaderAdapter(),
             new DispatcherLiveSessionTimer(),
-            new LiveSessionSyncHost(this));
+            new LiveSessionSyncHost(this),
+            new LiveSessionOpenHost(this));
         Export = new ClipExportViewModel(this, settings);
         Asr = new ClipAsrViewModel(asr ?? throw new ArgumentNullException(nameof(asr)), this);
         _liveRecordings.SessionCompleted += OnLiveRecordingSessionCompleted;
@@ -674,129 +675,11 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     }
 
     /// <summary>
-    /// 打开「录制中」的场次：读取正在写入的分片文件并进入 live 剪辑模式。
-    /// 录制仍在前端追加 mkv cluster，因此只开放到 <see cref="SafeClipDuration"/> 的安全可剪范围。
+    /// 打开「录制中」的场次：编排（分段拒绝、分片校验、探测兜底、陈旧加载中止、失败文案）
+    /// 由 <see cref="LiveSessionCoordinator"/> 负责，本类只提供 UI 副作用（见 <see cref="LiveSessionOpenHost"/>）。
     /// </summary>
-    private async Task OpenLiveSessionAsync(RecordingSession session, LiveRecordingInfo liveInfo)
-    {
-        if (liveInfo.PartNumber > 1)
-        {
-            StatusText = ClipStudioStatusText.LiveSegmented(liveInfo.PartNumber);
-            return;
-        }
-
-        _loadVersion++;
-        var version = _loadVersion;
-        ReplaceCancellationSource(ref _loadCts);
-        ReplaceCancellationSource(ref _waveformCts);
-        var ct = _loadCts!.Token;
-        var waveformCt = _waveformCts!.Token;
-
-        IsBusy = true;
-        StatusText = ClipStudioStatusText.LiveOpening;
-        try
-        {
-            var partPath = liveInfo.PartFilePath;
-            if (string.IsNullOrWhiteSpace(partPath) || !File.Exists(partPath))
-            {
-                StatusText = ClipStudioStatusText.LivePartMissing(partPath);
-                return;
-            }
-
-            var danmakuPath = !string.IsNullOrWhiteSpace(session.DanmakuFilePath)
-                              && File.Exists(session.DanmakuFilePath)
-                ? session.DanmakuFilePath
-                : null;
-
-            _currentSession = session;
-            _currentVideoPath = partPath;
-            _currentDanmakuPath = danmakuPath;
-            Asr.Reset();
-            ResetHighlightAsrState();
-            VideoTitle = ClipStudioPresentationLogic.BuildLiveVideoTitle(session);
-
-            // 录制中的分片时长通常是 N/A：探测失败是预期路径，用实时进度兜底。
-            VideoMetadata? metadata = null;
-            try
-            {
-                metadata = await _videoProbe.ProbeAsync(partPath, ct).ConfigureAwait(true);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-            catch
-            {
-                // 分片尚未写完索引 / duration 为 N/A，忽略并按实时进度继续。
-            }
-
-            if (version != _loadVersion || _disposed)
-            {
-                return;
-            }
-
-            // 探测成功时沿用真实编码（hevc 无损导出需要打 hvc1 tag）；失败时按 h264 兜底。
-            _sourceVideoCodec = string.IsNullOrWhiteSpace(metadata?.VideoCodec) ? "h264" : metadata!.VideoCodec;
-
-            StartLiveClipSession(liveInfo, partPath);
-            Duration = LiveRecordedDuration;
-            VideoSubtitle = ClipStudioPresentationLogic.BuildLiveVideoSubtitle(session, liveInfo, metadata);
-            Position = TimeSpan.Zero;
-            UpdateSelection(TimeSpan.Zero, SafeClipDuration > TimeSpan.Zero ? SafeClipDuration : LiveRecordedDuration);
-            Highlights.Clear();
-            HighlightMarkers = Array.Empty<ClipHighlightMarker>();
-            Waveform = null;
-            _danmakuItems = Array.Empty<RecordedDanmakuItem>();
-            _cursor = new DanmakuPlaybackCursor(_danmakuItems);
-            _cursor.Reset(0);
-            OnPropertyChanged(nameof(HasDanmaku));
-            OnPropertyChanged(nameof(DanmakuInfoText));
-            OnPropertyChanged(nameof(DanmakuItemCount));
-
-            if (danmakuPath is not null)
-            {
-                await _liveSync.RefreshDanmakuAsync(ct).ConfigureAwait(true);
-                if (version != _loadVersion || _disposed)
-                {
-                    return;
-                }
-            }
-
-            await LoadHighlightsAsync(session, LiveRecordedDuration, ct).ConfigureAwait(true);
-            if (version != _loadVersion || _disposed)
-            {
-                return;
-            }
-
-            // 先用占位数组按实时时长生成波形，等增量音频峰值提取完成后再刷新。
-            RebuildLiveWaveformData();
-            Export.SetGeneratedOutputFileName(partPath, _inPoint, _outPoint);
-            IsWaveformLoading = true;
-            RaiseTimelineChanged();
-            DanmakuEnabledChanged?.Invoke(_danmakuPlaybackEnabled);
-            DanmakuSyncRequested?.Invoke(Array.Empty<DanmakuMessage>(), true);
-            LoadLiveVideoRequested?.Invoke(partPath);
-            StatusText = ClipStudioStatusText.LiveOpened;
-            Export.NotifyAvailabilityChanged();
-            _liveSync.StartAutoSync();
-            _ = _liveSync.ExtractWaveformAsync(waveformCt);
-        }
-        catch (OperationCanceledException)
-        {
-            // 切换场次时取消上一次加载，静默忽略。
-        }
-        catch (Exception ex)
-        {
-            StatusText = ClipStudioStatusText.LiveOpenFailed(ex.Message);
-        }
-        finally
-        {
-            if (version == _loadVersion)
-            {
-                IsBusy = false;
-            }
-        }
-    }
+    private Task OpenLiveSessionAsync(RecordingSession session, LiveRecordingInfo liveInfo) =>
+        _liveSync.OpenAsync(session, liveInfo);
 
     /// <summary>退出 live 模式（切到离线视频 / 录制结束时重置定时器与安全截止）。</summary>
     private void ExitLiveMode()
@@ -1382,6 +1265,90 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
     {
         OnPropertyChanged(nameof(IsSyncingLive));
         SyncLiveProgressCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>把「打开 live 会话」需要的 UI / 数据操作显式暴露给 <see cref="LiveSessionCoordinator"/>。</summary>
+    private sealed class LiveSessionOpenHost : ILiveSessionOpenHost
+    {
+        private readonly ClipStudioViewModel _owner;
+
+        public LiveSessionOpenHost(ClipStudioViewModel owner) => _owner = owner;
+
+        public LiveSessionLoadHandle BeginLoad()
+        {
+            _owner._loadVersion++;
+            var version = _owner._loadVersion;
+            ReplaceCancellationSource(ref _owner._loadCts);
+            ReplaceCancellationSource(ref _owner._waveformCts);
+            return new LiveSessionLoadHandle(version, _owner._loadCts!.Token, _owner._waveformCts!.Token);
+        }
+
+        public bool IsLoadCurrent(LiveSessionLoadHandle handle)
+            => handle.Version == _owner._loadVersion && !_owner._disposed;
+
+        public void SetBusy(bool busy) => _owner.IsBusy = busy;
+
+        public void SetStatus(string text) => _owner.StatusText = text;
+
+        public void PrepareLiveSessionFields(RecordingSession session, string partPath, string? danmakuPath)
+        {
+            _owner._currentSession = session;
+            _owner._currentVideoPath = partPath;
+            _owner._currentDanmakuPath = danmakuPath;
+            _owner.Asr.Reset();
+            _owner.ResetHighlightAsrState();
+        }
+
+        public void SetLiveVideoTitle(string title) => _owner.VideoTitle = title;
+
+        public async Task<VideoMetadata?> ProbeVideoAsync(string path, CancellationToken ct)
+            => await _owner._videoProbe.ProbeAsync(path, ct).ConfigureAwait(true);
+
+        public void EnterLiveSession(
+            RecordingSession session,
+            LiveRecordingInfo liveInfo,
+            string partPath,
+            VideoMetadata? metadata)
+        {
+            // 探测成功时沿用真实编码（hevc 无损导出需要打 hvc1 tag）；失败时按 h264 兜底。
+            _owner._sourceVideoCodec = string.IsNullOrWhiteSpace(metadata?.VideoCodec)
+                ? "h264"
+                : metadata!.VideoCodec;
+
+            _owner.StartLiveClipSession(liveInfo, partPath);
+            _owner.Duration = _owner.LiveRecordedDuration;
+            _owner.VideoSubtitle = ClipStudioPresentationLogic.BuildLiveVideoSubtitle(session, liveInfo, metadata);
+            _owner.Position = TimeSpan.Zero;
+            _owner.UpdateSelection(
+                TimeSpan.Zero,
+                _owner.SafeClipDuration > TimeSpan.Zero ? _owner.SafeClipDuration : _owner.LiveRecordedDuration);
+            _owner.Highlights.Clear();
+            _owner.HighlightMarkers = Array.Empty<ClipHighlightMarker>();
+            _owner.Waveform = null;
+            _owner._danmakuItems = Array.Empty<RecordedDanmakuItem>();
+            _owner._cursor = new DanmakuPlaybackCursor(_owner._danmakuItems);
+            _owner._cursor.Reset(0);
+            _owner.OnPropertyChanged(nameof(ClipStudioViewModel.HasDanmaku));
+            _owner.OnPropertyChanged(nameof(ClipStudioViewModel.DanmakuInfoText));
+            _owner.OnPropertyChanged(nameof(ClipStudioViewModel.DanmakuItemCount));
+        }
+
+        public Task LoadHighlightsAsync(RecordingSession session, TimeSpan duration, CancellationToken ct)
+            => _owner.LoadHighlightsAsync(session, duration, ct);
+
+        public void CompleteLiveOpen(string partPath)
+        {
+            // 先用占位数组按实时时长生成波形，等增量音频峰值提取完成后再刷新。
+            _owner.RebuildLiveWaveformData();
+            _owner.Export.SetGeneratedOutputFileName(partPath, _owner._inPoint, _owner._outPoint);
+            _owner.IsWaveformLoading = true;
+            _owner.RaiseTimelineChanged();
+            _owner.DanmakuEnabledChanged?.Invoke(_owner._danmakuPlaybackEnabled);
+            _owner.DanmakuSyncRequested?.Invoke(Array.Empty<DanmakuMessage>(), true);
+            _owner.LoadLiveVideoRequested?.Invoke(partPath);
+            _owner.StatusText = ClipStudioStatusText.LiveOpened;
+            _owner.Export.NotifyAvailabilityChanged();
+        }
     }
 
 }
