@@ -160,7 +160,8 @@ public sealed class SegmentMergerTests : IAsyncLifetime
         await File.WriteAllBytesAsync(firstPath, new byte[] { 0x00, 0x01, 0x02, 0x03 });
         await File.WriteAllBytesAsync(secondPath, new byte[] { 0x04, 0x05, 0x06, 0x07 });
 
-        var merger = new FfmpegSegmentMerger(_ffmpegPath);
+        var logs = new List<string>();
+        var merger = new FfmpegSegmentMerger(_ffmpegPath, logs.Add);
         var outputPath = Path.Combine(directory, "merged.mkv");
 
         var result = await merger.MergeAsync(
@@ -172,13 +173,85 @@ public sealed class SegmentMergerTests : IAsyncLifetime
             });
 
         Assert.False(result.Merged);
-        Assert.NotNull(result.ErrorMessage);
-        Assert.StartsWith("ffmpeg 合并分片失败（exit=", result.ErrorMessage);
+        Assert.Equal("分片均无法解析，已保留原文件。", result.ErrorMessage);
         Assert.Equal(TimeSpan.Zero, result.Duration);
+        // 两段都不可解码：在测量阶段就被识别为损坏分片，直接保留原文件，不再尝试 concat。
         Assert.Equal(new FileInfo(firstPath).Length + new FileInfo(secondPath).Length, result.FileSizeBytes);
         Assert.True(File.Exists(firstPath), "合并失败时第一个分片应保留。");
         Assert.True(File.Exists(secondPath), "合并失败时第二个分片应保留。");
         Assert.False(File.Exists(outputPath + ".concat.txt"));
+    }
+
+    [Fact]
+    public async Task MergeAsync_ZeroByteSegment_IsSkippedAndReportsWarning()
+    {
+        var directory = Path.Combine(_directory, "zero-byte");
+        Directory.CreateDirectory(directory);
+        var validPath = Path.Combine(directory, "part-000.mkv");
+        var zeroPath = Path.Combine(directory, "part-001.mkv");
+        await File.WriteAllBytesAsync(validPath, new byte[] { 0x11, 0x22, 0x33, 0x44 });
+        await File.WriteAllBytesAsync(zeroPath, Array.Empty<byte>());
+
+        // 只剩一个可用分片时走 File.Move 快路径，不会调用 ffmpeg。
+        var merger = new FfmpegSegmentMerger(Path.Combine(_directory, "missing-ffmpeg.exe"));
+        var outputPath = Path.Combine(directory, "merged.mkv");
+
+        var result = await merger.MergeAsync(
+            outputPath,
+            new[]
+            {
+                new RecordedSegment(validPath, TimeSpan.FromSeconds(2), null),
+                new RecordedSegment(zeroPath, TimeSpan.FromSeconds(1), null),
+            });
+
+        Assert.True(result.Merged, result.ErrorMessage);
+        Assert.NotNull(result.Warning);
+        Assert.Contains("0 字节", result.Warning);
+        Assert.True(File.Exists(outputPath));
+        Assert.False(File.Exists(validPath));
+        // 被跳过的 0 字节分片原样保留，便于排查。
+        Assert.True(File.Exists(zeroPath));
+    }
+
+    [Fact]
+    public async Task MergeAsync_CorruptLastSegment_DropsTailOnceAndMergesRemainder()
+    {
+        if (_ffmpegPath is null)
+        {
+            return; // 本机缺少 ffmpeg 时跳过；CI 缺 ffmpeg 会在 InitializeAsync 中失败。
+        }
+
+        var directory = Path.Combine(_directory, "corrupt-tail");
+        Directory.CreateDirectory(directory);
+        var firstPath = Path.Combine(directory, "part-000.mkv");
+        var secondPath = Path.Combine(directory, "part-001.mkv");
+        var corruptPath = Path.Combine(directory, "part-002.mkv");
+        await CreateTestVideoAsync(firstPath);
+        await CreateTestVideoAsync(secondPath);
+        // 非空但内容非法：预检不剔除，靠尾部降级重试兜底。
+        await File.WriteAllBytesAsync(corruptPath, new byte[] { 0xDE, 0xAD, 0xBE, 0xEF, 0x00 });
+
+        var logs = new List<string>();
+        var merger = new FfmpegSegmentMerger(_ffmpegPath, logs.Add);
+        var outputPath = Path.Combine(directory, "merged.mkv");
+
+        var result = await merger.MergeAsync(
+            outputPath,
+            new[]
+            {
+                new RecordedSegment(firstPath, TimeSpan.FromSeconds(1), null),
+                new RecordedSegment(secondPath, TimeSpan.FromSeconds(1), null),
+                new RecordedSegment(corruptPath, TimeSpan.FromSeconds(1), null),
+            });
+
+        Assert.True(result.Merged, result.ErrorMessage);
+        Assert.NotNull(result.Warning);
+        Assert.Contains("无法解析", result.Warning);
+        Assert.Contains("part-002.mkv", result.Warning);
+        Assert.Equal(0, await RunFfmpegAsync(new[] { "-v", "error", "-i", outputPath, "-f", "null", "-" }));
+        Assert.False(File.Exists(firstPath));
+        Assert.False(File.Exists(secondPath));
+        Assert.True(File.Exists(corruptPath), "降级合并应保留损坏的末尾分片供排查。");
     }
 
     private async Task CreateTestVideoAsync(string path)

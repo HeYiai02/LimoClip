@@ -397,8 +397,9 @@ internal sealed class RecordingSessionWorker
                 partCount = _parts.Count;
             }
 
+            // 合并成功但有降级说明（跳过 0 字节/损坏分片）时也写入会话备注，便于用户知情。
             var mergeNote = mergeResult.Merged
-                ? null
+                ? mergeResult.Warning
                 : $"录制分片合并失败：{mergeResult.ErrorMessage}（{partCount} 个分片已保留在录制目录）";
 
             var endedAt = _context.Clock();
