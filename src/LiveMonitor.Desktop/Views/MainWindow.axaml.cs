@@ -17,7 +17,6 @@ using LiveMonitor.Desktop.Services;
 using LiveMonitor.Desktop.ViewModels;
 using DockControl = Dock.Avalonia.Controls.DockControl;
 using Point = Avalonia.Point;
-using DataObject = Avalonia.Input.DataObject;
 using DragDropEffects = Avalonia.Input.DragDropEffects;
 
 namespace LiveMonitor.Desktop.Views;
@@ -1013,12 +1012,9 @@ public partial class MainWindow : Window
         _roomDragActive = true;
         try
         {
-            // TODO(V0.7.5): 迁移到 DataTransfer / DoDragDropAsync（需真机拖放冒烟后单独 PR）。
-#pragma warning disable CS0618
-            var data = new DataObject();
-            data.Set("limoclip/room-id", room.Id.ToString());
-            await DragDrop.DoDragDrop(e, data, DragDropEffects.Copy);
-#pragma warning restore CS0618
+            var data = new DataTransfer();
+            data.Add(DataTransferItem.Create(FreeformWorkspaceCanvas.RoomIdFormat, room.Id.ToString()));
+            await DragDrop.DoDragDropAsync(e, data, DragDropEffects.Copy);
         }
         finally
         {
