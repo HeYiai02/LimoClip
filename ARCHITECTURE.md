@@ -30,7 +30,7 @@ LimoClip 是 Windows 桌面端的多平台直播**监控 + 录制 + 剪辑**工�
 | WebView 登录 | WebView2（临时用户目录，登录后采集 Cookie） |
 | 平台解析 | 各家 HTTP API + Jint（斗鱼签名、抖音 sign.js）；yt-dlp 作为 YouTube/Twitch 兜底 |
 | 插件签名 | Ed25519（BouncyCastle）+ SHA256 清单校验 |
-| 测试 | xUnit（6 个测试工程，当前共 3255 个用例） |
+| 测试 | xUnit（6 个测试工程，当前共 3271 个用例） |
 
 ### 平台支持矩阵
 
@@ -379,7 +379,7 @@ Program.Main
   - `KeywordFilter`：`DanmakuBlockKeywords` 黑名单，支持子串匹配。
 - 高能检测：`SlidingWindowDetector` 以「短窗计数 / 基线窗计数 / 密度倍数 / 最小条数 / 冷却时间 / 加权关键词」判定高能事件，产出 `HighlightEvent`（峰值、基线、倍数、原因、命中词）；`HighlightSettingsStore` 负责参数持久化。
 - 渲染：`DanmakuOverlay` + `DanmakuLaneAllocator`（按时间/高度分配轨道避免重叠）+ `DanmakuRenderTicker`（所有窗格共用一个与合成器 vsync 对齐的帧回调，用 `TopLevel.RequestAnimationFrame` 的时间戳推进滚动，避免 DispatcherTimer 抖动；弹幕空闲时停止循环，带 1s 低频看门狗防止最小化后帧回调丢失导致冻结）；`DanmakuEmoteText` / `DanmakuEmoteImageCache` 处理表情文本与图片缓存（图片渲染默认开启，设置页可关；下载地址先归一化协议相对 URL `//host/...` 为 https，失败按 60s 冷却重试，避免 B 站协议相对地址导致整场表情退回 `[表情名]` 文本）；轨道换算、同屏并发与播放倍率钳制、运动与离屏回收、出生位置与时长/速度推导、表情与超长文本格式化等纯逻辑位于 `Controls/DanmakuOverlayLogic`（`DanmakuOverlayLogicTests` 覆盖），`DanmakuOverlay` 只保留状态与绘制（V0.7.5）。共享帧循环的帧间隔换算（首帧按 60fps、delta 钳制 [0.001, 0.1]）与 1200ms 停滞看门狗判定位于 `Controls/DanmakuRenderTiming`（`DanmakuRenderTimingTests` 覆盖）。实际更新频率受 Avalonia 渲染循环上限约束（Windows 上默认 `SleepRenderTimer` 固定约 60Hz，`IRenderTimer` 标记为不可由用户实现），因此 120/144/200Hz 显示器上弹幕仍以约 60fps 更新：实测弹幕帧循环与 `Render` 均稳定 60fps、单帧绘制 <0.2ms，循环本身不是瓶颈，高刷屏更顺滑需等 Avalonia 上游支持按显示器刷新率驱动渲染循环。
-- 落地：录制时 `DanmakuJsonlRecorder` 逐行写 JSONL（含时间戳与高能标记）；剪辑回放由 `DanmakuJsonlReader` + `DanmakuPlaybackCursor` 按时间轴读取，并支持导出 `.ass` 字幕（`DanmakuAssConverter`）。
+- 落地：录制时 `DanmakuJsonlRecorder` 逐行写 JSONL（含时间戳与高能标记）；剪辑回放由 `DanmakuJsonlReader` + `DanmakuPlaybackCursor` 按时间轴读取，并支持导出 `.ass` 字幕（`DanmakuAssConverter`）；对多分片合并的录像，读取同目录 `<视频名>.offsets.json` 把弹幕与高能偏移换算到合并后时间轴（原 JSONL 不改写）。
 
 ---
 
@@ -398,7 +398,8 @@ Program.Main
 | `RecordingDirectoryGuard` | 开录前目录可写预检（探针文件）、ffmpeg 失败原因中文翻译（权限/路径/编码器缺失等） |
 | `RecordingFileNaming` | 输出文件名规则：`{开始时间}_{房间显示名}_{平台房间号}.mkv`（非法字符替换、长度限制） |
 | `RecordingManager` | 录制状态机与调度：自动录制轮询、会话持久化、失败重试、卡死检测、分段续录、合并收尾、历史删除、合并失败重试（`RetryMergeAsync`）；实现 `ILiveRecordingMonitor`——`GetLiveRecordings()` / `TryGetLiveRecording(sessionId, out LiveRecordingInfo)` 在锁内复制活动会话并 `BuildLiveRecordingInfo`（实时已完成时长、当前分片路径/分片号、累计时长、文件大小、弹幕数、高能数），供剪辑台边录边剪轮询 |
-| `SegmentMerger` / `SegmentOverlapPlanner` | 分段录制后的合并与重叠裁剪；`SegmentPreflight` 预检分片、`SegmentMergeRetryPolicy` 降级重试 |
+| `SegmentMerger` / `SegmentOverlapPlanner` | 分段录制后的合并与重叠裁剪；`SegmentPreflight` 预检分片、`SegmentMergeRetryPolicy` 降级重试；多段合并成功后落盘 `SegmentOffsetMap` 时间轴映射 sidecar |
+| `SegmentOffsetMap` / `SegmentOffsetMapFile` | 合并后时间轴映射：记录每分片原始起点/裁掉时长/合并后起点，把弹幕 `offsetMs` 与高能 `RecordingOffsetMs` 从原始时间轴换算到合并时间轴；sidecar 为 `<视频名>.offsets.json`，缺失/损坏/版本不符时回退原时间轴 |
 | `DanmakuJsonlRecorder` | 录制期间弹幕落盘（JSONL） |
 | `RecordingHighlightTracker` | 录制期间把高能事件关联到会话（弹幕过滤 + 高能检测的录制侧桥接） |
 
@@ -421,6 +422,7 @@ Program.Main
 - 合并成功删除分片；失败保留全部分片并在会话 `ErrorMessage` 中记录，便于人工恢复；
 - **合并失败重试（V0.7.6）**：录制中心「历史录像」行对合并失败/崩溃恢复且带错误信息的已结束会话显示「重试合并」按钮 → `RecordingManager.RetryMergeAsync` 按 `{name}.partNNN.mkv` 重新合并；成功回写 Completed、时长与大小并清理分片，失败写「重试合并失败：…」并保留全部分片；录制中的会话直接拒绝；
 - **异常分片容错（V0.7.6）**：`SegmentPreflight` 先跳过空白路径/缺失/0 字节/不可读分片并记录原因；测时长时 ffmpeg 无法解封装的分片视为损坏直接剔除（宁可少一段，也不产出「成功但缺尾」的视频）；若 concat 仍失败，`SegmentMergeRetryPolicy` 只剔除末尾一个分片重试一次；降级合并的说明通过 `SegmentMergeResult.Warning` 返回并写入会话 `ErrorMessage`，损坏分片原样保留供排查。
+- **时间轴映射（V0.7.6）**：多段合并时重叠段会裁掉开头，合并视频时间轴相对原始墙钟整体前移；`FfmpegSegmentMerger` 在 concat 成功后把每段「原始起点（`StartOffset`，缺失回退累计时长）/原始时长/裁掉时长/合并后起点」写入 sidecar `<视频名>.offsets.json`（写失败只记日志，不影响合并；单段直接搬移时删除过期 sidecar）。剪辑台打开合并录像时读取 sidecar，按「原始偏移落在哪一段（重叠区保留前一段画面）、空档贴到下一段合并起点、越界夹到总内容时长」把弹幕与高能偏移换算到合并时间轴，原 `.jsonl` 与高能数据不改写；无 sidecar 的旧录像行为不变。
 
 **进度与卡死**：`FfmpegProgressParser` 解析 `progress=continue/end` 与 `out_time_us/size/bitrate`；首帧锚点（`OnFirstFrameAnchored`）用于把弹幕/高能事件对齐到文件时间轴；`StallTimeout=30s` 触发 `Stalled` 并结束当前段。
 
@@ -607,17 +609,17 @@ dotnet build LiveMonitor.sln --no-restore
 - 工程目标框架：`Data`、`Media`、`Desktop` 为 `net8.0-windows`，其余类库为 `net8.0`；测试工程对应同目标框架（`Data`/`Media`/`Desktop` 测试为 `net8.0-windows`，`Platforms`/`Danmaku` 测试为 `net8.0`）。
 - 需要 `tools/` 下的 ffmpeg/mpv 才能运行应用（`scripts/fetch-tools.ps1` 自动下载并校验）。
 
-### 13.2 测试（当前 3255 个用例）
+### 13.2 测试（当前 3271 个用例）
 
 | 测试工程 | 覆盖范围 | 用例数 |
 | --- | --- | --- |
 | `tests/LiveMonitor.Data.Tests` | 数据库/仓储/凭据（DPAPI）、清流请求头迁移 | 38 |
 | `tests/LiveMonitor.Platforms.Tests` | 六平台解析/API/弹幕协议、插件信任与热更新、镜像回退、自定义清流 Provider、斗鱼流接缝、抖音帧接缝与断线通知、弹幕重连退避、B 站连接解析（`BilibiliConnectionParsing`）、B 站房间号/画质/播放地址解析（`BilibiliProviderParsing`）、Twitch 频道与拉流解析（`TwitchProviderParsing`）、虎牙房间号/线路/档位解析（`HuyaProviderParsing`）、虎牙接口响应与房间页解析（`HuyaApiClientParsing`）、斗鱼接口响应解析（`DouyuApiParsing`）、插件版本比较与版本解析（`PluginVersionComparer`/`PluginVersionInfo`） | 887 |
 | `tests/LiveMonitor.Danmaku.Tests` | 过滤器、高能检测、会话管理、重连/释放竞态、断线退避策略（`DanmakuReconnectPolicy`） | 125 |
-| `tests/LiveMonitor.Media.Tests` | 录制状态机与并发收尾、轮询器与会话工作器、立即开播探测（`RecordingTargetPoller.PollRoomOnceAsync`）、分段合并、分片预检与降级重试（`SegmentPreflight`/`SegmentMergeRetryPolicy`）、合并失败后按分片重试合并（`RecordingManager.RetryMergeAsync`）、剪辑导出、波形、增量波形/增量弹幕读取、ASR 响应解析与按句拆分（`AsrResponseParser`）、FFmpeg 参数协议分支（取消路径覆盖预取消与首帧进度回调取消） | 276 |
-| `tests/LiveMonitor.Desktop.Tests` | ViewModel（主窗口拆分/房间目录/布局方案/状态栏/高亮/录制中心/剪辑台与 ASR/导出子视图模型/设置页 ASR/组件更新/通用与弹幕）、Dock/自由画布布局、时间轴几何（`ClipTimelineGeometry`）与缩放视口/拖拽钳制（`ClipTimelineViewLogic`）、播放器管理器与 `IWorkspacePlayer`、回放 seek 探测/防抖逻辑（`ReplaySeekLogic`）、剪辑预览位置推进与安全上界（`ClipPlaybackPositionLogic`）、剪辑预览播放状态机与守卫（`ClipPlaybackStateLogic`）、剪辑台展示层纯逻辑（`ClipStudioPresentationLogic`）、音量表解析与平滑（`AudioMeterLogic`）、mpv 流选项映射与请求头清理（`StreamOptionMapper`）、AppServices 释放、登录配置、播放状态文本、录制目标排序、自由布局命中与宿主切换、自由画布交互几何（`FreeformInteractionLogic`）、录制中心历史子视图模型（`RecordingHistoryViewModel`）、弹幕渲染层纯逻辑（`DanmakuOverlayLogic`）、窗格控制条 chrome 规则（`PlayerChromeLogic`）、健康采样规则（`PlayerHealthSampling`）、录制目标行展示规则（`RecordingTargetDisplayLogic`）、历史录像行展示规则（`RecordingHistoryDisplayLogic`）、播放器丢帧降档守护（`DropGuardPolicy`）、状态栏 GPU 指标解析与展示（`GpuMetricsLogic`）、边录边剪增量波形纯逻辑（`LiveWaveformLogic`）、剪辑台选区/步进/高能窗口纯规则（`ClipSelectionLogic`）、剪辑台列表行展示规则（`ClipListDisplayLogic`）、导出任务行展示规则（`ClipExportTaskDisplayLogic`）、录制格式化文案（`RecordingUiFormat`）、自由画布磁吸引擎（`FreeformSnapEngine`）、弹幕表情缓存键与重试规则（`DanmakuEmoteCacheLogic`）、录制中心摘要与目录归一化规则（`RecordingCenterDisplayLogic`）、剪辑导出文件名与时间码规则（`ClipExportNamingLogic`）、弹幕渲染帧节拍与停滞判定（`DanmakuRenderTiming`）、播放器 CA 与音量表路径解析（`PlayerPathResolver`）、时间码格式化统一入口（`TimeCodeFormat`）、边录边剪会话状态（`LiveClipSession`）、安全剪辑边界（`LiveClipSafety`）、自由画布预设边缘（`FreeformLayoutPresets`）、主窗口状态栏文案（`MainWindowStatusText`）、平台登录配置表（`PlatformLoginProfiles`）、录制中心与历史录像状态提示文案（`RecordingCenterStatusText`）、录制目标行回报文案（`RecordingTargetStatusText`）、语音识别面板文案（`AsrStatusText`）、窗格状态与重连提示文案（`RoomStatusText`）、剪辑导出面板状态文案（`ClipExportStatusText`）、语音识别设置分区文案（`AsrSettingsStatusText`）、通用与弹幕设置分区文案（`GeneralAndDanmakuSettingsStatusText`）、组件与更新分区文案（`PluginAndToolUpdateStatusText`）、设置页宿主导航/账号状态栏文案（`SettingsWindowStatusText`）、主窗口宿主对话框与状态栏文案（`MainWindowStatusText` 扩展）、平台徽章与名称唯一来源（`PlatformBadgeFormat`）、播放器表面提示文案（`RoomStatusText` 扩展与 `ClipPreviewStatusText`）、主库列表状态（`RoomListStatusText`）、主库校验文案（`RoomCatalogStatusText`）、语音识别预设目录（`AsrPresetCatalog`）与连接测试文案（`AsrConnectionStatusText`）、方案加载前的宿主切换顺序与自由画布同步守卫（`ProfileSwitchHostTests`）、边录边剪同步循环编排（`LiveSessionCoordinator`，含定时器抽象/弹幕读取适配/宿主回调顺序与重入保护）、打开 live 会话编排（`LiveSessionCoordinator.OpenAsync` + `ILiveSessionOpenHost`，含分段拒绝/分片校验/探测兜底/陈旧加载中止）、录制结束切离线编排（`LiveSessionCoordinator.CompleteAsync` + `ILiveSessionCompletionHost`，含缺文件/异常映射/宿主释放中止与选区恢复门槛）、Avalonia 11.3 DataTransfer 拖放格式（`FreeformDragFormatTests`）、剪辑台回放中切换 live 与下拉选择 live 的加载路径（`ClipStudioViewModelTests` 扩展）、录制中心历史行「重试合并」入口与文案（`RecordingHistoryDisplayLogic.CanRetryMerge`/`RecordingCenterStatusText`） | 1929 |
+| `tests/LiveMonitor.Media.Tests` | 录制状态机与并发收尾、轮询器与会话工作器、立即开播探测（`RecordingTargetPoller.PollRoomOnceAsync`）、分段合并、分片预检与降级重试（`SegmentPreflight`/`SegmentMergeRetryPolicy`）、合并失败后按分片重试合并（`RecordingManager.RetryMergeAsync`）、合并时间轴映射 sidecar（`SegmentOffsetMap`/`SegmentOffsetMapFile`）、剪辑导出、波形、增量波形/增量弹幕读取、ASR 响应解析与按句拆分（`AsrResponseParser`）、FFmpeg 参数协议分支（取消路径覆盖预取消与首帧进度回调取消） | 287 |
+| `tests/LiveMonitor.Desktop.Tests` | ViewModel（主窗口拆分/房间目录/布局方案/状态栏/高亮/录制中心/剪辑台与 ASR/导出子视图模型/设置页 ASR/组件更新/通用与弹幕）、Dock/自由画布布局、时间轴几何（`ClipTimelineGeometry`）与缩放视口/拖拽钳制（`ClipTimelineViewLogic`）、播放器管理器与 `IWorkspacePlayer`、回放 seek 探测/防抖逻辑（`ReplaySeekLogic`）、剪辑预览位置推进与安全上界（`ClipPlaybackPositionLogic`）、剪辑预览播放状态机与守卫（`ClipPlaybackStateLogic`）、剪辑台展示层纯逻辑（`ClipStudioPresentationLogic`）、音量表解析与平滑（`AudioMeterLogic`）、mpv 流选项映射与请求头清理（`StreamOptionMapper`）、AppServices 释放、登录配置、播放状态文本、录制目标排序、自由布局命中与宿主切换、自由画布交互几何（`FreeformInteractionLogic`）、录制中心历史子视图模型（`RecordingHistoryViewModel`）、弹幕渲染层纯逻辑（`DanmakuOverlayLogic`）、窗格控制条 chrome 规则（`PlayerChromeLogic`）、健康采样规则（`PlayerHealthSampling`）、录制目标行展示规则（`RecordingTargetDisplayLogic`）、历史录像行展示规则（`RecordingHistoryDisplayLogic`）、播放器丢帧降档守护（`DropGuardPolicy`）、状态栏 GPU 指标解析与展示（`GpuMetricsLogic`）、边录边剪增量波形纯逻辑（`LiveWaveformLogic`）、剪辑台选区/步进/高能窗口纯规则（`ClipSelectionLogic`）、剪辑台列表行展示规则（`ClipListDisplayLogic`）、导出任务行展示规则（`ClipExportTaskDisplayLogic`）、录制格式化文案（`RecordingUiFormat`）、自由画布磁吸引擎（`FreeformSnapEngine`）、弹幕表情缓存键与重试规则（`DanmakuEmoteCacheLogic`）、录制中心摘要与目录归一化规则（`RecordingCenterDisplayLogic`）、剪辑导出文件名与时间码规则（`ClipExportNamingLogic`）、弹幕渲染帧节拍与停滞判定（`DanmakuRenderTiming`）、播放器 CA 与音量表路径解析（`PlayerPathResolver`）、时间码格式化统一入口（`TimeCodeFormat`）、边录边剪会话状态（`LiveClipSession`）、安全剪辑边界（`LiveClipSafety`）、自由画布预设边缘（`FreeformLayoutPresets`）、主窗口状态栏文案（`MainWindowStatusText`）、平台登录配置表（`PlatformLoginProfiles`）、录制中心与历史录像状态提示文案（`RecordingCenterStatusText`）、录制目标行回报文案（`RecordingTargetStatusText`）、语音识别面板文案（`AsrStatusText`）、窗格状态与重连提示文案（`RoomStatusText`）、剪辑导出面板状态文案（`ClipExportStatusText`）、语音识别设置分区文案（`AsrSettingsStatusText`）、通用与弹幕设置分区文案（`GeneralAndDanmakuSettingsStatusText`）、组件与更新分区文案（`PluginAndToolUpdateStatusText`）、设置页宿主导航/账号状态栏文案（`SettingsWindowStatusText`）、主窗口宿主对话框与状态栏文案（`MainWindowStatusText` 扩展）、平台徽章与名称唯一来源（`PlatformBadgeFormat`）、播放器表面提示文案（`RoomStatusText` 扩展与 `ClipPreviewStatusText`）、主库列表状态（`RoomListStatusText`）、主库校验文案（`RoomCatalogStatusText`）、语音识别预设目录（`AsrPresetCatalog`）与连接测试文案（`AsrConnectionStatusText`）、方案加载前的宿主切换顺序与自由画布同步守卫（`ProfileSwitchHostTests`）、边录边剪同步循环编排（`LiveSessionCoordinator`，含定时器抽象/弹幕读取适配/宿主回调顺序与重入保护）、打开 live 会话编排（`LiveSessionCoordinator.OpenAsync` + `ILiveSessionOpenHost`，含分段拒绝/分片校验/探测兜底/陈旧加载中止）、录制结束切离线编排（`LiveSessionCoordinator.CompleteAsync` + `ILiveSessionCompletionHost`，含缺文件/异常映射/宿主释放中止与选区恢复门槛）、Avalonia 11.3 DataTransfer 拖放格式（`FreeformDragFormatTests`）、剪辑台回放中切换 live 与下拉选择 live 的加载路径（`ClipStudioViewModelTests` 扩展）、录制中心历史行「重试合并」入口与文案（`RecordingHistoryDisplayLogic.CanRetryMerge`/`RecordingCenterStatusText`）、合并录像的时间轴映射换算（`ClipStudioPresentationLogic.MapDanmakuOffsets`/`ProjectHighlights` 映射参数） | 1934 |
 
-合计 **3255** 个用例，五套全部通过（0 失败 0 跳过）。
+合计 **3271** 个用例，五套全部通过（0 失败 0 跳过）。
 
 运行方式（使用已构建的测试 dll，避免重复构建）：
 
