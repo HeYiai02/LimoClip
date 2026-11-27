@@ -136,6 +136,87 @@ public sealed class ClipStudioViewModelTests
     }
 
     [Fact]
+    public async Task OpenSession_AppliesSegmentOffsetMap_ToDanmakuAndHighlights()
+    {
+        if (!FfmpegLocator.TryLocate(out var ffmpegPath))
+        {
+            return;
+        }
+
+        var tempDirectory = CreateTempDirectory();
+        try
+        {
+            var videoPath = Path.Combine(tempDirectory, "merged-session.mp4");
+            GenerateVideo(ffmpegPath, videoPath);
+
+            var jsonlPath = Path.Combine(tempDirectory, "merged-session.jsonl");
+            await File.WriteAllLinesAsync(jsonlPath, new[]
+            {
+                "{\"type\":\"meta\",\"version\":1}",
+                "{\"type\":\"dm\",\"offsetMs\":500,\"uname\":\"甲\",\"text\":\"早段\"}",
+                "{\"type\":\"dm\",\"offsetMs\":1800,\"uname\":\"乙\",\"text\":\"断流后\"}"
+            });
+
+            // 模拟两段合并：第一段 0~1.5s，第二段从墙钟 2s 才恢复（中间断流 0.5s），
+            // 合并时间轴里第二段内容前移 0.5s：原 1.8s → 合并后 1.3s... 这里按映射表精确算：
+            // seg0=1.5s、seg1 起点 2s → mergedStart1=1.5s，原 1.8s → 1.5 + (1.8-2) 夹到 0 → 1.5s。
+            var offsetMap = SegmentOffsetMap.Create(
+                new[]
+                {
+                    new RecordedSegment(Path.Combine(tempDirectory, "part-000.mkv"), TimeSpan.FromSeconds(1.5), null, TimeSpan.Zero),
+                    new RecordedSegment(Path.Combine(tempDirectory, "part-001.mkv"), TimeSpan.FromSeconds(0.5), null, TimeSpan.FromSeconds(2)),
+                },
+                new[] { TimeSpan.Zero, TimeSpan.Zero });
+            SegmentOffsetMapFile.Write(videoPath, offsetMap);
+
+            var session = new RecordingSession
+            {
+                Platform = PlatformType.Bilibili,
+                RoomId = "room-1",
+                RoomDisplayName = "测试房间",
+                VideoFilePath = videoPath,
+                DanmakuFilePath = jsonlPath,
+                StartedAt = DateTime.UtcNow,
+                Status = RecordingStatus.Completed
+            };
+
+            var highlights = new FakeHighlightEventRepository
+            {
+                Events =
+                {
+                    new HighlightEvent(PlatformType.Bilibili, "room-1", DateTimeOffset.UtcNow, 18.75, 3.5, "弹幕速率突增")
+                    {
+                        RecordingSessionId = session.Id,
+                        RecordingOffsetMs = 1800
+                    }
+                }
+            };
+
+            var viewModel = CreateViewModel(ffmpegPath, highlights);
+            try
+            {
+                await viewModel.OpenSessionAsync(session);
+
+                var danmaku = Assert.IsAssignableFrom<IReadOnlyList<RecordedDanmakuItem>>(
+                    ((IClipExportHost)viewModel).DanmakuItems);
+                Assert.Equal(2, danmaku.Count);
+                Assert.Equal(500L, danmaku[0].OffsetMs);
+                Assert.Equal(1500L, danmaku[1].OffsetMs);
+                Assert.Equal(TimeSpan.FromMilliseconds(1500), viewModel.Highlights[0].Position);
+                Assert.Equal(TimeSpan.FromMilliseconds(1500), viewModel.HighlightMarkers[0].Position);
+            }
+            finally
+            {
+                viewModel.Dispose();
+            }
+        }
+        finally
+        {
+            TryDeleteDirectory(tempDirectory);
+        }
+    }
+
+    [Fact]
     public async Task TranscribeSelection_WithoutVideo_SetsFriendlyStatus_AndSkipsProvider()
     {
         var asr = new FakeAsrProvider();

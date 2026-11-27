@@ -142,6 +142,44 @@ public sealed class SegmentMergerTests : IAsyncLifetime
         Assert.False(File.Exists(outputPath + ".concat.txt"));
         // 合并产物必须是 ffmpeg 可解码的 matroska 文件。
         Assert.Equal(0, await RunFfmpegAsync(new[] { "-v", "error", "-i", outputPath, "-f", "null", "-" }));
+
+        // 合并成功时落盘时间轴映射 sidecar，供剪辑台把弹幕/高能偏移换算到合并时间轴。
+        var offsetMap = SegmentOffsetMapFile.TryLoad(outputPath);
+        Assert.NotNull(offsetMap);
+        Assert.Equal(2, offsetMap!.Segments.Count);
+        Assert.InRange(offsetMap.TotalContentSeconds, 1.8, 2.2);
+        Assert.Equal(TimeSpan.FromSeconds(0.5), offsetMap.MapOffset(TimeSpan.FromSeconds(0.5)));
+    }
+
+    [Fact]
+    public async Task MergeAsync_SingleSegment_RemovesStaleOffsetMap()
+    {
+        if (_ffmpegPath is null)
+        {
+            return; // 本机缺少 ffmpeg 时跳过；CI 缺 ffmpeg 会在 InitializeAsync 中失败。
+        }
+
+        var directory = Path.Combine(_directory, "single");
+        Directory.CreateDirectory(directory);
+        var partPath = Path.Combine(directory, "part-000.mkv");
+        await CreateTestVideoAsync(partPath);
+
+        var outputPath = Path.Combine(directory, "single.mkv");
+        // 模拟上一次多段合并遗留的映射表：单段直接搬移后必须清掉，否则剪辑台会错误换算时间轴。
+        SegmentOffsetMapFile.Write(
+            outputPath,
+            SegmentOffsetMap.Create(
+                new[] { new RecordedSegment(partPath, TimeSpan.FromSeconds(1), null) },
+                new[] { TimeSpan.Zero }));
+        Assert.NotNull(SegmentOffsetMapFile.TryLoad(outputPath));
+
+        var merger = new FfmpegSegmentMerger(_ffmpegPath);
+        var result = await merger.MergeAsync(
+            outputPath,
+            new[] { new RecordedSegment(partPath, TimeSpan.FromSeconds(1), null) });
+
+        Assert.True(result.Merged, result.ErrorMessage);
+        Assert.Null(SegmentOffsetMapFile.TryLoad(outputPath));
     }
 
     [Fact]

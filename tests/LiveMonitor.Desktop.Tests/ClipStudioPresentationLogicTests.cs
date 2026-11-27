@@ -2,6 +2,7 @@ using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Enums;
 using LiveMonitor.Core.Models;
 using LiveMonitor.Desktop.ViewModels;
+using LiveMonitor.Media.Recording;
 using Xunit;
 
 namespace LiveMonitor.Desktop.Tests;
@@ -463,4 +464,69 @@ public sealed class ClipStudioPresentationLogicTests
     [InlineData(false, "▶")]
     public void PlayPauseGlyph_maps_state(bool playing, string expected)
         => Assert.Equal(expected, ClipStudioPresentationLogic.PlayPauseGlyph(playing));
+
+    // ---- 合并视频时间轴映射（弹幕/高能换算） ----
+
+    private static SegmentOffsetMap TrimmedMap()
+        => SegmentOffsetMap.Create(
+            new[]
+            {
+                new RecordedSegment("part0.mkv", TimeSpan.FromSeconds(10), null, TimeSpan.Zero),
+                new RecordedSegment("part1.mkv", TimeSpan.FromSeconds(10), null, TimeSpan.FromSeconds(8)),
+            },
+            new[] { TimeSpan.Zero, TimeSpan.FromSeconds(2) });
+
+    [Fact]
+    public void MapDanmakuOffsets_without_map_returns_same_items()
+    {
+        var items = new List<RecordedDanmakuItem> { new(5_000, "u", "hello", false, false) };
+
+        var mapped = ClipStudioPresentationLogic.MapDanmakuOffsets(items, offsetMap: null);
+
+        Assert.Same(items, mapped);
+    }
+
+    [Fact]
+    public void MapDanmakuOffsets_shifts_items_into_merged_timeline()
+    {
+        var items = new List<RecordedDanmakuItem>
+        {
+            new(9_000, "u", "overlap", false, false),
+            new(15_000, "u", "second-part", false, false),
+        };
+
+        var mapped = ClipStudioPresentationLogic.MapDanmakuOffsets(items, TrimmedMap());
+
+        Assert.Equal(9_000L, mapped[0].OffsetMs);
+        Assert.Equal(15_000L, mapped[1].OffsetMs);
+        Assert.Equal("overlap", mapped[0].Text);
+    }
+
+    [Fact]
+    public void ProjectHighlights_with_map_shifts_position_into_merged_timeline()
+    {
+        var events = new[] { Highlight(SessionStart.AddSeconds(100), offsetMs: 15_000) };
+
+        var projection = Assert.Single(ClipStudioPresentationLogic.ProjectHighlights(
+            events,
+            SessionStart,
+            TimeSpan.FromSeconds(30),
+            TrimmedMap()));
+
+        Assert.Equal(TimeSpan.FromSeconds(15), projection.Position);
+    }
+
+    [Fact]
+    public void ProjectHighlights_with_map_clamps_to_merged_duration()
+    {
+        var events = new[] { Highlight(SessionStart.AddSeconds(100), offsetMs: 19_000) };
+
+        var projection = Assert.Single(ClipStudioPresentationLogic.ProjectHighlights(
+            events,
+            SessionStart,
+            TimeSpan.FromSeconds(18),
+            TrimmedMap()));
+
+        Assert.Equal(TimeSpan.FromSeconds(18), projection.Position);
+    }
 }
