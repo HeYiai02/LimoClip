@@ -266,6 +266,28 @@ public sealed class FfmpegSegmentMerger : ISegmentMerger
         }
     }
 
+    /// <summary>
+    /// 合并成功后落盘时间轴映射表（弹幕/高能偏移换算用）；写失败只记日志，不影响已合并成的视频。
+    /// </summary>
+    private void WriteOffsetMap(
+        string outputPath,
+        IReadOnlyList<RecordedSegment> segments,
+        IReadOnlyList<TimeSpan> trims)
+    {
+        try
+        {
+            var map = SegmentOffsetMap.Create(segments, trims);
+            SegmentOffsetMapFile.Write(outputPath, map);
+            _log?.Invoke(
+                $"已写入分片时间轴映射：{Path.GetFileName(SegmentOffsetMapFile.GetPath(outputPath))}" +
+                $"（{map.Segments.Count} 段，合并后 {map.TotalContentSeconds:0.0} 秒）。");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            _log?.Invoke($"写入分片时间轴映射失败（视频已合并）：{ex.Message}");
+        }
+    }
+
     private static string? CombineNotes(string? first, string? second)
     {
         if (string.IsNullOrWhiteSpace(first))
@@ -342,6 +364,7 @@ public sealed class FfmpegSegmentMerger : ISegmentMerger
                 _log?.Invoke(
                     $"录制分片合并完成：{existing.Count} 段 → {outputPath}（{mergedSize / 1024.0 / 1024.0:0.0} MB，" +
                     $"裁剪重叠 {trims.Sum(trim => trim.TotalSeconds):0.0} 秒）。");
+                WriteOffsetMap(outputPath, existing, trims);
                 return new SegmentMergeResult(true, mergedSize, null, contentDuration);
             }
 
@@ -521,6 +544,8 @@ public sealed class FfmpegSegmentMerger : ISegmentMerger
             }
 
             File.Move(segment.Path, outputPath, overwrite: true);
+            // 单分片不裁剪，合并时间轴与原时间轴一致；清掉此前合并遗留的映射表。
+            SegmentOffsetMapFile.TryDelete(outputPath);
             return new SegmentMergeResult(true, TryGetFileLength(outputPath), null, segment.Duration);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

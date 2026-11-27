@@ -7,6 +7,7 @@ using LiveMonitor.Core.Interfaces;
 using LiveMonitor.Core.Models;
 using LiveMonitor.Desktop.Controls;
 using LiveMonitor.Media.Editing;
+using LiveMonitor.Media.Recording;
 
 namespace LiveMonitor.Desktop.ViewModels;
 
@@ -579,6 +580,8 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             Position = TimeSpan.Zero;
             _danmakuItems = null;
             _cursor = null;
+            // 多分片合并的录像带有时间轴映射表：弹幕/高能偏移需换算到合并视频时间轴。
+            var offsetMap = SegmentOffsetMapFile.TryLoad(videoPath);
             Highlights.Clear();
             HighlightMarkers = Array.Empty<ClipHighlightMarker>();
             Waveform = null;
@@ -589,7 +592,8 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
             {
                 try
                 {
-                    _danmakuItems = await DanmakuJsonlReader.ReadAllAsync(danmakuPath, ct).ConfigureAwait(true);
+                    var items = await DanmakuJsonlReader.ReadAllAsync(danmakuPath, ct).ConfigureAwait(true);
+                    _danmakuItems = ClipStudioPresentationLogic.MapDanmakuOffsets(items, offsetMap);
                 }
                 catch (OperationCanceledException)
                 {
@@ -613,7 +617,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
 
             if (session is not null)
             {
-                await LoadHighlightsAsync(session, metadata.Duration, ct).ConfigureAwait(true);
+                await LoadHighlightsAsync(session, metadata.Duration, ct, offsetMap).ConfigureAwait(true);
             }
 
             Export.SetGeneratedOutputFileName(videoPath, _inPoint, _outPoint);
@@ -736,7 +740,11 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
         _ = OnLiveSessionCompletedAsync(session);
     }
 
-    private async Task LoadHighlightsAsync(RecordingSession session, TimeSpan duration, CancellationToken ct)
+    private async Task LoadHighlightsAsync(
+        RecordingSession session,
+        TimeSpan duration,
+        CancellationToken ct,
+        SegmentOffsetMap? offsetMap = null)
     {
         try
         {
@@ -744,7 +752,7 @@ public sealed partial class ClipStudioViewModel : ObservableObject, IDisposable,
                 .GetByRecordingSessionAsync(session.Id, MaxHighlightCount, ct)
                 .ConfigureAwait(true);
             var startOffset = new DateTimeOffset(session.StartedAt.ToUniversalTime().Ticks, TimeSpan.Zero);
-            var projections = ClipStudioPresentationLogic.ProjectHighlights(events, startOffset, duration);
+            var projections = ClipStudioPresentationLogic.ProjectHighlights(events, startOffset, duration, offsetMap);
             var markers = new List<ClipHighlightMarker>(projections.Count);
             foreach (var projection in projections)
             {

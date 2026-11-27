@@ -1,6 +1,7 @@
 using LiveMonitor.Core.Entities;
 using LiveMonitor.Core.Enums;
 using LiveMonitor.Core.Models;
+using LiveMonitor.Media.Recording;
 
 namespace LiveMonitor.Desktop.ViewModels;
 
@@ -13,6 +14,28 @@ internal static class ClipStudioPresentationLogic
 {
     /// <summary>高能事件在时间轴上的投影：位置已夹到 [0, duration]。</summary>
     public readonly record struct HighlightProjection(HighlightEvent Event, TimeSpan Position);
+
+    /// <summary>
+    /// 把弹幕的原始偏移（相对录制起点）换算到合并视频时间轴；没有映射表时原样返回。
+    /// </summary>
+    public static IReadOnlyList<RecordedDanmakuItem> MapDanmakuOffsets(
+        IReadOnlyList<RecordedDanmakuItem> items,
+        SegmentOffsetMap? offsetMap)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        if (offsetMap is null || offsetMap.IsEmpty)
+        {
+            return items;
+        }
+
+        var mapped = new List<RecordedDanmakuItem>(items.Count);
+        foreach (var item in items)
+        {
+            mapped.Add(item with { OffsetMs = offsetMap.MapOffsetMs(item.OffsetMs) });
+        }
+
+        return mapped;
+    }
 
     /// <summary>普通录像/本地视频的副标题：房间 · 标题 · 分辨率 · fps · 编码。</summary>
     public static string BuildVideoSubtitle(RecordingSession? session, VideoMetadata metadata)
@@ -100,7 +123,8 @@ internal static class ClipStudioPresentationLogic
     public static IReadOnlyList<HighlightProjection> ProjectHighlights(
         IReadOnlyList<HighlightEvent> events,
         DateTimeOffset sessionStartedAt,
-        TimeSpan duration)
+        TimeSpan duration,
+        SegmentOffsetMap? offsetMap = null)
     {
         if (events.Count == 0)
         {
@@ -113,6 +137,12 @@ internal static class ClipStudioPresentationLogic
             var position = highlightEvent.RecordingOffsetMs is { } offsetMs && offsetMs > 0
                 ? TimeSpan.FromMilliseconds(offsetMs)
                 : highlightEvent.TriggerTime - sessionStartedAt;
+            // 多分片合并后时间轴前移（重叠被裁掉）：按 sidecar 映射表换算到合并视频时间轴。
+            if (offsetMap is not null)
+            {
+                position = offsetMap.MapOffset(position);
+            }
+
             if (position < TimeSpan.Zero)
             {
                 position = TimeSpan.Zero;
