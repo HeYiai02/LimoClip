@@ -409,12 +409,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
                 OnPropertyChanged(nameof(FreeformModeButtonText));
                 OnPropertyChanged(nameof(FreeformModeHint));
                 OnPropertyChanged(nameof(ShowDockWorkspace));
+                OnPropertyChanged(nameof(ShowFreeformCanvas));
             }
         }
     }
 
     /// <summary>自由布局模式下由画布承载窗格，Dock 宿主必须隐藏，避免同一播放器控件被两个宿主同时挂载。</summary>
-    public bool ShowDockWorkspace => !IsWorkspaceEmpty && !IsFreeformMode;
+    public bool ShowDockWorkspace => FullscreenRenderPolicy.ShouldShowDock(IsWorkspaceEmpty, IsFreeformMode, IsFocused);
+
+    /// <summary>焦点全屏时自由画布同样隐藏，避免后台窗格与焦点浮层重复渲染。</summary>
+    public bool ShowFreeformCanvas => FullscreenRenderPolicy.ShouldShowFreeform(IsFreeformMode, IsFocused);
     public string FreeformModeButtonText => MainWindowStatusText.FreeformModeLabel(IsFreeformMode);
 
     public string FreeformModeHint => MainWindowStatusText.FreeformModeHint(IsFreeformMode);
@@ -609,6 +613,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             GridColumns);
         OnPropertyChanged(nameof(IsWorkspaceEmpty));
         OnPropertyChanged(nameof(ShowDockWorkspace));
+        OnPropertyChanged(nameof(ShowFreeformCanvas));
     }
 
     /// <summary>高能事件面板是否展开；只影响主窗口叠加层，不写入方案 / Dock 布局。</summary>
@@ -926,7 +931,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             return;
         }
 
-        tile.PlayerView?.PushDanmaku(messages);
+        // 焦点全屏时工作区已隐藏，后台窗格不再渲染弹幕，避免与焦点浮层抢合成器帧。
+        if (FullscreenRenderPolicy.ShouldPushDanmakuToTiles(IsFocused))
+        {
+            tile.PlayerView?.PushDanmaku(messages);
+        }
+
         if (ReferenceEquals(tile, _focusedTile))
         {
             _focusPlayer?.PushDanmaku(messages);
@@ -1286,11 +1296,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
             _focusMuteSnapshot[candidate.PaneId] = existing.IsMuted;
             existing.SetMute(true);
+            // 隐藏的工作区窗格不再渲染弹幕：清空叠层让共享帧循环把它们移出，恢复焦点后再重新接收。
+            existing.ClearDanmaku();
         }
 
         _focusedTile = tile;
         OnPropertyChanged(nameof(IsFocused));
         OnPropertyChanged(nameof(FocusedTitle));
+        OnPropertyChanged(nameof(ShowDockWorkspace));
+        OnPropertyChanged(nameof(ShowFreeformCanvas));
         ShowFocusHint();
 
         // DataContext 指向原窗格 tile：弹幕开关、标题等绑定在浮层里同样生效。
@@ -1345,6 +1359,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         HideFocusHint();
         OnPropertyChanged(nameof(IsFocused));
         OnPropertyChanged(nameof(FocusedTitle));
+        OnPropertyChanged(nameof(ShowDockWorkspace));
+        OnPropertyChanged(nameof(ShowFreeformCanvas));
         StatusText = MainWindowStatusText.FullscreenExited();
     }
 
