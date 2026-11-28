@@ -419,6 +419,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
     /// <summary>焦点全屏时自由画布同样隐藏，避免后台窗格与焦点浮层重复渲染。</summary>
     public bool ShowFreeformCanvas => FullscreenRenderPolicy.ShouldShowFreeform(IsFreeformMode, IsFocused);
+
+    /// <summary>焦点全屏时不再向工作区窗格推送弹幕，避免后台叠层与焦点浮层抢合成器帧。</summary>
+    internal bool ShouldPushDanmakuToTiles => FullscreenRenderPolicy.ShouldPushDanmakuToTiles(IsFocused);
     public string FreeformModeButtonText => MainWindowStatusText.FreeformModeLabel(IsFreeformMode);
 
     public string FreeformModeHint => MainWindowStatusText.FreeformModeHint(IsFreeformMode);
@@ -924,15 +927,21 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         }
     }
 
-    private void DeliverDanmakuBatch(RoomTileViewModel tile, IReadOnlyList<DanmakuMessage> messages)
+    internal void DeliverDanmakuBatch(RoomTileViewModel tile, IReadOnlyList<DanmakuMessage> messages)
     {
         if (_disposed || !_danmakuHandles.ContainsKey(tile))
         {
             return;
         }
 
+        DispatchDanmaku(tile, messages);
+    }
+
+    /// <summary>把一批已过滤的弹幕分发给窗格与焦点浮层；焦点全屏时只推焦点浮层。</summary>
+    internal void DispatchDanmaku(RoomTileViewModel tile, IReadOnlyList<DanmakuMessage> messages)
+    {
         // 焦点全屏时工作区已隐藏，后台窗格不再渲染弹幕，避免与焦点浮层抢合成器帧。
-        if (FullscreenRenderPolicy.ShouldPushDanmakuToTiles(IsFocused))
+        if (ShouldPushDanmakuToTiles)
         {
             tile.PlayerView?.PushDanmaku(messages);
         }
@@ -1300,11 +1309,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             existing.ClearDanmaku();
         }
 
-        _focusedTile = tile;
-        OnPropertyChanged(nameof(IsFocused));
-        OnPropertyChanged(nameof(FocusedTitle));
-        OnPropertyChanged(nameof(ShowDockWorkspace));
-        OnPropertyChanged(nameof(ShowFreeformCanvas));
+        ApplyFocusTileState(tile);
         ShowFocusHint();
 
         // DataContext 指向原窗格 tile：弹幕开关、标题等绑定在浮层里同样生效。
@@ -1362,6 +1367,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         OnPropertyChanged(nameof(ShowDockWorkspace));
         OnPropertyChanged(nameof(ShowFreeformCanvas));
         StatusText = MainWindowStatusText.FullscreenExited();
+    }
+
+    /// <summary>把焦点态落到窗格上并广播渲染相关的可见性变化（供全屏入口与回归测试复用）。</summary>
+    internal void ApplyFocusTileState(RoomTileViewModel tile)
+    {
+        _focusedTile = tile;
+        OnPropertyChanged(nameof(IsFocused));
+        OnPropertyChanged(nameof(FocusedTitle));
+        OnPropertyChanged(nameof(ShowDockWorkspace));
+        OnPropertyChanged(nameof(ShowFreeformCanvas));
+        OnPropertyChanged(nameof(ShouldPushDanmakuToTiles));
     }
 
     private void ShowFocusHint()
