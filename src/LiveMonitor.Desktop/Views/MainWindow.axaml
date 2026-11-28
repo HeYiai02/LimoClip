@@ -297,7 +297,7 @@
 
         <!-- 自由布局画布（V0.7）：与平铺 Dock 互斥显示，支持拖动/缩放/磁吸/画中画 -->
         <controls:FreeformWorkspaceCanvas x:Name="FreeformCanvas"
-                                          IsVisible="{Binding IsFreeformMode}"
+                                          IsVisible="{Binding ShowFreeformCanvas}"
                                           Background="{DynamicResource BrushBgWorkspace}" />
 
 
