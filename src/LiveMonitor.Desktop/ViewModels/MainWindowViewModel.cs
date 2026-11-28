@@ -104,7 +104,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     public MainWindowViewModel(AppServices services)
     {
         _services = services;
-        _players = new WorkspacePlayerManager(services);
+        _players = new WorkspacePlayerManager(
+            services,
+            static () => new MpvPlayerView(),
+            () => new GpuLoadSnapshot(SystemStatus.Metrics.GpuUtilization, SystemStatus.Metrics.GpuDecoder));
         RoomCatalog = new RoomCatalogViewModel(services.Rooms, services.Platforms, services.Credentials, this);
         LayoutProfiles = new WorkspaceLayoutProfileViewModel(services.Profiles, CreateDefaultProfileLayoutJson, this);
 
