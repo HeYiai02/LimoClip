@@ -3,11 +3,14 @@ using LiveMonitor.Core.Models;
 namespace LiveMonitor.Desktop.Services;
 
 /// <summary>
-/// 画质档位选择策略：大窗优先原画，中窗 720P，小窗/多路 480P + 15fps。
+/// 画质档位（分辨率）选择策略：大窗优先原画，中窗 720P，小窗/多路 480P。
+/// 帧率不再由布局尺寸静态压缩：默认保持源帧率，只有 GPU 持续高负载时才由
+/// <see cref="AdaptiveQualityPolicy"/> + <see cref="WorkspacePlayerManager"/> 自适应压帧率/画质。
 /// 纯函数，方便单测和后续接入焦点槽。
 /// </summary>
 public static class QualityPolicy
 {
+    /// <summary>小窗或多路时是否使用低分辨率档（480P）。仅影响分辨率，不压缩帧率。</summary>
     public static bool ShouldUseCompact(double height, int activeRoomCount)
         => activeRoomCount >= 12 || (height > 0 && height < 360);
 

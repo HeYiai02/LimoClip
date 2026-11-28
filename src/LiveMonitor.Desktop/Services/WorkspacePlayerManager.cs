@@ -29,21 +29,37 @@ public sealed class WorkspacePlayerManager : IDisposable
     private readonly SemaphoreSlim _parseGate = new(4, 4);
     private readonly DispatcherTimer _dropTimer;
     private readonly object _gate = new();
+    private readonly HashSet<string> _autoCompactPanes = new(StringComparer.Ordinal);
+    private readonly Func<GpuLoadSnapshot>? _gpuLoad;
     private static readonly TimeSpan OfflinePollDelay = TimeSpan.FromSeconds(60);
     private bool _disposed;
 
+    // 自适应画质状态：默认不压帧率；GPU 持续高负载时先压帧率（紧凑模式），仍不够再降一档画质；
+    // 负载健康约 30 秒后自动解除压缩并尝试升回策略目标画质。每周期 2 秒（InspectDrops 节拍）。
+    private int _pressureCycles;
+    private int _healthyCycles;
+    private bool _adaptiveCompact;
+    private bool _adaptiveQualityDegraded;
+
     public WorkspacePlayerManager(AppServices services)
-        : this(services, static () => new MpvPlayerView())
+        : this(services, static () => new MpvPlayerView(), null)
     {
     }
 
-    /// <summary>测试接缝：注入假播放器工厂，避免 Desktop 单测启动真实 mpv。</summary>
-    internal WorkspacePlayerManager(AppServices services, Func<IWorkspacePlayer> createPlayer)
+    /// <summary>
+    /// 测试/宿主接缝：注入假播放器工厂避免启动真实 mpv，并可注入 GPU 负载采样
+    /// （生产由主窗口状态栏的 nvidia-smi 指标提供；为空时只保留按丢帧率的逐窗格降档）。
+    /// </summary>
+    internal WorkspacePlayerManager(
+        AppServices services,
+        Func<IWorkspacePlayer> createPlayer,
+        Func<GpuLoadSnapshot>? gpuLoadProvider = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(createPlayer);
         _services = services;
         _createPlayer = createPlayer;
+        _gpuLoad = gpuLoadProvider;
         _dropTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _dropTimer.Tick += (_, _) => InspectDrops();
         _dropTimer.Start();
@@ -202,7 +218,7 @@ public sealed class WorkspacePlayerManager : IDisposable
                 return;
             }
 
-            player.SetCompactMode(ShouldUseCompact(ViewHeight(player), ActiveRoomCount));
+            player.SetCompactMode(_adaptiveCompact);
             await player.PlayAsync(quality, cts.Token);
             // 起播时窗格可能还没完成布局（Bounds.Height=0），按 720P 起播；
             // 起播后拿到真实高度再纠正一次，单路/大窗才能升到原画。
@@ -234,9 +250,6 @@ public sealed class WorkspacePlayerManager : IDisposable
     }
 
     private int ActiveRoomCount => _statuses.Values.Count(status => status.IsLive);
-
-    private static bool ShouldUseCompact(double height, int activeRoomCount)
-        => QualityPolicy.ShouldUseCompact(height, activeRoomCount);
 
     private static StreamQuality? ChooseQuality(RoomStatus status, double height, int activeRoomCount)
         => QualityPolicy.Choose(status, height, activeRoomCount);
@@ -298,8 +311,7 @@ public sealed class WorkspacePlayerManager : IDisposable
             return;
         }
 
-        var compact = ShouldUseCompact(ViewHeight(player), ActiveRoomCount);
-        player.SetCompactMode(compact);
+        player.SetCompactMode(_adaptiveCompact);
         var target = ChooseQuality(status, ViewHeight(player), ActiveRoomCount);
         if (target is null || player.CurrentQuality?.Id == target.Id)
         {
@@ -376,6 +388,8 @@ public sealed class WorkspacePlayerManager : IDisposable
             return;
         }
 
+        UpdateAdaptiveLoad();
+
         var now = DateTimeOffset.UtcNow;
         foreach (var (paneId, player) in _playerByPane.ToArray())
         {
@@ -411,7 +425,7 @@ public sealed class WorkspacePlayerManager : IDisposable
             if (DropGuardPolicy.ShouldDowngrade(badCycles))
             {
                 _dropBaselines.Remove(paneId);
-                _ = DowngradeAsync(player, status);
+                _ = DowngradeAsync(paneId, player, status);
                 continue;
             }
 
@@ -419,7 +433,7 @@ public sealed class WorkspacePlayerManager : IDisposable
         }
     }
 
-    private static async Task DowngradeAsync(IWorkspacePlayer player, RoomStatus status)
+    private async Task DowngradeAsync(string paneId, IWorkspacePlayer player, RoomStatus status)
     {
         var current = player.CurrentQuality;
         if (current is null)
@@ -443,10 +457,150 @@ public sealed class WorkspacePlayerManager : IDisposable
         }
 
         player.SetCompactMode(true);
+        _autoCompactPanes.Add(paneId);
+    }
+
+    /// <summary>
+    /// 按 GPU 负载推进自适应状态：默认不压帧率；持续高压先压帧率，仍高压再降一档画质；
+    /// 连续健康约 30 秒后解除压缩并尝试升回策略目标画质。没有 GPU 采样时不做任何自适应调整。
+    /// </summary>
+    private void UpdateAdaptiveLoad()
+    {
+        if (_gpuLoad is null)
+        {
+            return;
+        }
+
+        GpuLoadSnapshot gpu;
+        try
+        {
+            gpu = _gpuLoad();
+        }
+        catch (Exception)
+        {
+            // 指标读取失败视为无采样，保持当前状态。
+            return;
+        }
+
+        var level = AdaptiveQualityPolicy.Classify(gpu);
+        if (level == AdaptiveQualityPolicy.LoadLevel.Pressure)
+        {
+            _pressureCycles++;
+            _healthyCycles = 0;
+        }
+        else if (level == AdaptiveQualityPolicy.LoadLevel.Healthy)
+        {
+            _healthyCycles++;
+            _pressureCycles = 0;
+        }
+        else
+        {
+            // Unknown（无采样）/Neutral（中间区间）保持现状，避免在阈值附近反复抖动。
+            _pressureCycles = 0;
+            _healthyCycles = 0;
+            return;
+        }
+
+        if (_adaptiveCompact)
+        {
+            if (_pressureCycles > 0 &&
+                AdaptiveQualityPolicy.ShouldDowngradeQuality(_pressureCycles) &&
+                !_adaptiveQualityDegraded)
+            {
+                _adaptiveQualityDegraded = true;
+                _ = DowngradeAllForLoadAsync();
+            }
+
+            if (AdaptiveQualityPolicy.ShouldRecover(_healthyCycles))
+            {
+                _ = RecoverAdaptiveQualityAsync();
+            }
+
+            return;
+        }
+
+        if (AdaptiveQualityPolicy.ShouldCompact(_pressureCycles))
+        {
+            _adaptiveCompact = true;
+            _pressureCycles = 0;
+            _healthyCycles = 0;
+            foreach (var (paneId, player) in _playerByPane.ToArray())
+            {
+                player.SetCompactMode(true);
+                _autoCompactPanes.Add(paneId);
+            }
+
+            return;
+        }
+
+        // 紧凑模式已解除（或从未进入）但仍有按丢帧率逐窗格降级留下的紧凑播放器：
+        // 连续健康约 30 秒后统一解除，避免个别窗格一直被钉在 15fps。
+        if (AdaptiveQualityPolicy.ShouldRecover(_healthyCycles))
+        {
+            _ = RecoverAdaptiveQualityAsync();
+        }
+    }
+
+    private async Task DowngradeAllForLoadAsync()
+    {
+        foreach (var (paneId, player) in _playerByPane.ToArray())
+        {
+            if (player.State != PlayerState.Playing ||
+                !_statuses.TryGetValue(paneId, out var status) || !status.IsLive)
+            {
+                continue;
+            }
+
+            await DowngradeAsync(paneId, player, status).ConfigureAwait(true);
+        }
+    }
+
+    private async Task RecoverAdaptiveQualityAsync()
+    {
+        _adaptiveCompact = false;
+        _adaptiveQualityDegraded = false;
+        _pressureCycles = 0;
+        _healthyCycles = 0;
+
+        foreach (var paneId in _autoCompactPanes.ToArray())
+        {
+            if (_playerByPane.TryGetValue(paneId, out var player))
+            {
+                player.SetCompactMode(false);
+            }
+        }
+
+        _autoCompactPanes.Clear();
+
+        // 解除压缩后把画质升回当前布局尺寸对应的策略目标；切换失败保持现状。
+        foreach (var (paneId, player) in _playerByPane.ToArray())
+        {
+            if (player.State != PlayerState.Playing ||
+                !_statuses.TryGetValue(paneId, out var status) || !status.IsLive)
+            {
+                continue;
+            }
+
+            var target = ChooseQuality(status, ViewHeight(player), ActiveRoomCount);
+            if (target is null || player.CurrentQuality?.Id == target.Id)
+            {
+                continue;
+            }
+
+            try
+            {
+                await player.SwitchQualityAsync(target).ConfigureAwait(true);
+            }
+            catch (Exception)
+            {
+                // 升级失败保留当前档位，下一轮尺寸变化/巡检会再试。
+            }
+        }
     }
 
     public void Stop(string paneId)
     {
+        _autoCompactPanes.Remove(paneId);
         lock (_gate)
         {
             if (_starts.Remove(paneId, out var cts))
@@ -504,6 +658,7 @@ public sealed class WorkspacePlayerManager : IDisposable
 
         _disposed = true;
         _dropTimer.Stop();
+        _autoCompactPanes.Clear();
 
         IWorkspacePlayer[] trackedPlayers;
         lock (_gate)
